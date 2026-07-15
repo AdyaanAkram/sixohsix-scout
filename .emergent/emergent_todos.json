@@ -1,0 +1,26 @@
+[
+  {
+    "content": "Phase 1: Build backend core (auth, RBAC, orgs, players, events, stations, assignments, evaluations, scoring)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 1: Seed data script (org, staff, 30 players, event, stations, groups, templates, evaluations)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 1 POC: test_core.py — 44/44 passed (evaluator restriction, autosave, submit-lock, weighted scoring)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2: Get design guidelines from design_agent",
+    "status": "in_progress"
+  },
+  {
+    "content": "Phase 2: Build full frontend (auth, dashboards, players, CSV import, events, check-in, mobile evaluation, review queue, development, reports, staff, templates, settings, audit)",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 2: End to End Testing using Testing Agent + fix all issues",
+    "status": "pending"
+  }
+]
