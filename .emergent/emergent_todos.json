@@ -13,14 +13,14 @@
   },
   {
     "content": "Phase 2: Get design guidelines from design_agent",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Phase 2: Build full frontend (auth, dashboards, players, CSV import, events, check-in, mobile evaluation, review queue, development, reports, staff, templates, settings, audit)",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Phase 2: End to End Testing using Testing Agent + fix all issues",
-    "status": "pending"
+    "status": "in_progress"
   }
 ]
