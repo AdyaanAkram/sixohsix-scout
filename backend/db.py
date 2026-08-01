@@ -1,17 +1,12 @@
-import os
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
-from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+from config import settings
 
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+client = AsyncIOMotorClient(settings.mongo_url, serverSelectionTimeoutMS=5000)
+db = client[settings.db_name]
 
 
 def new_id() -> str:

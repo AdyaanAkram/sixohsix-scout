@@ -1,0 +1,74 @@
+# Production-oriented compose.
+# - Default: API + web; Mongo from MONGO_URL (Atlas recommended)
+# - Local Mongo: docker compose --profile local-db up -d
+#
+# Required env (see .env.example): JWT_SECRET, MONGO_URL, DB_NAME, CORS_ORIGINS,
+# APP_PUBLIC_URL, REACT_APP_BACKEND_URL (empty = same-origin /api proxy)
+
+services:
+  mongo:
+    profiles: ["local-db"]
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      MONGO_URL: ${MONGO_URL:?Set MONGO_URL to Atlas or mongodb://mongo:27017 with profile local-db}
+      DB_NAME: ${DB_NAME:-pbg_scout}
+      JWT_SECRET: ${JWT_SECRET:?set a 32+ char JWT_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:3000}
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-stdout}
+      MAIL_FROM: ${MAIL_FROM:-noreply@606athletics.local}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-auto}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      ALLOW_COMPOSE_MONGO: ${ALLOW_COMPOSE_MONGO:-0}
+    ports:
+      - "8000:8000"
+    volumes:
+      - uploads_data:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        # Empty = browser calls same origin /api (nginx proxies to api)
+        REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL:-}
+        API_UPSTREAM: ${API_UPSTREAM:-http://api:8000}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "3000:80"
+
+volumes:
+  mongo_data:
+  uploads_data:

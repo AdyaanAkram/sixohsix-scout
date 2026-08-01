@@ -1,8 +1,12 @@
-"""Seed fictional data for PBG Scout. Idempotent: wipes and recreates seed org data.
+"""Seed fictional data for PBG Scout. Wipes and recreates seed org data.
 Run: python seed.py
+
+Refuses to run when APP_ENV=production unless ALLOW_PROD_SEED=I_UNDERSTAND_WIPE.
 """
 import asyncio
+import os
 import random
+import sys
 from datetime import date, datetime, timedelta, timezone
 
 from auth import hash_password
@@ -57,7 +61,9 @@ async def wipe():
     for coll in ["organizations", "users", "memberships", "athletes", "events", "event_athletes",
                  "event_groups", "stations", "evaluation_templates", "evaluator_assignments",
                  "evaluations", "athlete_notes", "athlete_goals", "athlete_media",
-                 "metric_benchmarks", "audit_logs", "invitations", "password_resets", "ai_drafts"]:
+                 "metric_benchmarks", "audit_logs", "invitations", "password_resets", "ai_drafts",
+                 "verified_metrics", "milestones", "notifications", "awards", "drills",
+                 "development_plans", "event_invites"]:
         await db[coll].delete_many({})
 
 
@@ -196,15 +202,18 @@ async def main():
         ]
         return cats, ms
 
-    def station_template(name, cats_ms, age_group=None):
+    def station_template(name, cats_ms, age_group=None, applies_to=None, is_default=False):
         cats, ms = cats_ms
         return {"id": new_id(), "organization_id": ORG_ID, "name": name,
-                "description": None, "age_group": age_group, "position": None,
+                "description": None, "age_group": age_group, "position": (applies_to or [None])[0] if applies_to else None,
+                "applies_to_positions": applies_to or [],
+                "is_default": is_default,
+                "template_version": 1,
                 "event_type": "Evaluation", "categories": cats, "metrics": ms,
                 "created_by": user_ids["admin@pbgscout.com"],
                 "created_at": now_iso(), "updated_at": now_iso()}
 
-    tpl_8u = station_template("8U-10U Skills Evaluation", rating_metrics_8u(), "10U")
+    tpl_8u = station_template("8U-10U Skills Evaluation", rating_metrics_8u(), "10U", is_default=True)
     tpl_11u = station_template("11U-13U Skills Evaluation", metrics_11u(), "12U")
     tpl_14u = station_template("14U-18U Showcase Evaluation", metrics_14u(), "14U")
 
@@ -229,25 +238,29 @@ async def main():
          metric("Infield Mechanics", "Defense", "rating_5", weight=2, order=2),
          metric("Footwork", "Defense", "rating_5", order=3),
          metric("Throwing Velocity", "Arm Strength", "velocity", unit="mph", key="throwing_velocity", order=4),
-         metric("Throwing Accuracy", "Arm Strength", "rating_5", weight=2, order=5)]))
+         metric("Throwing Accuracy", "Arm Strength", "rating_5", weight=2, order=5)]),
+        applies_to=["IF", "1B", "2B", "3B", "SS"])
     tpl_outfield = station_template("Outfield Station", (
         [{"name": "Defense", "weight": 25}, {"name": "Arm Strength", "weight": 15}],
         [metric("Outfield Routes", "Defense", "rating_5", weight=2, required=True, order=1),
          metric("Fly-Ball Reads", "Defense", "rating_5", weight=2, order=2),
          metric("Throwing Velocity", "Arm Strength", "velocity", unit="mph", key="throwing_velocity", order=3),
-         metric("Throwing Accuracy", "Arm Strength", "rating_5", order=4)]))
+         metric("Throwing Accuracy", "Arm Strength", "rating_5", order=4)]),
+        applies_to=["OF", "LF", "CF", "RF"])
     tpl_pitching = station_template("Pitching Station", (
         [{"name": "Arm Strength", "weight": 15}, {"name": "Baseball IQ", "weight": 10}],
         [metric("Pitching Velocity", "Arm Strength", "velocity", unit="mph", weight=2, key="pitching_velocity", order=1),
          metric("Pitching Mechanics", "Arm Strength", "rating_5", weight=2, required=True, order=2),
          metric("Control", "Arm Strength", "rating_5", weight=2, order=3),
-         metric("Pitch Sequencing", "Baseball IQ", "rating_5", order=4)]))
+         metric("Pitch Sequencing", "Baseball IQ", "rating_5", order=4)]),
+        applies_to=["P"])
     tpl_catching = station_template("Catching Station", (
         [{"name": "Defense", "weight": 25}, {"name": "Arm Strength", "weight": 15}],
         [metric("Pop Time", "Arm Strength", "time", unit="sec", higher=False, key="pop_time", order=1),
          metric("Receiving", "Defense", "rating_5", weight=2, required=True, order=2),
          metric("Blocking", "Defense", "rating_5", weight=2, order=3),
-         metric("Footwork", "Defense", "rating_5", order=4)]))
+         metric("Footwork", "Defense", "rating_5", order=4)]),
+        applies_to=["C"])
 
     all_templates = [tpl_8u, tpl_11u, tpl_14u, tpl_athletic, tpl_hitting, tpl_infield,
                      tpl_outfield, tpl_pitching, tpl_catching]
@@ -495,7 +508,25 @@ async def main():
         if flag:
             await db.athletes.update_one({"id": a["id"]}, {"$set": {"flagged_follow_up": True, "position_projection": a["primary_position"]}})
 
+    from routes_drills import ensure_org_drills
+    drill_n = await ensure_org_drills(ORG_ID)
+    # Sample verified metrics + PB milestone for demo athlete
+    demo = next((x for x in athletes if x.get("email") and "demo" in (x.get("email") or "")), athletes[0])
+    await db.verified_metrics.insert_one({
+        "id": new_id(), "organization_id": ORG_ID, "athlete_id": demo["id"],
+        "metric_key": "exit_velo", "value": 82.5, "unit": "mph",
+        "verified_by": scout_id, "verified_by_name": "Ramon Dela Cruz",
+        "measured_at": now.strftime("%Y-%m-%d"), "source": "seed", "created_at": now_iso(),
+    })
+    await db.milestones.insert_one({
+        "id": new_id(), "organization_id": ORG_ID, "athlete_id": demo["id"],
+        "kind": "personal_best", "metric_key": "exit_velo", "value": 82.5, "unit": "mph",
+        "prev_value": None, "delta": None, "label": "New PB · Exit Velocity",
+        "detail": "82.5 mph", "created_at": now_iso(),
+    })
+
     print("Seed complete.")
+    print(f"  Drills seeded: {drill_n}")
     print(f"  Org: PBG Midwest ({ORG_ID})")
     print(f"  Staff: {len(STAFF)} (password: {PASSWORD})")
     print(f"  Athletes: {len(athletes)}")
@@ -505,4 +536,13 @@ async def main():
 
 
 if __name__ == "__main__":
+    app_env = (os.environ.get("APP_ENV") or "development").lower()
+    if app_env == "production" and os.environ.get("ALLOW_PROD_SEED") != "I_UNDERSTAND_WIPE":
+        print(
+            "Refusing to seed: APP_ENV=production.\n"
+            "Seed wipes the database. For a real org use: python bootstrap_admin.py\n"
+            "To override (DESTROY data): ALLOW_PROD_SEED=I_UNDERSTAND_WIPE python seed.py",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     asyncio.run(main())

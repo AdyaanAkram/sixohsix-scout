@@ -1,10 +1,10 @@
 /* PBG Scout app-level styles (design tokens live in index.css) */
 
-.card-shadow {
+.{
   box-shadow: 0 1px 0 rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.08);
 }
 
-.sticky-bar-shadow {
+.{
   box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.1);
 }
 

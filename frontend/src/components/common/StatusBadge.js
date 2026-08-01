@@ -2,35 +2,35 @@ import { cn } from "@/lib/utils";
 
 const STYLES = {
   // event statuses
-  "Draft": "bg-[#EFE7D7] text-[#0F172A] border-[#E6D9C2]",
-  "Registration Open": "bg-[#E6F0FF] text-[#102A4F] border-[#BBD6FF]",
-  "Registration Closed": "bg-[#EFE7D7] text-[#0F172A] border-[#E6D9C2]",
-  "Check-In Open": "bg-[#FFF7E6] text-[#7C2D12] border-[#FFD9A3]",
-  "Evaluation Active": "bg-[#EAF7EF] text-[#14532D] border-[#BFE6CC]",
-  "Evaluation Complete": "bg-[#EEF2FF] text-[#1E3A8A] border-[#C7D2FE]",
-  "Reports Under Review": "bg-[#EEF2FF] text-[#1E3A8A] border-[#C7D2FE]",
-  "Closed": "bg-slate-100 text-slate-600 border-slate-200",
+  "Draft": "bg-[hsl(var(--divider))] text-[hsl(var(--foreground))] border-[hsl(var(--border-strong))]",
+  "Registration Open": "bg-[hsl(var(--info) / 0.15)] text-[hsl(var(--brand-secondary))] border-[hsl(var(--info) / 0.4)]",
+  "Registration Closed": "bg-[hsl(var(--divider))] text-[hsl(var(--foreground))] border-[hsl(var(--border-strong))]",
+  "Check-In Open": "bg-warning/15 text-warning border-warning/40",
+  "Evaluation Active": "bg-success/15 text-success border-success/40",
+  "Evaluation Complete": "bg-[hsl(var(--info) / 0.15)] text-info border-[hsl(var(--info) / 0.4)]",
+  "Reports Under Review": "bg-[hsl(var(--info) / 0.15)] text-info border-[hsl(var(--info) / 0.4)]",
+  "Closed": "bg-secondary text-muted-foreground border-border",
   // evaluation statuses
-  draft: "bg-[#EFE7D7] text-[#0F172A] border-[#E6D9C2]",
-  submitted: "bg-[#E6F0FF] text-[#102A4F] border-[#BBD6FF]",
-  approved: "bg-[#EAF7EF] text-[#14532D] border-[#BFE6CC]",
-  returned: "bg-[#FDECEC] text-[#7F1D1D] border-[#F8B4B4]",
-  not_started: "bg-white text-slate-500 border-slate-200",
+  draft: "bg-[hsl(var(--divider))] text-[hsl(var(--foreground))] border-[hsl(var(--border-strong))]",
+  submitted: "bg-[hsl(var(--info) / 0.15)] text-[hsl(var(--brand-secondary))] border-[hsl(var(--info) / 0.4)]",
+  approved: "bg-success/15 text-success border-success/40",
+  returned: "bg-destructive/15 text-destructive border-destructive/40",
+  not_started: "bg-card text-muted-foreground border-border",
   // check-in
-  registered: "bg-[#EFE7D7] text-[#0F172A] border-[#E6D9C2]",
-  checked_in: "bg-[#EAF7EF] text-[#14532D] border-[#BFE6CC]",
-  absent: "bg-[#FDECEC] text-[#7F1D1D] border-[#F8B4B4]",
+  registered: "bg-[hsl(var(--divider))] text-[hsl(var(--foreground))] border-[hsl(var(--border-strong))]",
+  checked_in: "bg-success/15 text-success border-success/40",
+  absent: "bg-destructive/15 text-destructive border-destructive/40",
   // goals
-  "Not Started": "bg-[#EFE7D7] text-[#0F172A] border-[#E6D9C2]",
-  "Active": "bg-[#E6F0FF] text-[#102A4F] border-[#BBD6FF]",
-  "Improving": "bg-[#EAF7EF] text-[#14532D] border-[#BFE6CC]",
-  "Needs Attention": "bg-[#FFF7E6] text-[#7C2D12] border-[#FFD9A3]",
-  "Completed": "bg-[#EEF2FF] text-[#1E3A8A] border-[#C7D2FE]",
-  "Archived": "bg-slate-100 text-slate-600 border-slate-200",
+  "Not Started": "bg-[hsl(var(--divider))] text-[hsl(var(--foreground))] border-[hsl(var(--border-strong))]",
+  "Active": "bg-[hsl(var(--info) / 0.15)] text-[hsl(var(--brand-secondary))] border-[hsl(var(--info) / 0.4)]",
+  "Improving": "bg-success/15 text-success border-success/40",
+  "Needs Attention": "bg-warning/15 text-warning border-warning/40",
+  "Completed": "bg-[hsl(var(--info) / 0.15)] text-info border-[hsl(var(--info) / 0.4)]",
+  "Archived": "bg-secondary text-muted-foreground border-border",
   // athlete
-  active: "bg-[#EAF7EF] text-[#14532D] border-[#BFE6CC]",
-  archived: "bg-slate-100 text-slate-600 border-slate-200",
-  merged: "bg-slate-100 text-slate-600 border-slate-200",
+  active: "bg-success/15 text-success border-success/40",
+  archived: "bg-secondary text-muted-foreground border-border",
+  merged: "bg-secondary text-muted-foreground border-border",
 };
 
 const LABELS = {
@@ -54,7 +54,7 @@ export const StatusBadge = ({ status, className, testId }) => {
       data-testid={testId || "status-badge"}
       className={cn(
         "inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-semibold",
-        STYLES[status] || "bg-slate-100 text-slate-700 border-slate-200",
+        STYLES[status] || "bg-secondary text-foreground border-border",
         className
       )}
     >

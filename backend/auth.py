@@ -9,7 +9,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from db import db
 
-JWT_SECRET = os.environ.get('JWT_SECRET', 'pbg-scout-dev-secret-change-in-prod')
+from config import settings
+
+JWT_SECRET = settings.jwt_secret
 JWT_ALGO = 'HS256'
 TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7  # 7 days
 

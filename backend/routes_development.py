@@ -212,5 +212,7 @@ async def development_overview(user=Depends(require_roles(*COACH_ROLES))):
         g["athlete"] = amap.get(g["athlete_id"])
     recent_notes = await db.athlete_notes.find({"organization_id": user["organization_id"], "note_type": "assessment"}, {"_id": 0}).sort("created_at", -1).to_list(20)
     for n in recent_notes:
-        n["athlete"] = amap.get(n["athlete_id"]) or await db.athletes.find_one({"id": n["athlete_id"]}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "age_group": 1})
+        n["athlete"] = amap.get(n["athlete_id"]) or await db.athletes.find_one(
+            {"id": n["athlete_id"], "organization_id": user["organization_id"]},
+            {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "age_group": 1})
     return {"goals": goals, "recent_assessments": recent_notes}

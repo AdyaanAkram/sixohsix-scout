@@ -5,7 +5,9 @@ from pydantic import BaseModel, EmailStr, Field
 
 from auth import (ADMIN_ROLES, create_token, get_current_user, hash_password,
                   rate_limit, require_roles, verify_password)
+from config import settings
 from db import clean, db, log_audit, new_id, now_iso
+from mailer import send_template
 
 router = APIRouter()
 
@@ -55,8 +57,7 @@ async def login(body: LoginBody, request: Request):
     membership = await db.memberships.find_one({"user_id": user["id"], "active": True}, {"_id": 0})
     if not membership:
         raise HTTPException(status_code=403, detail="No active organization membership.")
-    if membership["role"] in ("athlete", "parent"):
-        raise HTTPException(status_code=403, detail="Athlete and Parent portals are coming soon.")
+    # Athletes and guardians land on My ID (client route guard).
     token = create_token(user["id"])
     org = await db.organizations.find_one({"id": membership["organization_id"]}, {"_id": 0})
     await log_audit(membership["organization_id"], {"id": user["id"], "full_name": user.get("full_name"), "role": membership["role"]}, "login", "user", user["id"])
@@ -83,19 +84,35 @@ async def me(user=Depends(get_current_user)):
 @router.post("/auth/forgot-password")
 async def forgot_password(body: ForgotBody, request: Request):
     rate_limit(f"forgot:{request.client.host if request.client else 'x'}", 5, 60)
+    generic = {"message": "If that email exists, a reset link has been sent."}
     user = await db.users.find_one({"email": body.email.lower()})
-    if user:
-        token = secrets.token_urlsafe(32)
-        await db.password_resets.insert_one({
-            "id": new_id(), "user_id": user["id"], "token": token,
-            "created_at": now_iso(), "used": False,
+    if not user:
+        return generic
+    token = secrets.token_urlsafe(32)
+    await db.password_resets.insert_one({
+        "id": new_id(), "user_id": user["id"], "token": token,
+        "created_at": now_iso(), "used": False,
+    })
+    membership = await db.memberships.find_one({"user_id": user["id"]}, {"_id": 0})
+    org_id = (membership or {}).get("organization_id")
+    if org_id:
+        # Never put the raw token in the audit log
+        await log_audit(org_id, None, "password_reset_requested", "user", user["id"], {})
+    link = f"{settings.app_public_url}/forgot-password?token={token}"
+    try:
+        send_template(user["email"], "password_reset", {
+            "name": user.get("full_name") or "there",
+            "link": link,
         })
-        # No email service configured for MVP: reset link surfaced to org admins via audit log
-        membership = await db.memberships.find_one({"user_id": user["id"]}, {"_id": 0})
-        if membership:
-            await log_audit(membership["organization_id"], None, "password_reset_requested", "user", user["id"], {"reset_token": token})
-        return {"message": "If that email exists, a reset link has been generated. Ask your administrator to retrieve it from the audit log.", "reset_token": token}
-    return {"message": "If that email exists, a reset link has been generated. Ask your administrator to retrieve it from the audit log."}
+    except Exception as e:
+        # Don't leak whether the account exists; log server-side
+        print(f"[auth] password reset mail failed: {e}")
+        if settings.app_env == "production":
+            raise HTTPException(status_code=503, detail="Unable to send reset email. Try again shortly.")
+    # Dev convenience only — never return tokens in production
+    if settings.app_env != "production" and settings.mail_provider == "stdout":
+        return {**generic, "reset_token": token}
+    return generic
 
 
 @router.post("/auth/reset-password")
@@ -127,12 +144,14 @@ async def list_staff(user=Depends(require_roles(*ADMIN_ROLES, "head_scout"))):
 
 @router.post("/staff/invite")
 async def invite_staff(body: InviteBody, user=Depends(require_roles(*ADMIN_ROLES))):
-    if body.role not in ROLES:
-        raise HTTPException(status_code=400, detail="Invalid role.")
+    if body.role not in ROLES or body.role in ("athlete", "parent"):
+        raise HTTPException(status_code=400, detail="Invalid role. Use athlete invite endpoint for athletes.")
     existing = await db.users.find_one({"email": body.email.lower()})
     if existing:
         raise HTTPException(status_code=400, detail="A user with this email already exists.")
+    from datetime import datetime, timedelta, timezone
     token = secrets.token_urlsafe(24)
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
     inv = {
         "id": new_id(),
         "organization_id": user["organization_id"],
@@ -141,18 +160,38 @@ async def invite_staff(body: InviteBody, user=Depends(require_roles(*ADMIN_ROLES
         "role": body.role,
         "token": token,
         "status": "pending",
+        "expires_at": expires_at,
         "created_by": user["id"],
         "created_at": now_iso(),
     }
     await db.invitations.insert_one(inv)
     await log_audit(user["organization_id"], user, "invite_sent", "invitation", inv["id"], {"email": body.email, "role": body.role})
-    return {"invitation": clean({k: v for k, v in inv.items() if k != '_id'}), "invite_token": token}
+    # Do not return raw token — email it (dev: stdout / prod: Resend)
+    link = f"{settings.app_public_url}/accept-invitation?token={token}"
+    send_template(body.email.lower(), "staff_invitation", {
+        "name": body.full_name, "org": user.get("organization_name") or "60'6\"", "link": link,
+    })
+    local, _, domain = body.email.lower().partition("@")
+    masked = f"{local[0]}***@{domain}" if local else f"***@{domain}"
+    return {"sent": True, "email": masked, "invitation_id": inv["id"], "expires_at": expires_at}
 
 
 @router.get("/invitations")
 async def list_invitations(user=Depends(require_roles(*ADMIN_ROLES))):
-    invs = await db.invitations.find({"organization_id": user["organization_id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    invs = await db.invitations.find({"organization_id": user["organization_id"]}, {"_id": 0, "token": 0}).sort("created_at", -1).to_list(200)
     return invs
+
+
+def _invitation_expired(inv) -> bool:
+    exp = inv.get("expires_at")
+    if not exp:
+        return False
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(str(exp).replace("Z", "+00:00"))
+        return dt < datetime.now(timezone.utc)
+    except Exception:
+        return False
 
 
 @router.get("/invitations/lookup/{token}")
@@ -160,8 +199,17 @@ async def lookup_invitation(token: str):
     inv = await db.invitations.find_one({"token": token, "status": "pending"}, {"_id": 0, "created_by": 0})
     if not inv:
         raise HTTPException(status_code=404, detail="Invitation not found or already used.")
+    if _invitation_expired(inv):
+        await db.invitations.update_one({"id": inv["id"]}, {"$set": {"status": "expired"}})
+        raise HTTPException(status_code=400, detail="This invitation has expired. Ask your coach to send a new one.")
     org = await db.organizations.find_one({"id": inv["organization_id"]}, {"_id": 0})
-    return {"email": inv["email"], "full_name": inv["full_name"], "role": inv["role"], "organization_name": org.get("name") if org else ""}
+    # Never echo the token back
+    return {
+        "email": inv["email"], "full_name": inv["full_name"], "role": inv["role"],
+        "athlete_id": inv.get("athlete_id"),
+        "organization_name": org.get("name") if org else "",
+        "expires_at": inv.get("expires_at"),
+    }
 
 
 @router.post("/auth/accept-invitation")
@@ -169,6 +217,9 @@ async def accept_invitation(body: AcceptInviteBody):
     inv = await db.invitations.find_one({"token": body.token, "status": "pending"})
     if not inv:
         raise HTTPException(status_code=400, detail="Invitation not found or already used.")
+    if _invitation_expired(inv):
+        await db.invitations.update_one({"id": inv["id"]}, {"$set": {"status": "expired"}})
+        raise HTTPException(status_code=400, detail="This invitation has expired.")
     uid = new_id()
     await db.users.insert_one({
         "id": uid, "email": inv["email"], "full_name": inv["full_name"],
@@ -179,12 +230,30 @@ async def accept_invitation(body: AcceptInviteBody):
         "id": new_id(), "user_id": uid, "organization_id": inv["organization_id"],
         "role": inv["role"], "active": True, "created_at": now_iso(),
     })
+    # Link athlete record when invitation is for athlete/parent
+    if inv.get("athlete_id"):
+        link = {"user_id": uid, "self_service_enabled": True, "updated_at": now_iso()}
+        if inv["role"] == "athlete":
+            await db.athletes.update_one(
+                {"id": inv["athlete_id"], "organization_id": inv["organization_id"]},
+                {"$set": link})
+        elif inv["role"] == "parent":
+            await db.athletes.update_one(
+                {"id": inv["athlete_id"], "organization_id": inv["organization_id"]},
+                {"$set": {"guardian_user_id": uid, "self_service_enabled": True, "updated_at": now_iso()}})
     await db.invitations.update_one({"id": inv["id"]}, {"$set": {"status": "accepted", "accepted_at": now_iso()}})
-    await log_audit(inv["organization_id"], None, "invite_accepted", "user", uid, {"email": inv["email"]})
+    await log_audit(inv["organization_id"], None, "invite_accepted", "user", uid, {"email": inv["email"], "role": inv["role"]})
     token = create_token(uid)
     org = await db.organizations.find_one({"id": inv["organization_id"]}, {"_id": 0})
-    return {"token": token, "user": {"id": uid, "email": inv["email"], "full_name": inv["full_name"], "role": inv["role"], "organization_id": inv["organization_id"], "organization_name": org.get("name") if org else None}}
-
+    return {
+        "token": token,
+        "user": {
+            "id": uid, "email": inv["email"], "full_name": inv["full_name"],
+            "role": inv["role"], "organization_id": inv["organization_id"],
+            "organization_name": org.get("name") if org else None,
+            "athlete_id": inv.get("athlete_id"),
+        },
+    }
 
 @router.patch("/staff/{user_id}")
 async def update_staff(user_id: str, body: UpdateStaffBody, user=Depends(require_roles("owner", "admin"))):

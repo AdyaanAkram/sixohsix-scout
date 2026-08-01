@@ -34,27 +34,27 @@ export default function AuditLog() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="font-display text-4xl text-[#0B1E3A]">Audit Log</h1>
-        <p className="text-sm text-slate-500">Record of sensitive actions across the organization.</p>
+        <h1 className="font-display text-4xl text-foreground">Audit Log</h1>
+        <p className="text-sm text-muted-foreground">Record of sensitive actions across the organization.</p>
       </div>
       {logs.length === 0 ? (
         <EmptyState icon={ScrollText} title="No audit entries" hint="Actions like sign-ins, submissions, and exports are recorded here." />
       ) : (
-        <Card className="rounded-2xl card-shadow border-[#E7E1D6] overflow-hidden">
+        <Card className="rounded-2xl border-border overflow-hidden">
           <div className="overflow-x-auto">
             <Table data-testid="audit-log-table">
               <TableHeader>
-                <TableRow className="bg-[hsl(var(--secondary))]">
+                <TableRow className="bg-secondary">
                   <TableHead>When</TableHead><TableHead>Who</TableHead><TableHead>Action</TableHead><TableHead>Details</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {logs.map((l) => (
                   <TableRow key={l.id}>
-                    <TableCell className="text-xs text-slate-500 whitespace-nowrap">{new Date(l.created_at).toLocaleString()}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{new Date(l.created_at).toLocaleString()}</TableCell>
                     <TableCell className="text-sm font-medium whitespace-nowrap">{l.actor_name || "System"}</TableCell>
                     <TableCell className="text-sm">{ACTION_LABELS[l.action] || l.action}</TableCell>
-                    <TableCell className="text-xs text-slate-500 max-w-[300px] truncate">
+                    <TableCell className="text-xs text-muted-foreground max-w-[300px] truncate">
                       {l.details && Object.keys(l.details).length > 0 ? Object.entries(l.details).filter(([k]) => k !== "reset_token").map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join(" · ") : "—"}
                     </TableCell>
                   </TableRow>

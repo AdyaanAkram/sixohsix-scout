@@ -23,8 +23,8 @@ async def dashboard(user=Depends(require_roles(*STAFF_ROLES))):
         assignments = await db.evaluator_assignments.find({"evaluator_id": user["id"], "organization_id": org_id}, {"_id": 0}).to_list(20)
         items = []
         for a in assignments:
-            event = await db.events.find_one({"id": a["event_id"]}, {"_id": 0})
-            station = await db.stations.find_one({"id": a["station_id"]}, {"_id": 0, "name": 1})
+            event = await db.events.find_one({"id": a["event_id"], "organization_id": org_id}, {"_id": 0})
+            station = await db.stations.find_one({"id": a["station_id"], "organization_id": org_id}, {"_id": 0, "name": 1})
             groups = await db.event_groups.find({"id": {"$in": a.get("group_ids") or []}}, {"_id": 0, "name": 1}).to_list(20)
             group_ids = a.get("group_ids") or []
             q = {"event_id": a["event_id"], "status": "checked_in"}
@@ -48,7 +48,9 @@ async def dashboard(user=Depends(require_roles(*STAFF_ROLES))):
         flagged = await db.athletes.count_documents({"organization_id": org_id, "flagged_follow_up": True, "status": "active"})
         recent_notes = await db.athlete_notes.find({"organization_id": org_id}, {"_id": 0}).sort("created_at", -1).to_list(5)
         for n in recent_notes:
-            ath = await db.athletes.find_one({"id": n["athlete_id"]}, {"_id": 0, "first_name": 1, "last_name": 1})
+            ath = await db.athletes.find_one(
+                {"id": n["athlete_id"], "organization_id": org_id},
+                {"_id": 0, "first_name": 1, "last_name": 1})
             n["athlete_name"] = f"{ath['first_name']} {ath['last_name']}" if ath else ""
         top = await _leaderboard_data(org_id, limit=5)
         return {"role": role, "awaiting_review": submitted, "approved": approved,
@@ -81,7 +83,7 @@ async def _leaderboard_data(org_id, event_id=None, age_group=None, position=None
         by_athlete[ev["athlete_id"]].append(ev)
     rows = []
     for aid, evs in by_athlete.items():
-        athlete = await db.athletes.find_one({"id": aid}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "age_group": 1, "primary_position": 1, "current_team": 1, "photo_url": 1})
+        athlete = await db.athletes.find_one({"id": aid, "organization_id": org_id}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "age_group": 1, "primary_position": 1, "current_team": 1, "photo_url": 1})
         if not athlete:
             continue
         if age_group and athlete.get("age_group") != age_group:
@@ -125,7 +127,7 @@ async def event_completion(event_id: str, user=Depends(require_roles(*REVIEW_ROL
     stations = await db.stations.find({"event_id": event_id}, {"_id": 0}).to_list(50)
     rows = []
     for entry in roster:
-        athlete = await db.athletes.find_one({"id": entry["athlete_id"]}, {"_id": 0, "first_name": 1, "last_name": 1, "age_group": 1, "primary_position": 1, "id": 1})
+        athlete = await db.athletes.find_one({"id": entry["athlete_id"], "organization_id": user["organization_id"]}, {"_id": 0, "first_name": 1, "last_name": 1, "age_group": 1, "primary_position": 1, "id": 1})
         if not athlete:
             continue
         station_status = {}
@@ -164,8 +166,8 @@ async def evaluator_disagreement(event_id: str, user=Depends(require_roles(*REVI
         vals = [s[1] for s in scores]
         spread = round(max(vals) - min(vals), 2)
         stdev = round(statistics.pstdev(vals), 2)
-        athlete = await db.athletes.find_one({"id": aid}, {"_id": 0, "first_name": 1, "last_name": 1, "id": 1, "age_group": 1})
-        station = await db.stations.find_one({"id": sid}, {"_id": 0, "name": 1})
+        athlete = await db.athletes.find_one({"id": aid, "organization_id": user["organization_id"]}, {"_id": 0, "first_name": 1, "last_name": 1, "id": 1, "age_group": 1})
+        station = await db.stations.find_one({"id": sid, "organization_id": user["organization_id"]}, {"_id": 0, "name": 1})
         rows.append({"athlete": athlete, "station_name": (station or {}).get("name"),
                      "scores": [{"evaluator": s[0], "score": s[1]} for s in scores],
                      "spread": spread, "stdev": stdev})
@@ -277,9 +279,9 @@ async def player_pdf(athlete_id: str, event_id: str | None = None, user=Depends(
     if evals:
         story.append(Paragraph("Evaluation Detail", h2))
         for ev in evals:
-            station = await db.stations.find_one({"id": ev["station_id"]}, {"_id": 0, "name": 1})
-            event = await db.events.find_one({"id": ev["event_id"]}, {"_id": 0, "name": 1, "date": 1})
-            template = await db.evaluation_templates.find_one({"id": ev.get("template_id")}, {"_id": 0})
+            station = await db.stations.find_one({"id": ev["station_id"], "organization_id": user["organization_id"]}, {"_id": 0, "name": 1})
+            event = await db.events.find_one({"id": ev["event_id"], "organization_id": user["organization_id"]}, {"_id": 0, "name": 1, "date": 1})
+            template = await db.evaluation_templates.find_one({"id": ev.get("template_id"), "organization_id": user["organization_id"]}, {"_id": 0})
             story.append(Paragraph(f"<b>{(station or {}).get('name', 'Station')}</b> — {(event or {}).get('name', '')} ({(event or {}).get('date', '')}) — Evaluator: {ev.get('evaluator_name', '')}", body))
             mrows = [["Metric", "Result", "Normalized"]]
             metric_map = {m["id"]: m for m in (template or {}).get("metrics", [])}

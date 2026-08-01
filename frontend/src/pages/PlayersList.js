@@ -60,12 +60,12 @@ const AddPlayerDialog = ({ onCreated }) => {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="rounded-xl bg-[#0B1E3A] hover:bg-[#102A4F] h-11" data-testid="add-player-button">
+        <Button className="rounded-xl bg-primary hover:bg-brand-secondary h-11" data-testid="add-player-button">
           <Plus className="h-4 w-4 mr-1" /> Add Player
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl">
-        <DialogHeader><DialogTitle className="font-display text-2xl text-[#0B1E3A]">Add Player</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Add Player</DialogTitle></DialogHeader>
         <form onSubmit={submit} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <F label="First name *" k="first_name" />
@@ -106,7 +106,7 @@ const AddPlayerDialog = ({ onCreated }) => {
             <F label="Emergency contact" k="emergency_contact" />
           </div>
           <DialogFooter>
-            <Button type="submit" disabled={busy || !form.first_name || !form.last_name} className="rounded-xl bg-[#0B1E3A] hover:bg-[#102A4F] w-full h-11" data-testid="add-player-submit-button">
+            <Button type="submit" disabled={busy || !form.first_name || !form.last_name} className="rounded-xl bg-primary hover:bg-brand-secondary w-full h-11" data-testid="add-player-submit-button">
               {busy ? "Adding…" : "Add Player"}
             </Button>
           </DialogFooter>
@@ -146,8 +146,8 @@ export default function PlayersList() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-display text-4xl text-[#0B1E3A]">Players</h1>
-          <p className="text-sm text-slate-500">{players.length} player{players.length === 1 ? "" : "s"} in the directory</p>
+          <h1 className="font-display text-4xl text-foreground">Players</h1>
+          <p className="text-sm text-muted-foreground">{players.length} player{players.length === 1 ? "" : "s"} in the directory</p>
         </div>
         {isAdmin && (
           <div className="flex gap-2">
@@ -164,19 +164,19 @@ export default function PlayersList() {
 
       <div className="flex flex-wrap gap-2">
         <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name…" className="pl-9 h-11 rounded-xl bg-white" data-testid="players-search-input" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name…" className="pl-9 h-11 rounded-xl bg-card" data-testid="players-search-input" />
         </div>
         <Select value={ageGroup} onValueChange={setAgeGroup}>
-          <SelectTrigger className="w-[110px] h-11 rounded-xl bg-white" data-testid="players-filter-age-group"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-[110px] h-11 rounded-xl bg-card" data-testid="players-filter-age-group"><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="all">All ages</SelectItem>{AGE_GROUPS.map((a) => <SelectItem key={a} value={a}>{a}</SelectItem>)}</SelectContent>
         </Select>
         <Select value={position} onValueChange={setPosition}>
-          <SelectTrigger className="w-[120px] h-11 rounded-xl bg-white" data-testid="players-filter-position"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-[120px] h-11 rounded-xl bg-card" data-testid="players-filter-position"><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="all">All positions</SelectItem>{POSITIONS.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
         </Select>
         <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-[120px] h-11 rounded-xl bg-white" data-testid="players-filter-status"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-[120px] h-11 rounded-xl bg-card" data-testid="players-filter-status"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="active">Active</SelectItem>
             <SelectItem value="archived">Archived</SelectItem>
@@ -195,25 +195,25 @@ export default function PlayersList() {
           <div className="md:hidden space-y-2">
             {players.map((p) => (
               <Link key={p.id} to={`/players/${p.id}`} data-testid={`player-card-${p.id}`}>
-                <Card className="rounded-2xl border-[#E7E1D6] mb-2 active:scale-[0.99] transition">
+                <Card className="rounded-2xl border-border mb-2 active:scale-[0.99] transition">
                   <CardContent className="py-3.5 flex items-center gap-3">
                     <PlayerAvatar firstName={p.first_name} lastName={p.last_name} />
                     <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-[#0B1E3A] truncate">{p.first_name} {p.last_name}</p>
-                      <p className="text-xs text-slate-500">{p.age_group || "—"} · {p.primary_position || "—"} · {p.current_team || "No team"}</p>
+                      <p className="font-semibold text-foreground truncate">{p.first_name} {p.last_name}</p>
+                      <p className="text-xs text-muted-foreground">{p.age_group || "—"} · {p.primary_position || "—"} · {p.current_team || "No team"}</p>
                     </div>
                     <StatusBadge status={p.status} />
-                    <ChevronRight className="h-4 w-4 text-slate-300" />
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
                   </CardContent>
                 </Card>
               </Link>
             ))}
           </div>
           {/* Desktop table */}
-          <Card className="hidden md:block rounded-2xl card-shadow border-[#E7E1D6] overflow-hidden">
+          <Card className="hidden md:block rounded-2xl border-border overflow-hidden">
             <Table data-testid="players-table">
               <TableHeader>
-                <TableRow className="bg-[hsl(var(--secondary))]">
+                <TableRow className="bg-secondary">
                   <TableHead>Player</TableHead>
                   <TableHead>Age Group</TableHead>
                   <TableHead>Position</TableHead>
@@ -225,18 +225,18 @@ export default function PlayersList() {
               </TableHeader>
               <TableBody>
                 {players.map((p) => (
-                  <TableRow key={p.id} className="cursor-pointer hover:bg-[hsl(var(--secondary))]" onClick={() => navigate(`/players/${p.id}`)} data-testid={`player-row-${p.id}`}>
+                  <TableRow key={p.id} className="cursor-pointer hover:bg-secondary" onClick={() => navigate(`/players/${p.id}`)} data-testid={`player-row-${p.id}`}>
                     <TableCell>
                       <div className="flex items-center gap-3">
                         <PlayerAvatar firstName={p.first_name} lastName={p.last_name} size="sm" />
-                        <span className="font-semibold text-[#0B1E3A]">{p.first_name} {p.last_name}</span>
+                        <span className="font-semibold text-foreground">{p.first_name} {p.last_name}</span>
                       </div>
                     </TableCell>
                     <TableCell>{p.age_group || "—"}</TableCell>
                     <TableCell>{p.primary_position || "—"}</TableCell>
                     <TableCell className="font-mono-num text-xs">{p.bats || "—"}/{p.throws || "—"}</TableCell>
-                    <TableCell className="text-slate-600">{p.current_team || "—"}</TableCell>
-                    <TableCell className="text-slate-600">{p.city ? `${p.city}, ${p.state}` : "—"}</TableCell>
+                    <TableCell className="text-muted-foreground">{p.current_team || "—"}</TableCell>
+                    <TableCell className="text-muted-foreground">{p.city ? `${p.city}, ${p.state}` : "—"}</TableCell>
                     <TableCell><StatusBadge status={p.status} /></TableCell>
                   </TableRow>
                 ))}

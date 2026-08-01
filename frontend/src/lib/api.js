@@ -1,7 +1,11 @@
 import axios from "axios";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-export const API = `${BACKEND_URL}/api`;
+// unset → local CRA default; empty string → same-origin /api (nginx proxy).
+const RAW = process.env.REACT_APP_BACKEND_URL;
+const BACKEND_URL = (RAW === undefined || RAW === null)
+  ? "http://127.0.0.1:8000"
+  : String(RAW).trim().replace(/\/$/, "");
+export const API = BACKEND_URL ? `${BACKEND_URL}/api` : "/api";
 
 export const api = axios.create({ baseURL: API });
 
@@ -35,5 +39,12 @@ export const signedUrl = (path) => {
   return `${API}${path}${sep}token=${getToken()}`;
 };
 
-export const errMsg = (e, fallback = "Something went wrong.") =>
-  e?.response?.data?.detail || e?.message || fallback;
+export const errMsg = (e, fallback = "Something went wrong.") => {
+  const detail = e?.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) return detail.map((d) => d.msg || JSON.stringify(d)).join("; ");
+  if (!e?.response && (e?.code === "ERR_NETWORK" || e?.message === "Network Error")) {
+    return "Cannot reach the API. Is the backend running on port 8000?";
+  }
+  return e?.message || fallback;
+};

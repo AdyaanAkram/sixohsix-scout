@@ -8,11 +8,12 @@ from pydantic import BaseModel
 
 from auth import ADMIN_ROLES, COACH_ROLES, STAFF_ROLES, get_current_user, require_roles
 from db import clean, db, log_audit, new_id, now_iso
+from positions import POSITION_TAXONOMY
 from scoring import aggregate_player_scores
 
 router = APIRouter()
 
-POSITIONS = ["P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "IF", "OF", "UTIL", "DH"]
+POSITIONS = list(POSITION_TAXONOMY)
 AGE_GROUPS = ["8U", "9U", "10U", "11U", "12U", "13U", "14U", "15U", "16U", "17U", "18U"]
 
 
@@ -57,6 +58,7 @@ class AthleteBody(BaseModel):
     guardian_email: str | None = None
     guardian_phone: str | None = None
     emergency_contact: str | None = None
+    email: str | None = None  # athlete's own email (distinct from guardian)
     status: str = "active"
     photo_url: str | None = None
 
@@ -66,6 +68,14 @@ def athlete_doc(body: AthleteBody, org_id: str, user_id: str):
     doc.update({
         "id": new_id(),
         "organization_id": org_id,
+        # TODO: later union organization_id with shared_with_organizations for read access
+        # (travel + HS dual membership / PBG evaluating on behalf of a league). Unused until then.
+        "shared_with_organizations": [],
+        "bio": None,
+        "user_id": None,
+        "guardian_user_id": None,
+        "profile_completed_at": None,
+        "self_service_enabled": False,
         "age": compute_age(body.date_of_birth),
         "age_group": compute_age_group(body.date_of_birth),
         "created_by": user_id,
@@ -209,17 +219,86 @@ async def athlete_summary(athlete_id: str, user=Depends(require_roles(*STAFF_ROL
     for ev in evals:
         by_event.setdefault(ev["event_id"], []).append(ev)
     event_scores = []
+    # Per-metric longitudinal series (trainer growth view)
+    metric_series = {}  # metric_key -> [{event_date, event_name, raw, unit, name}]
     for event_id, evs in by_event.items():
         agg = aggregate_player_scores(evs)
         event = await db.events.find_one({"id": event_id}, {"_id": 0, "name": 1, "date": 1})
+        event_name = event.get("name") if event else "Event"
+        event_date = event.get("date") if event else None
         event_scores.append({
             "event_id": event_id,
-            "event_name": event.get("name") if event else "Event",
-            "event_date": event.get("date") if event else None,
+            "event_name": event_name,
+            "event_date": event_date,
             "overall_score": agg["overall_score"],
             "category_scores": agg["category_scores"],
         })
+        for ev in evs:
+            template = await db.evaluation_templates.find_one({"id": ev.get("template_id")}, {"_id": 0, "metrics": 1})
+            metrics_by_id = {m["id"]: m for m in (template or {}).get("metrics", [])}
+            computed = (ev.get("computed") or {}).get("metrics") or {}
+            scores = ev.get("scores") or {}
+            for mid, entry in scores.items():
+                if not isinstance(entry, dict) or entry.get("not_observed"):
+                    continue
+                raw = entry.get("value")
+                if raw is None or raw == "":
+                    continue
+                meta = metrics_by_id.get(mid) or {}
+                mtype = meta.get("metric_type") or ""
+                # Prefer measurable / rating metrics for growth tracking
+                if mtype in ("comment", "observation", "yes_no", "multiple_choice"):
+                    continue
+                key = meta.get("key") or mid
+                name = meta.get("name") or key
+                unit = meta.get("unit") or ""
+                # For dual-attempt measurements, use best attempt
+                a2 = entry.get("attempt_2")
+                best = raw
+                if isinstance(raw, (int, float)) and isinstance(a2, (int, float)):
+                    best = max(raw, a2) if meta.get("higher_is_better", True) else min(raw, a2)
+                metric_series.setdefault(key, {"name": name, "unit": unit, "metric_type": mtype, "higher_is_better": meta.get("higher_is_better", True), "points": []})
+                metric_series[key]["points"].append({
+                    "event_id": event_id,
+                    "event_name": event_name,
+                    "event_date": event_date,
+                    "raw": best,
+                    "normalized": (computed.get(mid) or {}).get("normalized"),
+                })
     event_scores.sort(key=lambda x: x.get("event_date") or "")
+
+    metric_history = []
+    for key, series in metric_series.items():
+        pts = sorted(series["points"], key=lambda p: p.get("event_date") or "")
+        if not pts:
+            continue
+        first, last = pts[0], pts[-1]
+        change = None
+        try:
+            if isinstance(first["raw"], (int, float)) and isinstance(last["raw"], (int, float)) and len(pts) > 1:
+                change = round(last["raw"] - first["raw"], 2)
+        except Exception:
+            change = None
+        improved = None
+        if change is not None:
+            improved = change > 0 if series["higher_is_better"] else change < 0
+            if change == 0:
+                improved = False
+        metric_history.append({
+            "key": key,
+            "name": series["name"],
+            "unit": series["unit"],
+            "metric_type": series["metric_type"],
+            "higher_is_better": series["higher_is_better"],
+            "latest": last["raw"],
+            "previous": pts[-2]["raw"] if len(pts) > 1 else None,
+            "first": first["raw"],
+            "change": change,
+            "improved": improved,
+            "points": pts,
+        })
+    # Sort: measurable first, then by absolute change desc
+    metric_history.sort(key=lambda m: (0 if m["metric_type"] in ("velocity", "time", "numeric") else 1, -(abs(m["change"]) if m["change"] is not None else -1)))
 
     latest = event_scores[-1] if event_scores else None
     previous = event_scores[-2] if len(event_scores) > 1 else None
@@ -239,6 +318,7 @@ async def athlete_summary(athlete_id: str, user=Depends(require_roles(*STAFF_ROL
         "last_evaluation_date": evals[-1].get("submitted_at") if evals else None,
         "event_scores": event_scores,
         "category_scores": agg_all["category_scores"],
+        "metric_history": metric_history,
         "goals": goals,
         "latest_scout_assessment": latest_scout,
         "position_projection": (latest_scout or {}).get("position_recommendation") or a.get("position_projection"),
@@ -291,22 +371,63 @@ async def athlete_timeline(athlete_id: str, user=Depends(require_roles(*STAFF_RO
 # ---------------- CSV import / export ----------------
 
 CSV_COLUMNS = {
-    "first name": "first_name", "last name": "last_name", "preferred name": "preferred_name",
-    "date of birth": "date_of_birth", "dob": "date_of_birth", "graduation year": "graduation_year",
-    "grad year": "graduation_year", "primary position": "primary_position",
-    "secondary positions": "secondary_positions", "bats": "bats", "throws": "throws",
-    "height": "height", "weight": "weight", "team": "current_team", "current team": "current_team",
-    "school": "school", "city": "city", "state": "state", "country": "country",
-    "guardian name": "guardian_name", "guardian email": "guardian_email", "guardian phone": "guardian_phone",
-    "jersey number": "jersey_number", "jersey": "jersey_number",
+    # Standard / PBG columns
+    "first name": "first_name", "lastname": "last_name", "last name": "last_name",
+    "preferred name": "preferred_name", "nickname": "preferred_name",
+    "date of birth": "date_of_birth", "dob": "date_of_birth", "birth date": "date_of_birth",
+    "birthday": "date_of_birth", "birthdate": "date_of_birth",
+    "graduation year": "graduation_year", "grad year": "graduation_year", "gradyear": "graduation_year",
+    "class year": "graduation_year", "class of": "graduation_year",
+    "primary position": "primary_position", "position": "primary_position", "pos": "primary_position",
+    "secondary positions": "secondary_positions", "secondary position": "secondary_positions",
+    "bats": "bats", "throws": "throws",
+    "height": "height", "ht": "height", "weight": "weight", "wt": "weight",
+    "team": "current_team", "current team": "current_team", "organization": "current_team",
+    "club": "current_team", "travel team": "current_team",
+    "school": "school", "high school": "school", "hs": "school",
+    "city": "city", "state": "state", "country": "country",
+    "guardian name": "guardian_name", "parent name": "guardian_name", "parent/guardian": "guardian_name",
+    "parent": "guardian_name", "mother": "guardian_name", "father": "guardian_name",
+    "guardian email": "guardian_email", "parent email": "guardian_email", "email": "guardian_email",
+    "guardian phone": "guardian_phone", "parent phone": "guardian_phone", "phone": "guardian_phone",
+    "mobile": "guardian_phone", "cell": "guardian_phone",
+    "jersey number": "jersey_number", "jersey": "jersey_number", "number": "jersey_number", "#": "jersey_number",
+    # GameChanger roster / export aliases (parents dump these onto the app)
+    "player": "full_name", "player name": "full_name", "athlete": "full_name", "athlete name": "full_name",
+    "name": "full_name", "full name": "full_name",
+    "player first name": "first_name", "player last name": "last_name",
+    "first": "first_name", "last": "last_name",
+    "jersey #": "jersey_number", "jersey num": "jersey_number", "uniform number": "jersey_number",
+    "uniform #": "jersey_number", "uniform": "jersey_number",
+    "bat": "bats", "throw": "throws", "handedness": "bats",
+    "team name": "current_team", "season team": "current_team",
+    "age group": "age_group_hint", "agegroup": "age_group_hint", "division": "age_group_hint",
 }
+
+
+def _normalize_header(col: str) -> str:
+    """Normalize CSV headers so GameChanger / spreadsheet variants map cleanly."""
+    key = (col or "").strip().lower()
+    key = key.replace("_", " ").replace("-", " ")
+    # collapse whitespace
+    key = " ".join(key.split())
+    return key
+
+
+def _split_full_name(full: str):
+    parts = [p for p in (full or "").strip().split() if p]
+    if not parts:
+        return None, None
+    if len(parts) == 1:
+        return parts[0], parts[0]
+    return parts[0], " ".join(parts[1:])
 
 
 def parse_dob(value):
     value = (value or "").strip()
     if not value:
         return None, None
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%m-%d-%Y", "%d/%m/%Y"):
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%m-%d-%Y", "%d/%m/%Y", "%Y/%m/%d"):
         try:
             return datetime.strptime(value, fmt).strftime("%Y-%m-%d"), None
         except ValueError:
@@ -331,9 +452,11 @@ async def import_preview(file: UploadFile = File(...), user=Depends(require_role
     mapping = {}
     unmapped = []
     for col in reader.fieldnames:
-        key = (col or "").strip().lower()
+        key = _normalize_header(col)
         if key in CSV_COLUMNS:
             mapping[col] = CSV_COLUMNS[key]
+        elif key in ("b/t", "bats/throws", "bat/throw"):
+            mapping[col] = "bats_throws"
         else:
             unmapped.append(col)
 
@@ -348,7 +471,22 @@ async def import_preview(file: UploadFile = File(...), user=Depends(require_role
         errors = []
         for col, field in mapping.items():
             val = (row.get(col) or "").strip()
-            if field == "date_of_birth":
+            if field == "full_name":
+                fn, ln = _split_full_name(val)
+                if not record.get("first_name") and fn:
+                    record["first_name"] = fn
+                if not record.get("last_name") and ln:
+                    record["last_name"] = ln
+            elif field == "bats_throws":
+                # GameChanger often exports "R/R", "L/R", "S/R"
+                parts = [p.strip().upper()[:1] for p in val.replace("-", "/").split("/") if p.strip()]
+                if parts:
+                    record["bats"] = parts[0]
+                if len(parts) > 1:
+                    record["throws"] = parts[1]
+            elif field == "age_group_hint":
+                record["age_group_hint"] = val or None
+            elif field == "date_of_birth":
                 parsed, err = parse_dob(val)
                 if err:
                     errors.append(err)
@@ -356,7 +494,11 @@ async def import_preview(file: UploadFile = File(...), user=Depends(require_role
             elif field == "graduation_year":
                 if val:
                     try:
-                        record[field] = int(val)
+                        # accept "2028" or "Class of 2028"
+                        digits = "".join(ch for ch in val if ch.isdigit())
+                        record[field] = int(digits[:4]) if digits else None
+                        if record[field] is None:
+                            errors.append(f"Graduation year must be a number: {val}")
                     except ValueError:
                         errors.append(f"Graduation year must be a number: {val}")
                 else:
@@ -364,7 +506,9 @@ async def import_preview(file: UploadFile = File(...), user=Depends(require_role
             elif field == "secondary_positions":
                 record[field] = [p.strip() for p in val.replace(";", ",").split(",") if p.strip()] if val else []
             else:
-                record[field] = val or None
+                # don't overwrite a stronger explicit field with empty
+                if val or field not in record:
+                    record[field] = val or None
         if not record.get("first_name"):
             errors.append("First name is required")
         if not record.get("last_name"):
@@ -380,6 +524,7 @@ async def import_preview(file: UploadFile = File(...), user=Depends(require_role
         "duplicate_rows": sum(1 for r in rows if r["is_duplicate"]),
         "mapped_columns": mapping,
         "unmapped_columns": unmapped,
+        "detected_format": "gamechanger" if any("game" in (c or "").lower() or c in ("Player", "Player Name", "Jersey #") for c in (reader.fieldnames or [])) or "full_name" in mapping.values() else "standard",
         "rows": rows,
     }
 
@@ -421,14 +566,14 @@ async def import_confirm(body: ImportConfirmBody, user=Depends(require_roles(*AD
             "city": data.get("city"),
             "state": data.get("state"),
             "country": data.get("country") or "USA",
-            "guardian_name": data.get("guardian_name"),
+              "guardian_name": data.get("guardian_name"),
             "guardian_email": data.get("guardian_email"),
             "guardian_phone": data.get("guardian_phone"),
             "emergency_contact": None,
             "status": "active",
             "photo_url": None,
             "age": compute_age(data.get("date_of_birth")),
-            "age_group": compute_age_group(data.get("date_of_birth")),
+            "age_group": data.get("age_group_hint") or compute_age_group(data.get("date_of_birth")),
             "created_by": user["id"],
             "created_at": now_iso(),
             "updated_at": now_iso(),
@@ -458,4 +603,4 @@ async def export_athletes(user=Depends(require_roles(*ADMIN_ROLES, "head_scout")
         writer.writerow(row)
     await log_audit(user["organization_id"], user, "athletes_exported", "athlete", None)
     return Response(content=output.getvalue(), media_type="text/csv",
-                    headers={"Content-Disposition": "attachment; filename=pbg_players.csv"})
+                    headers={"Content-Disposition": "attachment; filename=606_players.csv"})

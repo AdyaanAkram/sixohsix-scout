@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  isolation-tests:
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand(\"ping\")'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.local.txt
+
+      - name: Install backend deps
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.local.txt
+          pip install pytest requests
+
+      - name: Write backend .env
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          Path(".env").write_text(
+              "APP_ENV=development\n"
+              "MONGO_URL=mongodb://localhost:27017\n"
+              "DB_NAME=pbg_scout_ci\n"
+              "JWT_SECRET=ci-test-secret-not-for-production-use\n"
+              "CORS_ORIGINS=http://localhost:3000\n"
+              "APP_PUBLIC_URL=http://localhost:3000\n"
+              "LOG_LEVEL=WARNING\n"
+          )
+          PY
+
+      - name: Start API
+        working-directory: backend
+        run: |
+          uvicorn server:app --host 127.0.0.1 --port 8000 &
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8000/ready && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8000/ready
+
+      - name: Org isolation + athlete tests
+        env:
+          PBG_API_BASE: http://127.0.0.1:8000/api
+          MONGO_URL: mongodb://localhost:27017
+          DB_NAME: pbg_scout_ci
+        run: pytest tests/test_org_isolation.py -n 0 -q --tb=short
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: |
+          npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          REACT_APP_BACKEND_URL=http://localhost:8000 npm run build

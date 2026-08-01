@@ -42,6 +42,7 @@ class AssignmentBody(BaseModel):
 
 class RosterBody(BaseModel):
     athlete_ids: list[str]
+    group_id: str | None = None  # optional — assign all added players to this group
 
 
 class CheckInBody(BaseModel):
@@ -56,7 +57,9 @@ class CheckInBody(BaseModel):
 async def list_events(user=Depends(require_roles(*STAFF_ROLES))):
     q = {"organization_id": user["organization_id"]}
     if user["role"] == "evaluator":
-        assignments = await db.evaluator_assignments.find({"evaluator_id": user["id"]}, {"_id": 0, "event_id": 1}).to_list(100)
+        assignments = await db.evaluator_assignments.find(
+            {"evaluator_id": user["id"], "organization_id": user["organization_id"]},
+            {"_id": 0, "event_id": 1}).to_list(100)
         event_ids = list({a["event_id"] for a in assignments})
         q["id"] = {"$in": event_ids}
     events = await db.events.find(q, {"_id": 0}).sort("date", -1).to_list(200)
@@ -107,7 +110,7 @@ async def update_event(event_id: str, body: EventBody, user=Depends(require_role
         raise HTTPException(status_code=400, detail="Invalid event status.")
     updates = body.model_dump()
     updates["updated_at"] = now_iso()
-    await db.events.update_one({"id": event_id}, {"$set": updates})
+    await db.events.update_one({"id": event_id, "organization_id": user["organization_id"]}, {"$set": updates})
     await log_audit(user["organization_id"], user, "event_updated", "event", event_id, {"status": body.status})
     return {"message": "Event updated."}
 
@@ -121,21 +124,43 @@ async def set_event_status(event_id: str, body: StatusBody, user=Depends(require
     await get_org_event(event_id, user)
     if body.status not in EVENT_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid event status.")
-    await db.events.update_one({"id": event_id}, {"$set": {"status": body.status, "updated_at": now_iso()}})
+    await db.events.update_one(
+        {"id": event_id, "organization_id": user["organization_id"]},
+        {"$set": {"status": body.status, "updated_at": now_iso()}})
     await log_audit(user["organization_id"], user, "event_status_changed", "event", event_id, {"status": body.status})
     return {"message": f"Event status set to {body.status}."}
 
 
 # ---------------- Roster ----------------
 
+async def _require_event_assignment(event_id: str, user):
+    """Staff must have an active assignment to the event (not necessarily station/group)."""
+    await get_org_event(event_id, user)
+    if user["role"] in ADMIN_ROLES or user["role"] == "head_scout":
+        return
+    assigned = await db.evaluator_assignments.find_one({
+        "event_id": event_id, "organization_id": user["organization_id"],
+        "evaluator_id": user["id"],
+    })
+    if not assigned and user["role"] not in ("coach",):
+        # coaches without an assignment still need hand-off at camps — allow if on staff of org
+        # but evaluators must be assigned
+        if user["role"] == "evaluator":
+            raise HTTPException(status_code=403, detail="You are not assigned to this event.")
+    if user["role"] == "evaluator" and not assigned:
+        raise HTTPException(status_code=403, detail="You are not assigned to this event.")
+
+
 @router.get("/events/{event_id}/roster")
 async def event_roster(event_id: str, user=Depends(require_roles(*STAFF_ROLES))):
     await get_org_event(event_id, user)
-    entries = await db.event_athletes.find({"event_id": event_id}, {"_id": 0}).to_list(1000)
+    org = user["organization_id"]
+    entries = await db.event_athletes.find({"event_id": event_id, "organization_id": org}, {"_id": 0}).to_list(1000)
     athlete_ids = [e["athlete_id"] for e in entries]
-    athletes = await db.athletes.find({"id": {"$in": athlete_ids}}, {"_id": 0}).to_list(1000)
+    athletes = await db.athletes.find(
+        {"id": {"$in": athlete_ids}, "organization_id": org}, {"_id": 0}).to_list(1000)
     amap = {a["id"]: a for a in athletes}
-    groups = await db.event_groups.find({"event_id": event_id}, {"_id": 0}).to_list(100)
+    groups = await db.event_groups.find({"event_id": event_id, "organization_id": org}, {"_id": 0}).to_list(100)
     gmap = {g["id"]: g["name"] for g in groups}
     out = []
     for e in entries:
@@ -148,14 +173,79 @@ async def event_roster(event_id: str, user=Depends(require_roles(*STAFF_ROLES)))
             "preferred_name": a.get("preferred_name"), "photo_url": a.get("photo_url"),
             "age_group": a.get("age_group"), "primary_position": a.get("primary_position"),
             "current_team": a.get("current_team"), "group_name": gmap.get(e.get("group_id")),
+            "jersey_number": a.get("jersey_number"),
         })
     out.sort(key=lambda x: (x.get("last_name") or "", x.get("first_name") or ""))
     return out
 
 
+@router.get("/events/{event_id}/roster/search")
+async def roster_search(event_id: str, q: str = "", user=Depends(require_roles(*STAFF_ROLES))):
+    """Event-scoped athlete picker for hand-off evaluates (Task 2).
+
+    Caller must be staff with an assignment to the event. Returns identity + eval status
+    for the caller's stations when available.
+    """
+    await _require_event_assignment(event_id, user)
+    org = user["organization_id"]
+    entries = await db.event_athletes.find({"event_id": event_id, "organization_id": org}, {"_id": 0}).to_list(1000)
+    athlete_ids = [e["athlete_id"] for e in entries]
+    athletes = await db.athletes.find(
+        {"id": {"$in": athlete_ids}, "organization_id": org}, {"_id": 0}).to_list(1000)
+    amap = {a["id"]: a for a in athletes}
+    needle = (q or "").strip().lower()
+    # Evaluations for this event (any station) — surface status for the caller's stations
+    my_station_ids = []
+    my_assignments = await db.evaluator_assignments.find({
+        "event_id": event_id, "organization_id": org, "evaluator_id": user["id"],
+    }, {"_id": 0, "station_id": 1, "id": 1}).to_list(50)
+    my_station_ids = [a["station_id"] for a in my_assignments]
+    evals = await db.evaluations.find({
+        "event_id": event_id, "organization_id": org, "evaluator_id": user["id"],
+    }, {"_id": 0, "athlete_id": 1, "status": 1, "id": 1, "station_id": 1}).to_list(1000)
+    emap = {}
+    for ev in evals:
+        emap.setdefault(ev["athlete_id"], []).append(ev)
+
+    out = []
+    for e in entries:
+        a = amap.get(e["athlete_id"])
+        if not a:
+            continue
+        name = f"{a.get('first_name', '')} {a.get('last_name', '')}".strip()
+        jersey = a.get("jersey_number") or e.get("bib_number") or ""
+        if needle:
+            hay = f"{name} {jersey} {a.get('primary_position') or ''} {a.get('age_group') or ''}".lower()
+            if needle not in hay:
+                continue
+        my_evals = emap.get(a["id"]) or []
+        primary_ev = next((ev for ev in my_evals if ev.get("station_id") in my_station_ids), my_evals[0] if my_evals else None)
+        out.append({
+            "athlete_id": a["id"],
+            "first_name": a.get("first_name"),
+            "last_name": a.get("last_name"),
+            "jersey_number": a.get("jersey_number"),
+            "bib_number": e.get("bib_number"),
+            "age_group": a.get("age_group"),
+            "primary_position": a.get("primary_position"),
+            "roster_status": e.get("status"),
+            "evaluation_id": primary_ev["id"] if primary_ev else None,
+            "evaluation_status": primary_ev["status"] if primary_ev else "not_started",
+            "default_assignment_id": (my_assignments[0]["id"] if my_assignments else None),
+        })
+    out.sort(key=lambda x: (x.get("last_name") or "", x.get("first_name") or ""))
+    return out[:100]
+
+
 @router.post("/events/{event_id}/roster")
 async def add_to_roster(event_id: str, body: RosterBody, user=Depends(require_roles(*ADMIN_ROLES))):
     await get_org_event(event_id, user)
+    group_id = body.group_id or None
+    if group_id:
+        g = await db.event_groups.find_one({
+            "id": group_id, "event_id": event_id, "organization_id": user["organization_id"]})
+        if not g:
+            raise HTTPException(status_code=400, detail="That group is not on this event. Create it under Groups first.")
     added = 0
     for aid in body.athlete_ids:
         athlete = await db.athletes.find_one({"id": aid, "organization_id": user["organization_id"]})
@@ -167,19 +257,20 @@ async def add_to_roster(event_id: str, body: RosterBody, user=Depends(require_ro
         await db.event_athletes.insert_one({
             "id": new_id(), "organization_id": user["organization_id"],
             "event_id": event_id, "athlete_id": aid, "status": "registered",
-            "bib_number": None, "group_id": None, "late_arrival": False,
+            "bib_number": None, "group_id": group_id, "late_arrival": False,
             "flagged_incomplete": False, "walk_up": False,
             "created_at": now_iso(), "updated_at": now_iso(),
         })
         added += 1
-    await log_audit(user["organization_id"], user, "roster_updated", "event", event_id, {"added": added})
+    await log_audit(user["organization_id"], user, "roster_updated", "event", event_id, {"added": added, "group_id": group_id})
     return {"added": added, "message": f"Added {added} players to the event roster."}
 
 
 @router.delete("/events/{event_id}/roster/{athlete_id}")
 async def remove_from_roster(event_id: str, athlete_id: str, user=Depends(require_roles(*ADMIN_ROLES))):
     await get_org_event(event_id, user)
-    await db.event_athletes.delete_one({"event_id": event_id, "athlete_id": athlete_id})
+    await db.event_athletes.delete_one({
+        "event_id": event_id, "athlete_id": athlete_id, "organization_id": user["organization_id"]})
     await log_audit(user["organization_id"], user, "roster_player_removed", "event", event_id, {"athlete_id": athlete_id})
     return {"message": "Player removed from roster."}
 
@@ -187,21 +278,33 @@ async def remove_from_roster(event_id: str, athlete_id: str, user=Depends(requir
 @router.patch("/events/{event_id}/roster/{athlete_id}")
 async def update_checkin(event_id: str, athlete_id: str, body: CheckInBody, user=Depends(require_roles(*ADMIN_ROLES, "head_scout", "coach"))):
     await get_org_event(event_id, user)
-    entry = await db.event_athletes.find_one({"event_id": event_id, "athlete_id": athlete_id})
+    entry = await db.event_athletes.find_one({
+        "event_id": event_id, "athlete_id": athlete_id, "organization_id": user["organization_id"]})
     if not entry:
         raise HTTPException(status_code=404, detail="Player is not on this event roster.")
-    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    # exclude_unset so explicit null (e.g. clear group_id) is kept; omit untouched fields
+    updates = body.model_dump(exclude_unset=True)
     if "status" in updates and updates["status"] not in ("registered", "checked_in", "absent"):
         raise HTTPException(status_code=400, detail="Invalid check-in status.")
     if updates.get("status") == "checked_in":
         updates["checked_in_at"] = now_iso()
+    if "group_id" in updates and updates["group_id"]:
+        g = await db.event_groups.find_one({
+            "id": updates["group_id"], "event_id": event_id, "organization_id": user["organization_id"]})
+        if not g:
+            raise HTTPException(status_code=400, detail="That group is not on this event.")
+    if "group_id" in updates and updates["group_id"] == "":
+        updates["group_id"] = None
     if "bib_number" in updates:
         # ensure bib uniqueness within event
-        dup = await db.event_athletes.find_one({"event_id": event_id, "bib_number": updates["bib_number"], "athlete_id": {"$ne": athlete_id}})
+        dup = await db.event_athletes.find_one({
+            "event_id": event_id, "organization_id": user["organization_id"],
+            "bib_number": updates["bib_number"], "athlete_id": {"$ne": athlete_id}})
         if dup and updates["bib_number"]:
             raise HTTPException(status_code=400, detail=f"Bib #{updates['bib_number']} is already assigned to another player.")
     updates["updated_at"] = now_iso()
-    await db.event_athletes.update_one({"id": entry["id"]}, {"$set": updates})
+    await db.event_athletes.update_one(
+        {"id": entry["id"], "organization_id": user["organization_id"]}, {"$set": updates})
     await log_audit(user["organization_id"], user, "check_in_updated", "event_athlete", entry["id"], updates)
     return {"message": "Check-in updated."}
 
@@ -230,7 +333,8 @@ async def add_walk_up(event_id: str, body: WalkUpBody, user=Depends(require_role
         "weight": None, "jersey_number": None, "current_team": None, "school": None,
         "city": None, "state": None, "country": "USA", "guardian_name": None,
         "guardian_email": None, "guardian_phone": None, "emergency_contact": None,
-        "status": "active", "photo_url": None, "created_by": user["id"],
+        "status": "active", "photo_url": None, "shared_with_organizations": [],
+        "created_by": user["id"],
         "created_at": now_iso(), "updated_at": now_iso(),
     })
     await db.event_athletes.insert_one({
@@ -422,4 +526,147 @@ async def event_progress(event_id: str, user=Depends(require_roles(*ADMIN_ROLES,
         "evaluations_completed": total_done, "evaluations_expected": total_expected,
         "evaluations_remaining": max(0, total_expected - total_done),
         "station_progress": station_progress, "evaluator_progress": evaluator_progress,
+    }
+
+
+# ---------------- Event staff invite codes (redeem) ----------------
+
+import secrets as _secrets
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+
+class EventInviteBody(BaseModel):
+    email: str | None = None
+    role: str = "evaluator"  # evaluator | coach
+    station_id: str | None = None
+    ttl_hours: int = 48
+
+
+class RedeemBody(BaseModel):
+    code: str
+    email: str
+    full_name: str
+    password: str
+
+
+@router.post("/events/{event_id}/invites")
+async def create_event_invite(event_id: str, body: EventInviteBody, user=Depends(require_roles(*ADMIN_ROLES))):
+    await get_org_event(event_id, user)
+    if body.role not in ("evaluator", "coach"):
+        raise HTTPException(status_code=400, detail="role must be evaluator or coach")
+    code = _secrets.token_hex(3).upper()  # 6 hex chars
+    expires = (_dt.now(_tz.utc) + _td(hours=body.ttl_hours)).isoformat()
+    doc = {
+        "id": new_id(),
+        "organization_id": user["organization_id"],
+        "event_id": event_id,
+        "email": (body.email or "").lower() or None,
+        "role": body.role,
+        "station_id": body.station_id,
+        "code": code,
+        "invited_by": user["id"],
+        "invited_at": now_iso(),
+        "expires_at": expires,
+        "accepted_at": None,
+        "accepted_by_user_id": None,
+        "revoked": False,
+    }
+    await db.event_invites.insert_one(doc)
+    await log_audit(user["organization_id"], user, "event_invite_created", "event_invite", doc["id"],
+                    {"event_id": event_id, "role": body.role})
+    from notifications import notify
+    # optional: notify existing user by email match
+    if doc["email"]:
+        u = await db.users.find_one({"email": doc["email"]}, {"_id": 0, "id": 1})
+        if u:
+            await notify(u["id"], "event_invite", "Event invite code",
+                         f"Your code is {code}", {"event_id": event_id, "code": code})
+    return clean(doc)
+
+
+@router.get("/events/{event_id}/invites")
+async def list_event_invites(event_id: str, user=Depends(require_roles(*ADMIN_ROLES))):
+    await get_org_event(event_id, user)
+    return await db.event_invites.find(
+        {"event_id": event_id, "organization_id": user["organization_id"]}, {"_id": 0}
+    ).sort("invited_at", -1).to_list(100)
+
+
+@router.post("/events/invites/{invite_id}/revoke")
+async def revoke_event_invite(invite_id: str, user=Depends(require_roles(*ADMIN_ROLES))):
+    inv = await db.event_invites.find_one({"id": invite_id, "organization_id": user["organization_id"]})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invite not found.")
+    await db.event_invites.update_one({"id": invite_id}, {"$set": {"revoked": True}})
+    return {"message": "Invite revoked."}
+
+
+@router.post("/events/redeem")
+async def redeem_event_invite(body: RedeemBody):
+    """Public redeem — creates user membership + optional station assignment."""
+    from auth import hash_password
+    code = body.code.strip().upper()
+    inv = await db.event_invites.find_one({"code": code, "revoked": False})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invalid invite code.")
+    if inv.get("accepted_at"):
+        raise HTTPException(status_code=400, detail="This code was already used.")
+    try:
+        exp = _dt.fromisoformat(inv["expires_at"].replace("Z", "+00:00"))
+        if exp < _dt.now(_tz.utc):
+            raise HTTPException(status_code=400, detail="This invite code has expired.")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+    email = body.email.strip().lower()
+    if inv.get("email") and inv["email"] != email:
+        raise HTTPException(status_code=400, detail="This code was issued for a different email.")
+    if len(body.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+    org_id = inv["organization_id"]
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        uid = existing["id"]
+        mem = await db.memberships.find_one({"user_id": uid, "organization_id": org_id})
+        if not mem:
+            await db.memberships.insert_one({
+                "id": new_id(), "user_id": uid, "organization_id": org_id,
+                "role": inv["role"], "active": True, "created_at": now_iso(),
+            })
+        else:
+            await db.memberships.update_one({"id": mem["id"]}, {"$set": {"role": inv["role"], "active": True}})
+    else:
+        uid = new_id()
+        await db.users.insert_one({
+            "id": uid, "email": email, "full_name": body.full_name.strip(),
+            "password_hash": hash_password(body.password), "active": True,
+            "created_at": now_iso(), "updated_at": now_iso(),
+        })
+        await db.memberships.insert_one({
+            "id": new_id(), "user_id": uid, "organization_id": org_id,
+            "role": inv["role"], "active": True, "created_at": now_iso(),
+        })
+    if inv.get("station_id") and inv["role"] == "evaluator":
+        existing_a = await db.evaluator_assignments.find_one({
+            "event_id": inv["event_id"], "station_id": inv["station_id"], "evaluator_id": uid})
+        if not existing_a:
+            await db.evaluator_assignments.insert_one({
+                "id": new_id(), "organization_id": org_id, "event_id": inv["event_id"],
+                "station_id": inv["station_id"], "evaluator_id": uid, "group_ids": [],
+                "created_by": inv.get("invited_by"), "created_at": now_iso(), "updated_at": now_iso(),
+            })
+    await db.event_invites.update_one({"id": inv["id"]}, {"$set": {
+        "accepted_at": now_iso(), "accepted_by_user_id": uid,
+    }})
+    from auth import create_token
+    org = await db.organizations.find_one({"id": org_id}, {"_id": 0, "name": 1})
+    return {
+        "token": create_token(uid),
+        "user": {
+            "id": uid, "email": email, "full_name": body.full_name.strip(),
+            "role": inv["role"], "organization_id": org_id,
+            "organization_name": (org or {}).get("name"),
+        },
+        "event_id": inv["event_id"],
     }

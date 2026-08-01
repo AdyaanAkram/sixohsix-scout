@@ -14,6 +14,18 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { CalendarDays, MapPin, Plus, Users, UserCog, ChevronRight } from "lucide-react";
 
+const EVENT_TYPES = [
+  "Evaluation",
+  "Camp",
+  "Clinic",
+  "Coaching Clinic",
+  "Travel",
+  "High School",
+  "Middle School",
+  "Showcase",
+  "Private Lesson Block",
+];
+
 const CreateEventDialog = ({ onCreated }) => {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -42,12 +54,12 @@ const CreateEventDialog = ({ onCreated }) => {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="rounded-xl bg-[#0B1E3A] hover:bg-[#102A4F] h-11" data-testid="create-event-button">
+        <Button className="rounded-xl bg-primary hover:bg-brand-secondary h-11" data-testid="create-event-button">
           <Plus className="h-4 w-4 mr-1" /> Create Event
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-md rounded-2xl">
-        <DialogHeader><DialogTitle className="font-display text-2xl text-[#0B1E3A]">Create Evaluation Event</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Create Evaluation Event</DialogTitle></DialogHeader>
         <form onSubmit={submit} className="space-y-3">
           <div className="space-y-1">
             <Label className="text-xs">Event name *</Label>
@@ -60,7 +72,14 @@ const CreateEventDialog = ({ onCreated }) => {
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Event type</Label>
-              <Input value={form.event_type} onChange={set("event_type")} className="h-10 rounded-lg" />
+              <select
+                value={form.event_type}
+                onChange={set("event_type")}
+                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
+                data-testid="event-type-select"
+              >
+                {EVENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Start time</Label>
@@ -84,7 +103,7 @@ const CreateEventDialog = ({ onCreated }) => {
             <Textarea value={form.description} onChange={set("description")} className="rounded-lg" rows={2} />
           </div>
           <DialogFooter>
-            <Button type="submit" disabled={busy} className="w-full h-11 rounded-xl bg-[#0B1E3A] hover:bg-[#102A4F]" data-testid="event-create-submit-button">
+            <Button type="submit" disabled={busy} className="w-full h-11 rounded-xl bg-primary hover:bg-brand-secondary" data-testid="event-create-submit-button">
               {busy ? "Creating…" : "Create Event"}
             </Button>
           </DialogFooter>
@@ -104,14 +123,14 @@ export default function EventsList() {
     setLoading(true);
     api.get("/events").then((r) => setEvents(r.data)).finally(() => setLoading(false));
   };
-  useEffect(load, []);
+  useEffect(() => { load(); }, []);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-display text-4xl text-[#0B1E3A]">Evaluation Events</h1>
-          <p className="text-sm text-slate-500">Organize and run player evaluation days.</p>
+          <h1 className="font-display text-4xl text-foreground">Evaluation Events</h1>
+          <p className="text-sm text-muted-foreground">Organize and run player evaluation days.</p>
         </div>
         {isAdmin && <CreateEventDialog onCreated={load} />}
       </div>
@@ -124,20 +143,20 @@ export default function EventsList() {
         <div className="grid gap-3 md:grid-cols-2">
           {events.map((ev) => (
             <Link key={ev.id} to={`/events/${ev.id}`} data-testid={`event-card-${ev.id}`}>
-              <Card className="rounded-2xl card-shadow border-[#E7E1D6] hover:shadow-lg transition-shadow h-full">
+              <Card className="rounded-2xl border-border hover:border-brand/50 transition-colors h-full">
                 <CardContent className="pt-5 pb-5">
                   <div className="flex items-start justify-between gap-2">
-                    <p className="font-display text-2xl text-[#0B1E3A] leading-tight">{ev.name}</p>
+                    <p className="font-display text-2xl text-foreground leading-tight">{ev.name}</p>
                     <StatusBadge status={ev.status} />
                   </div>
-                  <div className="mt-2 space-y-1 text-sm text-slate-600">
-                    <p className="flex items-center gap-1.5"><CalendarDays className="h-4 w-4 text-slate-400" /> {ev.date} {ev.start_time && `· ${ev.start_time}–${ev.end_time}`}</p>
-                    {ev.location && <p className="flex items-center gap-1.5"><MapPin className="h-4 w-4 text-slate-400" /> {ev.location}</p>}
+                  <div className="mt-2 space-y-1 text-sm text-muted-foreground">
+                    <p className="flex items-center gap-1.5"><CalendarDays className="h-4 w-4 text-muted-foreground" /> {ev.date} {ev.start_time && `· ${ev.start_time}–${ev.end_time}`}</p>
+                    {ev.location && <p className="flex items-center gap-1.5"><MapPin className="h-4 w-4 text-muted-foreground" /> {ev.location}</p>}
                   </div>
-                  <div className="mt-3 flex items-center gap-4 text-xs text-slate-500">
+                  <div className="mt-3 flex items-center gap-4 text-xs text-muted-foreground">
                     <span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" /> {ev.player_count} players</span>
                     <span className="inline-flex items-center gap-1"><UserCog className="h-3.5 w-3.5" /> {ev.evaluator_count} evaluators</span>
-                    <span className="ml-auto inline-flex items-center gap-0.5 text-[#1F4AA8] font-medium">Open <ChevronRight className="h-3.5 w-3.5" /></span>
+                    <span className="ml-auto inline-flex items-center gap-0.5 text-info font-medium">Open <ChevronRight className="h-3.5 w-3.5" /></span>
                   </div>
                 </CardContent>
               </Card>

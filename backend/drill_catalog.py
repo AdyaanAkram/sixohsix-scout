@@ -1,0 +1,66 @@
+"""Default drill taxonomy (ported from Velo DRILL_LIBRARY) for org seeding."""
+
+DEFAULT_DRILLS = [
+    # SS
+    {"key": "ss_glove", "positions": ["SS"], "name": "Glove Side Rangers", "category": "defense",
+     "description": "Balls to glove side, quick release.", "metric_tags": ["throwing_velo"]},
+    {"key": "ss_backhand", "positions": ["SS"], "name": "Deep Backhand", "category": "defense",
+     "description": "Backhand plays with arm across body.", "metric_tags": []},
+    {"key": "ss_run", "positions": ["SS"], "name": "Off-the-Run Charge", "category": "defense",
+     "description": "Slow rollers, barehand + throw.", "metric_tags": ["sixty_yd"]},
+    {"key": "ss_dp", "positions": ["SS"], "name": "Double Play Pivot", "category": "defense",
+     "description": "Feed from 2B, pivot & throw to 1B.", "metric_tags": []},
+    # 2B
+    {"key": "2b_dp", "positions": ["2B"], "name": "Double Play Feed", "category": "defense",
+     "description": "Underhand + jump-pivot feeds to SS.", "metric_tags": []},
+    {"key": "2b_back", "positions": ["2B"], "name": "Backhand Range", "category": "defense",
+     "description": "Backhand behind the bag.", "metric_tags": []},
+    # 3B
+    {"key": "3b_line", "positions": ["3B"], "name": "Line Drive Reaction", "category": "defense",
+     "description": "Reaction to hot corner smashes.", "metric_tags": []},
+    {"key": "3b_slow", "positions": ["3B"], "name": "Slow Roller Charge", "category": "defense",
+     "description": "Barehand + throw on the run.", "metric_tags": ["sixty_yd"]},
+    # 1B
+    {"key": "1b_pick", "positions": ["1B"], "name": "Short-Hop Pick", "category": "defense",
+     "description": "Pick throws in the dirt.", "metric_tags": []},
+    {"key": "1b_hold", "positions": ["1B"], "name": "Hold + Range", "category": "defense",
+     "description": "Hold runner, then range for grounders.", "metric_tags": []},
+    # OF
+    {"key": "of_route", "positions": ["LF", "CF", "RF", "OF"], "name": "Route Efficiency", "category": "defense",
+     "description": "First-step reads on fly balls.", "metric_tags": ["sixty_yd"]},
+    {"key": "of_arm", "positions": ["LF", "CF", "RF", "OF"], "name": "Long Toss + Cutoff", "category": "defense",
+     "description": "One-hop to plate + hit cutoff.", "metric_tags": ["throwing_velo"]},
+    {"key": "of_wall", "positions": ["LF", "CF", "RF", "OF"], "name": "Wall Read", "category": "defense",
+     "description": "Playing balls off the wall.", "metric_tags": []},
+    # C
+    {"key": "c_block", "positions": ["C"], "name": "Blocking Series", "category": "catching",
+     "description": "10 balls in the dirt.", "metric_tags": []},
+    {"key": "c_pop", "positions": ["C"], "name": "Pop Time to 2B", "category": "catching",
+     "description": "Timed pop time throws.", "metric_tags": ["pop_time", "throwing_velo"]},
+    {"key": "c_frame", "positions": ["C"], "name": "Framing Grid", "category": "catching",
+     "description": "9-zone frame + present.", "metric_tags": []},
+    # P
+    {"key": "p_fb", "positions": ["P", "RHP", "LHP"], "name": "Fastball Command", "category": "pitching",
+     "description": "Arm-side / glove-side corners.", "metric_tags": ["pitch_velo"]},
+    {"key": "p_break", "positions": ["P", "RHP", "LHP"], "name": "Breaking Ball Zone", "category": "pitching",
+     "description": "Strike / chase / bury.", "metric_tags": []},
+    {"key": "p_pfp", "positions": ["P", "RHP", "LHP"], "name": "PFP Comebackers", "category": "pitching",
+     "description": "Field position + throws to 1B.", "metric_tags": []},
+    {"key": "p_pickoff", "positions": ["LHP", "P"], "name": "Pickoff Move", "category": "pitching",
+     "description": "Quick pickoffs to 1B.", "metric_tags": []},
+    # ATH / HIT
+    {"key": "ath_60", "positions": ["ATH"], "name": "60 Yard Dash", "category": "athleticism",
+     "description": "Timed sprint.", "metric_tags": ["sixty_yd"]},
+    {"key": "ath_vj", "positions": ["ATH"], "name": "Vertical Jump", "category": "athleticism",
+     "description": "Standing vertical.", "metric_tags": ["vertical_jump"]},
+    {"key": "ath_agility", "positions": ["ATH"], "name": "5-10-5 Pro Agility", "category": "athleticism",
+     "description": "Change of direction test.", "metric_tags": ["ten_yd"]},
+    {"key": "h_tee", "positions": ["HIT"], "name": "Tee High/Low", "category": "hitting",
+     "description": "Alternating high/low tee for plane.", "metric_tags": ["exit_velo", "bat_speed"]},
+    {"key": "h_soft", "positions": ["HIT"], "name": "Front Toss Approach", "category": "hitting",
+     "description": "Take/swing on approach zones.", "metric_tags": []},
+    {"key": "h_bp", "positions": ["HIT"], "name": "Live BP Rounds", "category": "hitting",
+     "description": "Contact / gap / drive.", "metric_tags": ["exit_velo"]},
+    {"key": "h_ev", "positions": ["HIT"], "name": "Exit Velo Cage", "category": "hitting",
+     "description": "Timed exit velo off tee.", "metric_tags": ["exit_velo", "bat_speed"]},
+]
