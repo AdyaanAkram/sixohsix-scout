@@ -19,7 +19,7 @@ async def ensure_indexes() -> None:
         ("evaluations", [("organization_id", 1), ("athlete_id", 1), ("status", 1)]),
         ("evaluations", [("organization_id", 1), ("event_id", 1), ("station_id", 1)]),
         ("memberships", [("user_id", 1), ("active", 1)]),
-        ("memberships", [("organization_id", 1), ("user_id", 1)]),
+        ("memberships", [("organization_id", 1), ("user_id", 1)], {"unique": True}),
         ("invitations", [("token", 1)], {"unique": True}),
         ("invitations", [("organization_id", 1), ("status", 1)]),
         ("audit_logs", [("organization_id", 1), ("created_at", -1)]),

@@ -124,6 +124,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
     allow_origins=settings.cors_origins,
+    # Demo / preview hosts (Surge + Cloudflare quick tunnels)
+    allow_origin_regex=r"https://.*\.(surge\.sh|trycloudflare\.com)",
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
     expose_headers=["X-Request-ID"],

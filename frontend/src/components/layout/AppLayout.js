@@ -6,10 +6,15 @@ import {
   LayoutDashboard, CalendarDays, Users, ClipboardList, BarChart3, TrendingUp,
   UserCog, FileSpreadsheet, Settings, LogOut, Home, ClipboardCheck,
   MoreHorizontal, ScrollText, ShieldCheck, IdCard, CalendarRange, Bell, Dumbbell,
+  ChevronsUpDown, Building2, Check,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const NAV_BY_ROLE = {
   owner: ["dashboard", "programs", "events", "players", "review", "reports", "development", "staff", "templates", "drills", "audit", "settings"],
@@ -23,8 +28,8 @@ const NAV_BY_ROLE = {
 
 const NAV_ITEMS = {
   dashboard: { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  programs: { to: "/programs", label: "Programs", icon: CalendarRange },
-  events: { to: "/events", label: "Events", icon: CalendarDays },
+  programs: { to: "/programs", label: "Programs", icon: CalendarRange }, // long-term
+  events: { to: "/events", label: "Events", icon: CalendarDays }, // short-term camps/clinics
   players: { to: "/players", label: "Players", icon: Users },
   evaluate: { to: "/evaluate", label: "Evaluate", icon: ClipboardCheck },
   "my-evaluations": { to: "/my-evaluations", label: "My Evaluations", icon: ClipboardList },
@@ -109,6 +114,89 @@ const STAFF_ONLY_PREFIXES = [
   "/staff", "/templates", "/drills", "/audit-log", "/development", "/my-evaluations", "/programs",
 ];
 
+const OrgSwitcher = ({ compact }) => {
+  const { user, switchOrganization } = useAuth();
+  const [orgs, setOrgs] = useState(user?.memberships || []);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api.get("/auth/memberships")
+      .then((r) => setOrgs(r.data || []))
+      .catch(() => setOrgs(user?.memberships || []));
+  }, [user?.organization_id, user?.memberships]);
+
+  const multi = (orgs || []).length > 1;
+  if (!user) return null;
+
+  if (!multi) {
+    return (
+      <div className={cn("px-3 py-2 rounded-xl bg-secondary/60 border border-border", compact && "py-1.5")}>
+        <p className="text-[10px] uppercase tracking-wide text-muted-foreground flex items-center gap-1">
+          <Building2 className="h-3 w-3" /> Organization
+        </p>
+        <p className="text-sm font-semibold text-foreground truncate" data-testid="current-org-name">
+          {user.organization_name || "—"}
+        </p>
+      </div>
+    );
+  }
+
+  const onSwitch = async (orgId) => {
+    if (orgId === user.organization_id || busy) return;
+    setBusy(true);
+    try {
+      await switchOrganization(orgId);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          disabled={busy}
+          data-testid="org-switcher-button"
+          className={cn(
+            "w-full flex items-center gap-2 rounded-xl border border-border bg-secondary/60 px-3 py-2 text-left hover:bg-secondary transition",
+            compact && "w-auto max-w-[180px]"
+          )}
+        >
+          <Building2 className="h-4 w-4 text-brand shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Organization</p>
+            <p className="text-sm font-semibold text-foreground truncate">{user.organization_name}</p>
+          </div>
+          <ChevronsUpDown className="h-4 w-4 text-muted-foreground shrink-0" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-72">
+        <DropdownMenuLabel>Switch organization</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {orgs.map((o) => (
+          <DropdownMenuItem
+            key={o.organization_id}
+            data-testid={`org-switch-${o.organization_id}`}
+            onClick={() => onSwitch(o.organization_id)}
+            className="flex items-start gap-2 cursor-pointer"
+          >
+            <Check className={cn("h-4 w-4 mt-0.5", (o.is_current || o.active || o.organization_id === user.organization_id) ? "opacity-100 text-brand" : "opacity-0")} />
+            <div className="min-w-0">
+              <p className="font-semibold truncate">{o.organization_name}</p>
+              <p className="text-[11px] text-muted-foreground capitalize">
+                {o.role?.replace("_", " ")}
+                {typeof o.athlete_count === "number" && ` · ${o.athlete_count} athletes`}
+                {typeof o.event_count === "number" && ` · ${o.event_count} events`}
+              </p>
+            </div>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
+
 export const AppLayout = ({ children }) => {
   const { user, logout } = useAuth();
   const [moreOpen, setMoreOpen] = useState(false);
@@ -155,8 +243,9 @@ export const AppLayout = ({ children }) => {
     <div className="min-h-screen bg-background">
       {/* Desktop sidebar ≥768px */}
       <aside className={cn("hidden md:flex fixed inset-y-0 left-0 w-[268px] flex-col border-r border-border bg-surface-2 z-40", focusMode && "md:hidden")} data-testid="desktop-sidebar-nav">
-        <div className="px-5 py-5 border-b border-divider">
+        <div className="px-5 py-5 border-b border-divider space-y-3">
           <Logo orgName={user?.organization_name} />
+          <OrgSwitcher />
         </div>
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {navKeys.map((k) => (
@@ -202,9 +291,11 @@ export const AppLayout = ({ children }) => {
       {/* Mobile top bar — glass (hidden in evaluation focus mode) */}
       {!focusMode && (
         <header className="md:hidden sticky top-0 z-40 glass-bar border-b">
-          <div className="flex items-center justify-between px-4 h-14">
-            <Logo orgName={user?.organization_name} />
-            <div className="flex items-center gap-1">
+          <div className="flex items-center justify-between px-4 h-14 gap-2">
+            <div className="min-w-0 flex-1">
+              <OrgSwitcher compact />
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
               <Button variant="ghost" size="icon" onClick={openNotifs} data-testid="mobile-notifications-button" className="relative">
                 <Bell className="h-4 w-4 text-muted-foreground" />
                 {unread > 0 && <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-brand" />}

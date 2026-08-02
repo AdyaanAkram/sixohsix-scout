@@ -16,6 +16,7 @@ from scoring import compute_evaluation_scores
 random.seed(42)
 
 ORG_ID = "org-pbg-midwest"
+ORG_SOUTH_ID = "org-pbg-south"
 
 STAFF = [
     {"email": "owner@pbgscout.com", "name": "Marco Villanueva", "role": "owner"},
@@ -63,7 +64,8 @@ async def wipe():
                  "evaluations", "athlete_notes", "athlete_goals", "athlete_media",
                  "metric_benchmarks", "audit_logs", "invitations", "password_resets", "ai_drafts",
                  "verified_metrics", "milestones", "notifications", "awards", "drills",
-                 "development_plans", "event_invites"]:
+                 "development_plans", "event_invites",
+                 "programs", "sessions", "enrollments", "attendance", "locations"]:
         await db[coll].delete_many({})
 
 
@@ -97,6 +99,7 @@ async def main():
         await db.users.insert_one({
             "id": uid, "email": s["email"], "full_name": s["name"],
             "password_hash": pw, "active": True,
+            "active_organization_id": ORG_ID,
             "created_at": now_iso(), "updated_at": now_iso(),
         })
         await db.memberships.insert_one({
@@ -525,11 +528,71 @@ async def main():
         "detail": "82.5 mph", "created_at": now_iso(),
     })
 
+    # ---- Second org (owner can switch) — own athletes / events / programs ----
+    await db.organizations.insert_one({
+        "id": ORG_SOUTH_ID, "name": "PBG South",
+        "full_name": "Philippines Baseball Group South Texas",
+        "tagline": "Identify. Evaluate. Develop. Connect.",
+        "contact_email": "south@pbgscout.com",
+        "feature_flags": {"athlete_portal": True, "parent_portal": True, "ai_features": False},
+        "created_at": now_iso(), "updated_at": now_iso(),
+    })
+    owner_uid = user_ids["owner@pbgscout.com"]
+    await db.memberships.insert_one({
+        "id": new_id(), "user_id": owner_uid, "organization_id": ORG_SOUTH_ID,
+        "role": "owner", "active": True, "created_at": now_iso(),
+    })
+    # Dedicated south coach (single-org) so lists stay distinct
+    south_coach = new_id()
+    await db.users.insert_one({
+        "id": south_coach, "email": "coach.south@pbgscout.com", "full_name": "Luis Navarro",
+        "password_hash": pw, "active": True, "active_organization_id": ORG_SOUTH_ID,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    })
+    await db.memberships.insert_one({
+        "id": new_id(), "user_id": south_coach, "organization_id": ORG_SOUTH_ID,
+        "role": "coach", "active": True, "created_at": now_iso(),
+    })
+    south_athletes = []
+    for i in range(6):
+        a = {
+            "id": new_id(), "organization_id": ORG_SOUTH_ID,
+            "first_name": FIRST_NAMES[20 + i], "last_name": LAST_NAMES[20 + i],
+            "date_of_birth": dob_for_age(12), "age": 12, "age_group": "12U",
+            "primary_position": random.choice(POSITIONS), "secondary_positions": [],
+            "bats": "R", "throws": "R", "status": "active",
+            "city": "Houston", "state": "TX", "country": "USA",
+            "current_team": "Houston Islanders",
+            "shared_with_organizations": [],
+            "created_at": now_iso(), "updated_at": now_iso(),
+        }
+        south_athletes.append(a)
+        await db.athletes.insert_one(a)
+    south_event = new_id()
+    await db.events.insert_one({
+        "id": south_event, "organization_id": ORG_SOUTH_ID,
+        "name": "PBG South Summer Clinic", "event_type": "Clinic",
+        "date": "2026-08-22", "start_time": "09:00", "end_time": "14:00",
+        "location": "Houston Sports Complex", "status": "Registration Open",
+        "age_groups": ["12U"], "description": "Short-term clinic for South org.",
+        "created_at": now_iso(), "updated_at": now_iso(),
+    })
+    await db.programs.insert_one({
+        "id": new_id(), "organization_id": ORG_SOUTH_ID,
+        "name": "South Year-Round Development", "type": "training_block",
+        "status": "open", "start_date": "2026-09-01", "end_date": "2027-05-31",
+        "description": "Long-term program for PBG South athletes.",
+        "created_at": now_iso(), "updated_at": now_iso(),
+    })
+    from routes_drills import ensure_org_drills as _ensure_south
+    await _ensure_south(ORG_SOUTH_ID)
+
     print("Seed complete.")
     print(f"  Drills seeded: {drill_n}")
     print(f"  Org: PBG Midwest ({ORG_ID})")
-    print(f"  Staff: {len(STAFF)} (password: {PASSWORD})")
-    print(f"  Athletes: {len(athletes)}")
+    print(f"  Org: PBG South ({ORG_SOUTH_ID}) — owner can switch")
+    print(f"  Staff: {len(STAFF)} + coach.south@pbgscout.com (password: {PASSWORD})")
+    print(f"  Athletes: {len(athletes)} Midwest + {len(south_athletes)} South")
     print(f"  Event: PBG Midwest Spring Evaluation Camp ({event_id})")
     print(f"  Stations: {len(station_defs)}, Groups: 3, Templates: {len(all_templates)}")
     print(f"  Evaluations: {submitted_count} submitted/approved, {draft_count} drafts")

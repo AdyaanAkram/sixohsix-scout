@@ -19,5 +19,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS http://127.0.0.1:8000/ready || exit 1
 
-# 2 workers for camp concurrency; scale replicas horizontally in cloud
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# Render/Koyeb set PORT; default 8000 for local/compose/Fly
+CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --proxy-headers --forwarded-allow-ips '*'"]

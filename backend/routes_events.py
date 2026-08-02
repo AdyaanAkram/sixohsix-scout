@@ -660,9 +660,11 @@ async def redeem_event_invite(body: RedeemBody):
         "accepted_at": now_iso(), "accepted_by_user_id": uid,
     }})
     from auth import create_token
+    await db.users.update_one(
+        {"id": uid}, {"$set": {"active_organization_id": org_id, "updated_at": now_iso()}})
     org = await db.organizations.find_one({"id": org_id}, {"_id": 0, "name": 1})
     return {
-        "token": create_token(uid),
+        "token": create_token(uid, org_id),
         "user": {
             "id": uid, "email": email, "full_name": body.full_name.strip(),
             "role": inv["role"], "organization_id": org_id,

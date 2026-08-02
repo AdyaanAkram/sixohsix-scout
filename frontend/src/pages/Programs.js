@@ -64,7 +64,9 @@ export default function Programs() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-display text-4xl text-foreground">Programs</h1>
-          <p className="text-sm text-muted-foreground">Camps, clinics, and training blocks — the year-round chassis.</p>
+          <p className="text-sm text-muted-foreground">
+            Long-term training for this organization — seasons, blocks, and ongoing development (not one-day camps).
+          </p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>

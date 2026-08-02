@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr, Field
 
 from auth import (ADMIN_ROLES, create_token, get_current_user, hash_password,
-                  rate_limit, require_roles, verify_password)
+                  rate_limit, require_roles, resolve_membership, verify_password)
 from config import settings
 from db import clean, db, log_audit, new_id, now_iso
 from mailer import send_template
@@ -18,6 +18,11 @@ ACTIVE_ROLES = ["owner", "admin", "head_scout", "coach", "evaluator"]
 class LoginBody(BaseModel):
     email: EmailStr
     password: str
+    organization_id: str | None = None
+
+
+class SwitchOrgBody(BaseModel):
+    organization_id: str
 
 
 class ForgotBody(BaseModel):
@@ -46,6 +51,34 @@ class UpdateStaffBody(BaseModel):
     full_name: str | None = None
 
 
+async def _user_payload(user_doc: dict, membership: dict) -> dict:
+    org = await db.organizations.find_one({"id": membership["organization_id"]}, {"_id": 0})
+    memberships = await db.memberships.find(
+        {"user_id": user_doc["id"], "active": True}, {"_id": 0}
+    ).to_list(100)
+    org_ids = [m["organization_id"] for m in memberships]
+    orgs = await db.organizations.find({"id": {"$in": org_ids}}, {"_id": 0, "id": 1, "name": 1, "tagline": 1}).to_list(100)
+    omap = {o["id"]: o for o in orgs}
+    return {
+        "id": user_doc["id"],
+        "email": user_doc["email"],
+        "full_name": user_doc.get("full_name"),
+        "role": membership["role"],
+        "organization_id": membership["organization_id"],
+        "organization_name": (org or {}).get("name"),
+        "organization_tagline": (org or {}).get("tagline"),
+        "memberships": [
+            {
+                "organization_id": m["organization_id"],
+                "organization_name": (omap.get(m["organization_id"]) or {}).get("name"),
+                "role": m["role"],
+                "active": m.get("organization_id") == membership["organization_id"],
+            }
+            for m in memberships
+        ],
+    }
+
+
 @router.post("/auth/login")
 async def login(body: LoginBody, request: Request):
     rate_limit(f"login:{request.client.host if request.client else 'x'}", 15, 60)
@@ -54,31 +87,82 @@ async def login(body: LoginBody, request: Request):
         raise HTTPException(status_code=401, detail="Invalid email or password.")
     if not user.get("active", True):
         raise HTTPException(status_code=403, detail="This account has been deactivated.")
-    membership = await db.memberships.find_one({"user_id": user["id"], "active": True}, {"_id": 0})
+    membership = await resolve_membership(user["id"], body.organization_id)
     if not membership:
         raise HTTPException(status_code=403, detail="No active organization membership.")
-    # Athletes and guardians land on My ID (client route guard).
-    token = create_token(user["id"])
-    org = await db.organizations.find_one({"id": membership["organization_id"]}, {"_id": 0})
-    await log_audit(membership["organization_id"], {"id": user["id"], "full_name": user.get("full_name"), "role": membership["role"]}, "login", "user", user["id"])
-    return {
-        "token": token,
-        "user": {
-            "id": user["id"],
-            "email": user["email"],
-            "full_name": user.get("full_name"),
-            "role": membership["role"],
-            "organization_id": membership["organization_id"],
-            "organization_name": org.get("name") if org else None,
-        },
-    }
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"active_organization_id": membership["organization_id"], "updated_at": now_iso()}},
+    )
+    token = create_token(user["id"], membership["organization_id"])
+    await log_audit(
+        membership["organization_id"],
+        {"id": user["id"], "full_name": user.get("full_name"), "role": membership["role"]},
+        "login", "user", user["id"],
+    )
+    return {"token": token, "user": await _user_payload(user, membership)}
 
 
 @router.get("/auth/me")
 async def me(user=Depends(get_current_user)):
-    org = await db.organizations.find_one({"id": user["organization_id"]}, {"_id": 0})
-    user["organization_name"] = org.get("name") if org else None
-    return clean(user)
+    membership = await db.memberships.find_one({
+        "user_id": user["id"], "organization_id": user["organization_id"], "active": True,
+    }, {"_id": 0})
+    if not membership:
+        raise HTTPException(status_code=403, detail="No active organization membership.")
+    full = await db.users.find_one({"id": user["id"]}, {"_id": 0, "password_hash": 0})
+    return await _user_payload(full or user, membership)
+
+
+@router.get("/auth/memberships")
+async def list_memberships(user=Depends(get_current_user)):
+    """Organizations this user can enter — each with own athletes, staff, programs, events."""
+    memberships = await db.memberships.find(
+        {"user_id": user["id"], "active": True}, {"_id": 0}
+    ).sort("created_at", 1).to_list(100)
+    org_ids = [m["organization_id"] for m in memberships]
+    orgs = await db.organizations.find({"id": {"$in": org_ids}}, {"_id": 0}).to_list(100)
+    omap = {o["id"]: o for o in orgs}
+    out = []
+    for m in memberships:
+        o = omap.get(m["organization_id"]) or {}
+        n_athletes = await db.athletes.count_documents({"organization_id": m["organization_id"], "status": "active"})
+        n_events = await db.events.count_documents({"organization_id": m["organization_id"]})
+        n_programs = await db.programs.count_documents({"organization_id": m["organization_id"]})
+        out.append({
+            "organization_id": m["organization_id"],
+            "organization_name": o.get("name"),
+            "tagline": o.get("tagline"),
+            "role": m["role"],
+            "is_current": m["organization_id"] == user["organization_id"],
+            "athlete_count": n_athletes,
+            "event_count": n_events,
+            "program_count": n_programs,
+        })
+    return out
+
+
+@router.post("/auth/switch-organization")
+async def switch_organization(body: SwitchOrgBody, user=Depends(get_current_user)):
+    membership = await db.memberships.find_one({
+        "user_id": user["id"],
+        "organization_id": body.organization_id,
+        "active": True,
+    }, {"_id": 0})
+    if not membership:
+        raise HTTPException(status_code=403, detail="You are not a member of that organization.")
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"active_organization_id": body.organization_id, "updated_at": now_iso()}},
+    )
+    token = create_token(user["id"], body.organization_id)
+    full = await db.users.find_one({"id": user["id"]}, {"_id": 0, "password_hash": 0})
+    await log_audit(
+        body.organization_id,
+        {"id": user["id"], "full_name": user.get("full_name"), "role": membership["role"]},
+        "switch_organization", "organization", body.organization_id,
+    )
+    return {"token": token, "user": await _user_payload(full or user, membership)}
 
 
 @router.post("/auth/forgot-password")
@@ -224,6 +308,7 @@ async def accept_invitation(body: AcceptInviteBody):
     await db.users.insert_one({
         "id": uid, "email": inv["email"], "full_name": inv["full_name"],
         "password_hash": hash_password(body.password), "active": True,
+        "active_organization_id": inv["organization_id"],
         "created_at": now_iso(), "updated_at": now_iso(),
     })
     await db.memberships.insert_one({
@@ -243,7 +328,7 @@ async def accept_invitation(body: AcceptInviteBody):
                 {"$set": {"guardian_user_id": uid, "self_service_enabled": True, "updated_at": now_iso()}})
     await db.invitations.update_one({"id": inv["id"]}, {"$set": {"status": "accepted", "accepted_at": now_iso()}})
     await log_audit(inv["organization_id"], None, "invite_accepted", "user", uid, {"email": inv["email"], "role": inv["role"]})
-    token = create_token(uid)
+    token = create_token(uid, inv["organization_id"])
     org = await db.organizations.find_one({"id": inv["organization_id"]}, {"_id": 0})
     return {
         "token": token,
@@ -252,6 +337,12 @@ async def accept_invitation(body: AcceptInviteBody):
             "role": inv["role"], "organization_id": inv["organization_id"],
             "organization_name": org.get("name") if org else None,
             "athlete_id": inv.get("athlete_id"),
+            "memberships": [{
+                "organization_id": inv["organization_id"],
+                "organization_name": org.get("name") if org else None,
+                "role": inv["role"],
+                "active": True,
+            }],
         },
     }
 

@@ -40,30 +40,53 @@ def verify_password(password: str, hashed: str) -> bool:
         return False
 
 
-def create_token(user_id: str) -> str:
+def create_token(user_id: str, organization_id: str | None = None) -> str:
     payload = {"sub": user_id, "exp": int(time.time()) + TOKEN_TTL_SECONDS, "iat": int(time.time())}
+    if organization_id:
+        payload["org"] = organization_id
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
 
 
-def decode_token(token: str) -> str:
+def decode_token(token: str) -> dict:
+    """Return JWT payload with at least `sub`. Raises 401 on failure."""
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
-        return payload["sub"]
+        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Session expired. Please sign in again.")
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid authentication token.")
 
 
-async def _load_user(user_id: str):
+async def resolve_membership(user_id: str, preferred_org_id: str | None = None):
+    """Pick active membership: preferred → user.active_organization_id → first by created_at."""
+    memberships = await db.memberships.find(
+        {"user_id": user_id, "active": True}, {"_id": 0}
+    ).sort("created_at", 1).to_list(100)
+    if not memberships:
+        return None
+    if preferred_org_id:
+        hit = next((m for m in memberships if m["organization_id"] == preferred_org_id), None)
+        if hit:
+            return hit
+    user = await db.users.find_one({"id": user_id}, {"_id": 0, "active_organization_id": 1})
+    preferred = (user or {}).get("active_organization_id")
+    if preferred:
+        hit = next((m for m in memberships if m["organization_id"] == preferred), None)
+        if hit:
+            return hit
+    return memberships[0]
+
+
+async def _load_user(user_id: str, organization_id: str | None = None):
     user = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
     if not user or not user.get("active", True):
         raise HTTPException(status_code=401, detail="Account not found or deactivated.")
-    membership = await db.memberships.find_one({"user_id": user_id, "active": True}, {"_id": 0})
+    membership = await resolve_membership(user_id, organization_id)
     if not membership:
         raise HTTPException(status_code=403, detail="No active organization membership.")
     user["role"] = membership["role"]
     user["organization_id"] = membership["organization_id"]
+    user["membership_id"] = membership.get("id")
     return user
 
 
@@ -76,8 +99,12 @@ async def get_current_user(request: Request, credentials: HTTPAuthorizationCrede
         token = request.query_params.get("token")
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated.")
-    user_id = decode_token(token)
-    return await _load_user(user_id)
+    payload = decode_token(token)
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid authentication token.")
+    org_id = payload.get("org")
+    return await _load_user(user_id, org_id)
 
 
 def require_roles(*roles):

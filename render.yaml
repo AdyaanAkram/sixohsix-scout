@@ -1,0 +1,31 @@
+# Free Render web service — spins down when idle (cold start ~30–60s).
+# https://dashboard.render.com → New → Blueprint → this repo
+services:
+  - type: web
+    name: sixohsix-scout-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    healthCheckPath: /ready
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DEMO_HOSTING
+        value: "1"
+      - key: MAIL_PROVIDER
+        value: stdout
+      - key: MAIL_FROM
+        value: noreply@606athletics.demo
+      - key: STORAGE_BACKEND
+        value: local
+      - key: DB_NAME
+        value: pbg_scout
+      - key: CORS_ORIGINS
+        value: https://606-scout.surge.sh
+      - key: APP_PUBLIC_URL
+        value: https://606-scout.surge.sh
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MONGO_URL
+        sync: false

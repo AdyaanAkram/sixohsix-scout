@@ -1,0 +1,41 @@
+# Fly.io — API only. Frontend stays on Surge (or deploy web separately later).
+# App name can be changed on first `fly launch` / `fly apps create`.
+
+app = "sixohsix-scout-api"
+primary_region = "iad"
+
+[build]
+  dockerfile = "backend/Dockerfile"
+
+[env]
+  APP_ENV = "production"
+  DB_NAME = "pbg_scout"
+  DEMO_HOSTING = "1"
+  MAIL_PROVIDER = "stdout"
+  MAIL_FROM = "noreply@606athletics.demo"
+  STORAGE_BACKEND = "local"
+  LOG_LEVEL = "INFO"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/ready"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[mounts]
+  source = "scout_uploads"
+  destination = "/app/uploads"

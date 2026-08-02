@@ -129,8 +129,10 @@ export default function EventsList() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-display text-4xl text-foreground">Evaluation Events</h1>
-          <p className="text-sm text-muted-foreground">Organize and run player evaluation days.</p>
+          <h1 className="font-display text-4xl text-foreground">Events</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Short-term camps, clinics, and evaluation days for this organization.
+          </p>
         </div>
         {isAdmin && <CreateEventDialog onCreated={load} />}
       </div>

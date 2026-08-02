@@ -78,11 +78,19 @@ def load_settings() -> Settings:
             errors.append("JWT_SECRET must be at least 32 characters in production")
         if "*" in cors_raw.split(",") or cors_raw.strip() == "*":
             errors.append("CORS_ORIGINS must not be '*' in production")
+        demo_hosting = os.environ.get("DEMO_HOSTING", "").strip() in ("1", "true", "yes")
         if mail_provider != "resend":
-            errors.append("MAIL_PROVIDER must be 'resend' in production")
-        if not resend_api_key:
+            if demo_hosting and mail_provider == "stdout":
+                print(
+                    "[config] WARNING: DEMO_HOSTING=1 — MAIL_PROVIDER=stdout "
+                    "(invite emails will not send; use bootstrap_admin / known passwords)",
+                    file=sys.stderr,
+                )
+            else:
+                errors.append("MAIL_PROVIDER must be 'resend' in production (or DEMO_HOSTING=1 with stdout)")
+        if not resend_api_key and not (demo_hosting and mail_provider == "stdout"):
             errors.append("RESEND_API_KEY is required in production")
-        if "localhost" in mail_from or mail_from.endswith(".local"):
+        if ("localhost" in mail_from or mail_from.endswith(".local")) and not demo_hosting:
             errors.append("MAIL_FROM must be a real domain address in production")
         if storage_backend not in ("local", "s3"):
             errors.append("STORAGE_BACKEND must be 'local' or 's3'")

@@ -413,6 +413,61 @@ def test_athlete_patch_rejects_privileged_fields(athlete_users):
     assert ok.json().get("bio") == "Updated bio"
 
 
+def test_owner_can_switch_organizations(tenants):
+    """Same user with two memberships must only see the active org's athletes."""
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
+    import asyncio
+    from motor.motor_asyncio import AsyncIOMotorClient
+    from auth import hash_password
+    from db import now_iso
+
+    a, b = tenants["A"], tenants["B"]
+
+    async def link_owner_to_both():
+        client = AsyncIOMotorClient(os.environ.get("MONGO_URL", "mongodb://localhost:27017"))
+        db = client[os.environ.get("DB_NAME", "pbg_scout_local")]
+        email = f"iso.multi.{uuid.uuid4().hex[:6]}@example.com"
+        uid = f"user-multi-{uuid.uuid4().hex[:6]}"
+        await db.users.insert_one({
+            "id": uid, "email": email, "full_name": "Multi Org Owner",
+            "password_hash": hash_password(PASSWORD), "active": True,
+            "active_organization_id": a["org_id"],
+            "created_at": now_iso(), "updated_at": now_iso(),
+        })
+        for org_id, role in ((a["org_id"], "owner"), (b["org_id"], "owner")):
+            await db.memberships.insert_one({
+                "id": f"mem-{uid}-{org_id[-6:]}", "user_id": uid, "organization_id": org_id,
+                "role": role, "active": True, "created_at": now_iso(),
+            })
+        return email
+
+    email = asyncio.run(link_owner_to_both())
+    login = requests.post(f"{BASE}/auth/login", json={"email": email, "password": PASSWORD}, timeout=10)
+    assert login.status_code == 200, login.text
+    assert len(login.json()["user"]["memberships"]) == 2
+    tok = login.json()["token"]
+    headers = {"Authorization": f"Bearer {tok}"}
+    # start in A
+    ath_a = requests.get(f"{BASE}/athletes", headers=headers, timeout=10)
+    assert ath_a.status_code == 200
+    assert {x["id"] for x in ath_a.json()} == {a["athlete_id"]}
+    # switch to B
+    sw = requests.post(
+        f"{BASE}/auth/switch-organization",
+        headers=headers,
+        json={"organization_id": b["org_id"]},
+        timeout=10,
+    )
+    assert sw.status_code == 200, sw.text
+    assert sw.json()["user"]["organization_id"] == b["org_id"]
+    headers_b = {"Authorization": f"Bearer {sw.json()['token']}"}
+    ath_b = requests.get(f"{BASE}/athletes", headers=headers_b, timeout=10)
+    assert ath_b.status_code == 200
+    ids_b = {x["id"] for x in ath_b.json()}
+    assert b["athlete_id"] in ids_b
+    assert a["athlete_id"] not in ids_b
+
+
 def test_expired_invitation_rejected(tenants):
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
     import asyncio
