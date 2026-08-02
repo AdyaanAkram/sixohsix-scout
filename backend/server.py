@@ -101,6 +101,48 @@ async def ready():
         return JSONResponse(status_code=503, content={"status": "not_ready", "detail": str(e)})
 
 
+@app.get("/debug/mongo")
+async def debug_mongo():
+    """Safe Mongo config probe (DEMO_HOSTING only) — no secrets."""
+    if not settings.demo_hosting:
+        return JSONResponse(status_code=404, content={"detail": "Not found"})
+    from urllib.parse import urlparse
+
+    raw = (settings.mongo_url or "").strip()
+    host = None
+    scheme = None
+    if raw:
+        try:
+            # mongodb+srv://user:pass@host/...
+            parsed = urlparse(raw.replace("mongodb+srv://", "https://").replace("mongodb://", "https://"))
+            host = parsed.hostname
+            scheme = "mongodb+srv" if raw.startswith("mongodb+srv://") else "mongodb"
+        except Exception:
+            host = "(unparseable)"
+    err = None
+    ok = False
+    try:
+        await client.admin.command("ping")
+        ok = True
+    except Exception as e:
+        err = str(e)[:400]
+    hint = None
+    if err and "TLSV1_ALERT_INTERNAL_ERROR" in err:
+        hint = (
+            "Atlas is rejecting TLS from this host — almost always Network Access. "
+            "In Atlas → Network Access → Allow Access from Anywhere (0.0.0.0/0), wait ~1 min, retry."
+        )
+    return {
+        "mongo_configured": bool(raw),
+        "scheme": scheme,
+        "host": host,
+        "db_name": settings.db_name,
+        "ping_ok": ok,
+        "error": err,
+        "hint": hint,
+    }
+
+
 @api_router.get("/")
 async def root():
     return {

@@ -30,6 +30,7 @@ class Settings:
     s3_endpoint_url: str | None
     s3_access_key: str | None
     s3_secret_key: str | None
+    demo_hosting: bool = False
 
 
 def _split_origins(raw: str) -> list[str]:
@@ -142,6 +143,7 @@ def load_settings() -> Settings:
         s3_endpoint_url=s3_endpoint_url,
         s3_access_key=s3_access_key,
         s3_secret_key=s3_secret_key,
+        demo_hosting=demo_hosting,
     )
 
 

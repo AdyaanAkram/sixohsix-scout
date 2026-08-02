@@ -5,9 +5,12 @@ services:
     name: sixohsix-scout-api
     runtime: docker
     plan: free
-    dockerfilePath: ./backend/Dockerfile
+    # Root Dockerfile sets DEMO_HOSTING defaults + start.sh (honors $PORT).
+    dockerfilePath: ./Dockerfile
     dockerContext: .
-    healthCheckPath: /ready
+    # /health = process up; /ready needs Mongo (Atlas IP allowlist). Don't use /ready
+    # as the deploy health check or free tier restarts loop while DB is blocked.
+    healthCheckPath: /health
     envVars:
       - key: APP_ENV
         value: production

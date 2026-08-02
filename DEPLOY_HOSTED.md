@@ -119,11 +119,41 @@ Share: **https://606-scout.surge.sh**
 
 ---
 
+## Render path (current free stack)
+
+1. **Atlas → Network Access → Allow Access from Anywhere** (`0.0.0.0/0`).  
+   Laptop working + Render failing with `TLSV1_ALERT_INTERNAL_ERROR` = this step missing.
+2. Render service env (Dashboard → Environment):
+   - `MONGO_URL` = Atlas URI (same one that works locally)
+   - `JWT_SECRET` = long random string
+   - `DEMO_HOSTING=1`
+   - `DB_NAME=pbg_scout`
+   - `CORS_ORIGINS` / `APP_PUBLIC_URL` = `https://606-scout.surge.sh`
+3. Manual Deploy → latest commit. Wait for live.
+4. Check:
+   ```bash
+   curl -s https://sixohsix-scout.onrender.com/health
+   curl -s https://sixohsix-scout.onrender.com/debug/mongo
+   curl -s https://sixohsix-scout.onrender.com/ready
+   ```
+   Expect `ping_ok: true` and `/ready` → `{"status":"ready",...}`.
+5. Point Surge at Render:
+   ```bash
+   cd frontend
+   REACT_APP_BACKEND_URL=https://sixohsix-scout.onrender.com npm run build
+   cp build/index.html build/200.html
+   surge ./build 606-scout.surge.sh
+   ```
+
+---
+
 ## Troubleshooting
 
 | Symptom | Fix |
 |---------|-----|
-| `/ready` fails | `flyctl logs -a sixohsix-scout-api` — usually bad `MONGO_URL` or Atlas IP allowlist |
+| `/ready` → `TLSV1_ALERT_INTERNAL_ERROR` | Atlas Network Access must include `0.0.0.0/0` (Render egress IPs change) |
+| `/debug/mongo` → `mongo_configured: false` | Set `MONGO_URL` on Render Environment, redeploy |
+| `/ready` fails (other) | Bad `MONGO_URL` password / URI; check `/debug/mongo` host |
 | Login CORS error | Rebuild Surge after API URL change; ensure `CORS_ORIGINS` includes `https://606-scout.surge.sh` |
-| App sleeps / slow first load | Free Fly machines auto-stop; first request wakes them (~30s). Set `min_machines_running = 1` to keep warm |
+| App sleeps / slow first load | Free Render spins down when idle; first request ~30–60s |
 | Invites don’t email | Expected with `DEMO_HOSTING=1` / stdout mail — use bootstrap passwords or add Resend |
