@@ -5,7 +5,17 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 from config import settings
 
-client = AsyncIOMotorClient(settings.mongo_url, serverSelectionTimeoutMS=5000)
+try:
+    import certifi
+    _tls_ca = certifi.where()
+except Exception:
+    _tls_ca = None
+
+_client_kwargs = {"serverSelectionTimeoutMS": 15000}
+if _tls_ca:
+    _client_kwargs["tlsCAFile"] = _tls_ca
+
+client = AsyncIOMotorClient(settings.mongo_url, **_client_kwargs)
 db = client[settings.db_name]
 
 
