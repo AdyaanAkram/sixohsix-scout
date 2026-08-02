@@ -58,10 +58,17 @@ def _init_sentry():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _init_sentry()
-    # Ping Mongo — fail fast if DB is unreachable
-    await client.admin.command("ping")
-    await ensure_indexes()
-    logger.info("API ready env=%s db=%s", settings.app_env, settings.db_name)
+    # Ping Mongo — log loudly but don't crash the process (Render exit code 3 on lifespan failure).
+    try:
+        await client.admin.command("ping")
+        await ensure_indexes()
+        logger.info("API ready env=%s db=%s", settings.app_env, settings.db_name)
+    except Exception as e:
+        logger.error(
+            "Mongo unavailable at startup (%s). Check MONGO_URL and Atlas Network Access (0.0.0.0/0). "
+            "/ready will stay 503 until DB is reachable.",
+            e,
+        )
     yield
     client.close()
     logger.info("API shutdown complete")
