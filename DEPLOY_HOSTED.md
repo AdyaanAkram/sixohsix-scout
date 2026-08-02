@@ -1,14 +1,24 @@
 # Hosted deploy (laptop can be off)
 
-Stack used here:
+**Recommended free stack (2026):**
 
 | Piece | Host |
 |--------|------|
-| Database | **MongoDB Atlas** (free M0 is fine for demos) |
-| API | **Fly.io** (`*.fly.dev`) |
-| Frontend | **Surge** (`606-scout.surge.sh`) pointing at the Fly API |
+| Database | **MongoDB Atlas** (free M0) — already set up |
+| API | **Render** free web service (`*.onrender.com`) |
+| Frontend | **Surge** (`606-scout.surge.sh`) pointing at the Render API |
 
-Your Mac does **not** need to stay on after this.
+Repo for deploy: https://github.com/AdyaanAkram/sixohsix-scout  
+
+> Fly.io needs a card for ongoing apps. Hugging Face Docker Spaces now need Pro. Render’s **free** plan is the practical $0 option (service **sleeps when idle**; first request can take ~30–60s).
+
+One-click Blueprint: https://render.com/deploy?repo=https://github.com/AdyaanAkram/sixohsix-scout
+
+---
+
+## Legacy notes (Fly / HF)
+
+Fly/HF paths below are kept for reference if you later pay for always-on.
 
 ---
 
