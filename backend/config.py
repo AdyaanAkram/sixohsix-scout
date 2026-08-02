@@ -62,8 +62,13 @@ def load_settings() -> Settings:
         errors.append("MONGO_URL is required")
     if not db_name:
         errors.append("DB_NAME is required")
+    demo_hosting = os.environ.get("DEMO_HOSTING", "").strip() in ("1", "true", "yes")
     if not jwt_secret:
-        errors.append("JWT_SECRET is required")
+        if demo_hosting:
+            jwt_secret = "demo-hosting-only-jwt-secret-change-me-32b"
+            print("[config] WARNING: JWT_SECRET missing — using demo default (DEMO_HOSTING=1)", file=sys.stderr)
+        else:
+            errors.append("JWT_SECRET is required")
     elif app_env == "production":
         weak = {
             "pbg-scout-dev-secret-change-in-prod",
@@ -71,14 +76,14 @@ def load_settings() -> Settings:
             "changeme",
             "secret",
             "ci-test-secret-not-for-production-use",
+            "demo-hosting-only-jwt-secret-change-me-32b",
         }
-        if jwt_secret in weak:
+        if jwt_secret in weak and not demo_hosting:
             errors.append("JWT_SECRET must be a strong unique secret in production")
-        if len(jwt_secret) < 32:
+        if len(jwt_secret) < 32 and not demo_hosting:
             errors.append("JWT_SECRET must be at least 32 characters in production")
         if "*" in cors_raw.split(",") or cors_raw.strip() == "*":
             errors.append("CORS_ORIGINS must not be '*' in production")
-        demo_hosting = os.environ.get("DEMO_HOSTING", "").strip() in ("1", "true", "yes")
         if mail_provider != "resend":
             if demo_hosting and mail_provider == "stdout":
                 print(
