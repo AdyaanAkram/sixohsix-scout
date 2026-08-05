@@ -157,3 +157,14 @@ Share: **https://606-scout.surge.sh**
 | Login CORS error | Rebuild Surge after API URL change; ensure `CORS_ORIGINS` includes `https://606-scout.surge.sh` |
 | App sleeps / slow first load | Free Render spins down when idle; first request ~30–60s |
 | Invites don’t email | Expected with `DEMO_HOSTING=1` / stdout mail — use bootstrap passwords or add Resend |
+
+---
+
+## Domain cutover (`id.606athletics.com`)
+
+Production target hostnames:
+
+- **App:** `https://id.606athletics.com` (alias: `app.606athletics.com`)
+- **API:** `https://api.606athletics.com` (or keep the Render/Fly origin behind a CNAME)
+
+Until DNS is ready, continue using **https://606-scout.surge.sh** for demos. Full cutover steps (CORS, `APP_PUBLIC_URL`, rebuild, smoke tests) are in [`DOMAIN.md`](DOMAIN.md).

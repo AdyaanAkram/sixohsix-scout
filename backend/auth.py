@@ -1,6 +1,7 @@
 import os
 import time
 from collections import defaultdict
+from datetime import datetime, timezone
 
 import bcrypt
 import jwt
@@ -57,24 +58,50 @@ def decode_token(token: str) -> dict:
         raise HTTPException(status_code=401, detail="Invalid authentication token.")
 
 
+def membership_expired(membership: dict | None) -> bool:
+    """True when temporary membership expires_at is in the past."""
+    if not membership:
+        return False
+    exp = membership.get("expires_at")
+    if not exp:
+        return False
+    try:
+        exp_dt = datetime.fromisoformat(str(exp).replace("Z", "+00:00"))
+        if exp_dt.tzinfo is None:
+            exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+        return exp_dt < datetime.now(timezone.utc)
+    except Exception:
+        return False
+
+
 async def resolve_membership(user_id: str, preferred_org_id: str | None = None):
-    """Pick active membership: preferred → user.active_organization_id → first by created_at."""
+    """Pick active membership: preferred → user.active_organization_id → first by created_at.
+    Skips expired temporary access and deactivates those memberships."""
     memberships = await db.memberships.find(
         {"user_id": user_id, "active": True}, {"_id": 0}
     ).sort("created_at", 1).to_list(100)
-    if not memberships:
+    valid = []
+    for m in memberships:
+        if membership_expired(m):
+            await db.memberships.update_one(
+                {"id": m["id"]},
+                {"$set": {"active": False, "expired_at": datetime.now(timezone.utc).isoformat()}},
+            )
+            continue
+        valid.append(m)
+    if not valid:
         return None
     if preferred_org_id:
-        hit = next((m for m in memberships if m["organization_id"] == preferred_org_id), None)
+        hit = next((m for m in valid if m["organization_id"] == preferred_org_id), None)
         if hit:
             return hit
     user = await db.users.find_one({"id": user_id}, {"_id": 0, "active_organization_id": 1})
     preferred = (user or {}).get("active_organization_id")
     if preferred:
-        hit = next((m for m in memberships if m["organization_id"] == preferred), None)
+        hit = next((m for m in valid if m["organization_id"] == preferred), None)
         if hit:
             return hit
-    return memberships[0]
+    return valid[0]
 
 
 async def _load_user(user_id: str, organization_id: str | None = None):
@@ -83,10 +110,15 @@ async def _load_user(user_id: str, organization_id: str | None = None):
         raise HTTPException(status_code=401, detail="Account not found or deactivated.")
     membership = await resolve_membership(user_id, organization_id)
     if not membership:
-        raise HTTPException(status_code=403, detail="No active organization membership.")
+        raise HTTPException(
+            status_code=403,
+            detail="No active organization membership. Temporary event access may have expired.",
+        )
     user["role"] = membership["role"]
     user["organization_id"] = membership["organization_id"]
     user["membership_id"] = membership.get("id")
+    user["membership_expires_at"] = membership.get("expires_at")
+    user["temporary_access"] = bool(membership.get("temporary") or membership.get("expires_at"))
     return user
 
 

@@ -21,6 +21,9 @@ import {
   CheckCircle2, XCircle, FileDown, Layers, Trophy, ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
+} from "recharts";
 
 const EVENT_STATUSES = ["Draft", "Registration Open", "Registration Closed", "Check-In Open", "Evaluation Active", "Evaluation Complete", "Reports Under Review", "Closed"];
 
@@ -551,7 +554,7 @@ const EvaluatorsTab = ({ eventId, isAdmin }) => {
                 {inviteBusy ? "Creating…" : "Generate code"}
               </Button>
             </div>
-            <div className="grid sm:grid-cols-3 gap-2">
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2">
               <Select value={inviteForm.role} onValueChange={(v) => setInviteForm((f) => ({ ...f, role: v }))}>
                 <SelectTrigger className="h-10 rounded-lg"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -567,7 +570,23 @@ const EvaluatorsTab = ({ eventId, isAdmin }) => {
                   {stations.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={1}
+                  max={720}
+                  value={inviteForm.ttl_hours}
+                  onChange={(e) => setInviteForm((f) => ({ ...f, ttl_hours: e.target.value }))}
+                  className="h-10 rounded-lg"
+                  data-testid="invite-ttl-hours"
+                  aria-label="Access TTL hours"
+                />
+                <span className="text-xs text-muted-foreground whitespace-nowrap">hrs TTL</span>
+              </div>
             </div>
+            <p className="text-[11px] text-muted-foreground">
+              Code expires after TTL. Redeemed access lasts until the later of that TTL or ~12h after event end. Revoke deactivates temporary memberships.
+            </p>
             {invites.length > 0 && (
               <div className="space-y-2">
                 {invites.map((inv) => (
@@ -662,21 +681,42 @@ const ProgressTab = ({ eventId }) => {
   }, [eventId]);
 
   if (!data) return <Skeleton className="h-48 rounded-2xl" />;
+  const inProgress = data.evaluations_draft ?? data.drafts ?? 0;
+  const complete = data.evaluations_completed ?? 0;
+  const missing = data.evaluations_remaining ?? 0;
+  const chartRows = [
+    { name: "Registered", value: data.total_players || 0, fill: "hsl(var(--muted-foreground))" },
+    { name: "Checked in", value: data.checked_in || 0, fill: "hsl(var(--info))" },
+    { name: "In progress", value: inProgress, fill: "hsl(var(--warning))" },
+    { name: "Complete", value: complete, fill: "hsl(var(--success))" },
+    { name: "Missing", value: missing, fill: "hsl(var(--brand))" },
+  ];
   return (
     <div className="space-y-4" data-testid="live-progress">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { label: "Players", value: data.total_players },
-          { label: "Checked In", value: data.checked_in },
-          { label: "Evals Completed", value: data.evaluations_completed },
-          { label: "Evals Remaining", value: data.evaluations_remaining },
-        ].map((s) => (
-          <Card key={s.label} className="rounded-2xl border-border"><CardContent className="py-4 text-center">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        {chartRows.map((s) => (
+          <Card key={s.name} className="rounded-2xl border-border"><CardContent className="py-4 text-center">
             <p className="text-2xl font-bold font-mono-num text-foreground">{s.value}</p>
-            <p className="text-xs text-muted-foreground">{s.label}</p>
+            <p className="text-xs text-muted-foreground">{s.name}</p>
           </CardContent></Card>
         ))}
       </div>
+      <Card className="rounded-2xl border-border">
+        <CardContent className="pt-4 pb-2">
+          <p className="font-semibold text-foreground text-sm mb-2">Event completion</p>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={chartRows}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }} />
+              <Bar dataKey="value" radius={[8, 8, 0, 0]}>
+                {chartRows.map((e) => <Cell key={e.name} fill={e.fill} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
       <Card className="rounded-2xl border-border">
         <CardContent className="pt-4 pb-4 space-y-3">
           <p className="font-semibold text-foreground text-sm">Station completion</p>
@@ -687,7 +727,7 @@ const ProgressTab = ({ eventId }) => {
                 <span className="font-mono-num text-muted-foreground">{s.completed}/{s.expected} · {s.completion_pct}% {s.drafts > 0 && `(+${s.drafts} drafts)`}</span>
               </div>
               <div className="h-2.5 rounded-full bg-muted overflow-hidden">
-                <div className="h-full bg-[hsl(var(--info))] rounded-full transition-all" style={{ width: `${s.completion_pct}%` }} />
+                <div className="h-full bg-brand rounded-full transition-all" style={{ width: `${s.completion_pct}%` }} />
               </div>
             </div>
           ))}

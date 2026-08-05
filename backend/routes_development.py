@@ -10,7 +10,64 @@ ASSESSMENT_TYPES = ["Practice Observation", "Game Observation", "Training Assess
                     "Tryout Assessment", "Showcase Assessment", "Development Check-In",
                     "Injury Return Observation", "Position Review", "Scout Follow-Up"]
 
+# Canonical note types / visibility buckets (append-only — never overwrite)
+NOTE_TYPES = [
+    "general", "development", "private_staff", "parent_visible", "scout", "follow_up",
+    # legacy values kept for reads
+    "assessment", "scout_assessment",
+]
+
+PARENT_VISIBLE_TYPES = {"parent_visible", "general"}
+ATHLETE_HIDDEN_TYPES = {"private_staff", "scout", "follow_up", "scout_assessment"}
+EVALUATOR_HIDDEN_TYPES = {"private_staff", "scout"}
+
 GOAL_STATUSES = ["Not Started", "Active", "Improving", "Needs Attention", "Completed", "Archived"]
+
+
+def _normalize_note_type(raw: str | None, assessment_type: str | None = None) -> str:
+    t = (raw or "").strip().lower().replace(" ", "_")
+    aliases = {
+        "private": "private_staff",
+        "staff": "private_staff",
+        "staff_private": "private_staff",
+        "parent": "parent_visible",
+        "parents": "parent_visible",
+        "assessment": "development",
+        "scout_assessment": "scout",
+        "scouting": "scout",
+    }
+    t = aliases.get(t, t)
+    if t in NOTE_TYPES and t not in ("assessment", "scout_assessment"):
+        return t
+    if assessment_type == "Scout Follow-Up":
+        return "follow_up"
+    return "development"
+
+
+def _note_visible_to_role(note: dict, role: str) -> bool:
+    ntype = note.get("note_type") or note.get("visibility") or "general"
+    if note.get("confidential") and role not in ("owner", "admin", "head_scout"):
+        return False
+    if role in ("athlete", "parent", "guardian"):
+        if ntype in ATHLETE_HIDDEN_TYPES:
+            return False
+        return ntype in PARENT_VISIBLE_TYPES or bool(note.get("parent_visible_note"))
+    if role == "evaluator":
+        if ntype in EVALUATOR_HIDDEN_TYPES:
+            return False
+        return True
+    return True
+
+
+def _strip_note_for_role(note: dict, role: str) -> dict:
+    out = dict(note)
+    if role in ("athlete", "parent", "guardian", "evaluator"):
+        out.pop("internal_note", None)
+    if role in ("athlete", "parent", "guardian"):
+        # Prefer parent-facing text when present
+        if out.get("parent_visible_note") and not out.get("summary"):
+            out["summary"] = out["parent_visible_note"]
+    return out
 
 
 # ---------------- Coach / YTD assessments (athlete notes) ----------------
@@ -19,6 +76,8 @@ class NoteBody(BaseModel):
     athlete_id: str
     assessment_date: str | None = None
     assessment_type: str = "Practice Observation"
+    note_type: str = "development"
+    visibility: str | None = None  # alias of note_type when provided
     team_or_program: str | None = None
     strengths: str | None = None
     development_priorities: str | None = None
@@ -27,6 +86,7 @@ class NoteBody(BaseModel):
     follow_up_date: str | None = None
     internal_note: str | None = None
     parent_visible_note: str | None = None
+    summary: str | None = None
     goal_id: str | None = None
 
 
@@ -35,10 +95,11 @@ async def list_notes(athlete_id: str, user=Depends(require_roles(*STAFF_ROLES)))
     a = await db.athletes.find_one({"id": athlete_id, "organization_id": user["organization_id"]})
     if not a:
         raise HTTPException(status_code=404, detail="Player not found.")
-    notes = await db.athlete_notes.find({"athlete_id": athlete_id, "organization_id": user["organization_id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
-    if user["role"] == "evaluator":
-        notes = [n for n in notes if not n.get("confidential")]
-    return notes
+    notes = await db.athlete_notes.find(
+        {"athlete_id": athlete_id, "organization_id": user["organization_id"]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(200)
+    role = user["role"]
+    return [_strip_note_for_role(n, role) for n in notes if _note_visible_to_role(n, role)]
 
 
 @router.post("/athletes/{athlete_id}/notes")
@@ -48,10 +109,13 @@ async def create_note(athlete_id: str, body: NoteBody, user=Depends(require_role
         raise HTTPException(status_code=404, detail="Player not found.")
     if body.assessment_type not in ASSESSMENT_TYPES:
         raise HTTPException(status_code=400, detail="Invalid assessment type.")
+    note_type = _normalize_note_type(body.visibility or body.note_type, body.assessment_type)
     doc = body.model_dump()
     doc.update({
         "id": new_id(), "organization_id": user["organization_id"],
-        "athlete_id": athlete_id, "note_type": "assessment",
+        "athlete_id": athlete_id,
+        "note_type": note_type,
+        "visibility": note_type,
         "author_id": user["id"], "author_name": user.get("full_name"), "author_role": user["role"],
         "assessment_date": body.assessment_date or now_iso()[:10],
         "created_at": now_iso(), "updated_at": now_iso(),
@@ -59,8 +123,10 @@ async def create_note(athlete_id: str, body: NoteBody, user=Depends(require_role
         "ai_draft": None, "ai_model": None, "ai_generated_at": None,
         "ai_approved_by": None, "ai_approved_at": None, "ai_status": None,
     })
+    # Append-only: always insert, never update/overwrite an existing note
     await db.athlete_notes.insert_one(doc)
-    await log_audit(user["organization_id"], user, "assessment_added", "athlete_note", doc["id"], {"athlete_id": athlete_id, "type": body.assessment_type})
+    await log_audit(user["organization_id"], user, "assessment_added", "athlete_note", doc["id"],
+                    {"athlete_id": athlete_id, "type": body.assessment_type, "note_type": note_type})
     return clean(doc)
 
 
@@ -81,9 +147,13 @@ async def create_scout_assessment(body: ScoutAssessmentBody, user=Depends(requir
     a = await db.athletes.find_one({"id": body.athlete_id, "organization_id": user["organization_id"]})
     if not a:
         raise HTTPException(status_code=404, detail="Player not found.")
+    note_type = "scout"
     doc = {
         "id": new_id(), "organization_id": user["organization_id"],
-        "athlete_id": body.athlete_id, "note_type": "scout_assessment",
+        "athlete_id": body.athlete_id,
+        "note_type": note_type,
+        "visibility": "private_staff" if body.confidential else "scout",
+        "assessment_type": "Head Scout Assessment",
         "author_id": user["id"], "author_name": user.get("full_name"), "author_role": user["role"],
         "summary": body.summary,
         "position_recommendation": body.position_recommendation,
@@ -94,6 +164,7 @@ async def create_scout_assessment(body: ScoutAssessmentBody, user=Depends(requir
         "assessment_date": now_iso()[:10],
         "created_at": now_iso(), "updated_at": now_iso(),
     }
+    # Append-only
     await db.athlete_notes.insert_one(doc)
     if body.flag_follow_up:
         await db.athletes.update_one({"id": body.athlete_id}, {"$set": {"flagged_follow_up": True, "updated_at": now_iso()}})

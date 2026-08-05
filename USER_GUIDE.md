@@ -1,11 +1,15 @@
-# 60'6" Athletics Scout — User Guide
+# 60'6" ID — User Guide
 
 Complete guide to logins, roles, organizations, programs, events, player onboarding, evaluations, and the athlete experience.
 
-**Product name:** 60'6" Athletics Scout  
+**Product name:** 60'6" ID  
+**Tagline:** Every Player. Every Rep. Every Season Tells the Story.  
+**Motto:** Train. Elevate. Succeed.  
+**Live app (fully hosted):** https://606-scout.surge.sh  
 **Local app:** http://localhost:3000  
-**Public demo (when tunnel is running):** https://606-scout.surge.sh  
 **API docs (local):** http://localhost:8000/docs  
+
+> **Cold start:** First load after idle can take 30–60 seconds while the free hosted API wakes up — wait once, then it is responsive.
 
 ---
 
@@ -410,11 +414,11 @@ Isolation: `pytest ../tests/test_org_isolation.py -q`
 
 ---
 
-## 16. Public Surge demo caveats
+## 16. Live demo (hosted)
 
-- Frontend: https://606-scout.surge.sh  
-- API must be reachable via the Cloudflare tunnel from the host machine.
-- If login fails remotely, the tunnel or local API stopped — restart both; if the tunnel URL changed, rebuild the frontend with the new `REACT_APP_BACKEND_URL` and `surge` again.
+- App: https://606-scout.surge.sh (Surge frontend + hosted API — laptop can be off)
+- Cold starts: free API hosts may take 30–60s on first request after idle
+- Deploy detail: `DEPLOY_HOSTED.md` · production domain path: `DOMAIN.md` (`id.606athletics.com` / `app.606athletics.com`)
 
 ---
 
@@ -427,4 +431,4 @@ Isolation: `pytest ../tests/test_org_isolation.py -q`
 
 ---
 
-*Document matches the PBG Scout / 60'6" codebase as of the multi-org + Velo athlete-features work. For deploy infrastructure detail, see `DEPLOY.md`. For a short camp-day checklist, see `README.md` → Camp day runbook.*
+*Document matches the 60'6" ID codebase. For deploy infrastructure, see `DEPLOY_HOSTED.md` and `DOMAIN.md`. Camp-day checklist: `README.md` → Camp day runbook.*

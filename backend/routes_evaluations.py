@@ -166,14 +166,18 @@ async def _resolve_for_athlete(*, org_id: str, athlete: dict, station: dict, pos
     position = normalize_position(position_override) or normalize_position(athlete.get("primary_position"))
     templates = await db.evaluation_templates.find({"organization_id": org_id}, {"_id": 0}).to_list(200)
     template, reason = resolve_template(
-        templates, position=position, station_template_id=station.get("template_id"))
+        templates,
+        position=position,
+        station_template_id=station.get("template_id"),
+        age_group=athlete.get("age_group"),
+    )
     if not template:
         name = f"{athlete.get('first_name', '')} {athlete.get('last_name', '')}".strip() or athlete.get("id")
         raise HTTPException(
             status_code=422,
             detail=(
                 f"No evaluation template found for {name} "
-                f"(position={position or 'unknown'}). "
+                f"(position={position or 'unknown'}, age={athlete.get('age_group') or 'unknown'}). "
                 "Assign a position template, a station template, or an org default."
             ),
         )

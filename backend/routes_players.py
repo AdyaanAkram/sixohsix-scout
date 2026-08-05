@@ -14,7 +14,15 @@ from scoring import aggregate_player_scores
 router = APIRouter()
 
 POSITIONS = list(POSITION_TAXONOMY)
-AGE_GROUPS = ["8U", "9U", "10U", "11U", "12U", "13U", "14U", "15U", "16U", "17U", "18U"]
+AGE_GROUPS = [
+    "7U", "8U", "9U", "10U", "11U", "12U", "13U", "14U", "15U", "16U", "17U", "18U",
+    "7U-8U", "8U-10U", "11U-13U", "14U-18U", "College", "Pro",
+]
+
+
+def format_permanent_id(athlete_id: str | None) -> str:
+    """Permanent 60'6\" ID: 606-{first 8 chars of UUID}."""
+    return f"606-{str(athlete_id or '')[:8].upper()}"
 
 
 def compute_age(dob_str):
@@ -32,8 +40,36 @@ def compute_age_group(dob_str):
     age = compute_age(dob_str)
     if age is None:
         return None
-    bracket = min(max(age + (age % 2), 8), 18)
-    return f"{bracket}U"
+    if age <= 7:
+        return "7U"
+    if age >= 19:
+        return "College"
+    return f"{age}U"
+
+
+def age_group_matches_template(athlete_age: str | None, template_age: str | None) -> bool:
+    """True if template age_group applies to athlete age_group."""
+    if not template_age:
+        return True  # blank = all ages
+    if not athlete_age:
+        return False
+    ta = str(template_age).strip()
+    aa = str(athlete_age).strip()
+    if ta == aa:
+        return True
+    if ta in ("College", "Pro") and aa in ("College", "Pro"):
+        return ta == aa
+    # Band like 9U-10U
+    if "-" in ta and ta[0].isdigit():
+        parts = ta.replace("U", "").split("-")
+        try:
+            lo, hi = int(parts[0]), int(parts[1])
+            if aa.endswith("U") and aa[:-1].isdigit():
+                n = int(aa[:-1])
+                return lo <= n <= hi
+        except Exception:
+            return False
+    return False
 
 
 class AthleteBody(BaseModel):
@@ -85,13 +121,22 @@ def athlete_doc(body: AthleteBody, org_id: str, user_id: str):
     return doc
 
 
-GUARDIAN_FIELDS = ["guardian_name", "guardian_email", "guardian_phone", "emergency_contact"]
+# Parent / medical / emergency / financial fields stripped for evaluator role
+EVALUATOR_PRIVATE_FIELDS = [
+    "guardian_name", "guardian_email", "guardian_phone", "emergency_contact",
+    "guardian_user_id", "parent_name", "parent_email", "parent_phone",
+    "medical_notes", "medical_conditions", "allergies", "medications",
+    "injury_history", "physician_name", "physician_phone",
+    "insurance_info", "insurance_provider", "insurance_policy", "insurance_group",
+    "financial_notes", "payment_status", "tuition", "fees_owed", "scholarship",
+    "ssn", "tax_id",
+]
 
 
 def restrict_guardian(doc, role):
-    """Evaluators do not need guardian/emergency contact info (minor privacy)."""
+    """Evaluators must not see parent/medical/emergency/financial fields."""
     if role == "evaluator":
-        for f in GUARDIAN_FIELDS:
+        for f in EVALUATOR_PRIVATE_FIELDS:
             doc.pop(f, None)
     return doc
 
@@ -304,13 +349,15 @@ async def athlete_summary(athlete_id: str, user=Depends(require_roles(*STAFF_ROL
     previous = event_scores[-2] if len(event_scores) > 1 else None
     goals = await db.athlete_goals.find({"athlete_id": athlete_id, "status": {"$nin": ["Archived"]}}, {"_id": 0}).sort("created_at", -1).to_list(20)
     latest_scout = await db.athlete_notes.find_one(
-        {"athlete_id": athlete_id, "note_type": "scout_assessment"}, {"_id": 0}, sort=[("created_at", -1)])
+        {"athlete_id": athlete_id, "note_type": {"$in": ["scout_assessment", "scout"]}},
+        {"_id": 0}, sort=[("created_at", -1)])
 
     # aggregate skill summary across all evals (latest event weighted most: use all)
     agg_all = aggregate_player_scores(evals)
 
     return {
         "athlete": restrict_guardian(a, user["role"]),
+        "permanent_id": format_permanent_id(a.get("id")),
         "latest_overall": latest["overall_score"] if latest else None,
         "previous_overall": previous["overall_score"] if previous else None,
         "score_change": round(latest["overall_score"] - previous["overall_score"], 2) if latest and previous and latest["overall_score"] is not None and previous["overall_score"] is not None else None,
@@ -322,6 +369,9 @@ async def athlete_summary(athlete_id: str, user=Depends(require_roles(*STAFF_ROL
         "goals": goals,
         "latest_scout_assessment": latest_scout,
         "position_projection": (latest_scout or {}).get("position_recommendation") or a.get("position_projection"),
+        "verified_metric_count": await db.verified_metrics.count_documents(
+            {"athlete_id": athlete_id, "organization_id": user["organization_id"]}
+        ),
     }
 
 
@@ -342,11 +392,16 @@ async def athlete_timeline(athlete_id: str, user=Depends(require_roles(*STAFF_RO
             "status": ev.get("status"), "ref_id": ev["id"],
         })
     notes = await db.athlete_notes.find({"athlete_id": athlete_id}, {"_id": 0}).to_list(500)
+    from routes_development import _note_visible_to_role
     for n in notes:
+        if not _note_visible_to_role(n, user["role"]):
+            continue
+        ntype = n.get("note_type") or ""
+        is_scout = ntype in ("scout_assessment", "scout")
         items.append({
-            "type": "note" if n.get("note_type") != "scout_assessment" else "scout_note",
+            "type": "scout_note" if is_scout else "note",
             "date": n.get("assessment_date") or n.get("created_at"),
-            "title": n.get("assessment_type", "Note") if n.get("note_type") != "scout_assessment" else "Head Scout Assessment",
+            "title": "Head Scout Assessment" if is_scout else (n.get("assessment_type") or ntype.replace("_", " ").title() or "Note"),
             "detail": (n.get("strengths") or n.get("summary") or "")[:160],
             "author": n.get("author_name"), "ref_id": n["id"],
         })
@@ -364,8 +419,101 @@ async def athlete_timeline(athlete_id: str, user=Depends(require_roles(*STAFF_RO
             "title": f"{m.get('file_type', 'media').title()} added",
             "detail": m.get("description", ""), "ref_id": m["id"],
         })
+    seasons = await db.athlete_seasons.find(
+        {"athlete_id": athlete_id, "organization_id": user["organization_id"]}, {"_id": 0}
+    ).to_list(100)
+    for s in seasons:
+        items.append({
+            "type": "season",
+            "date": f"{s.get('year', '')}-01-01",
+            "title": f"{s.get('year')} Season — {s.get('team') or 'Team'}",
+            "detail": " · ".join(
+                x for x in [s.get("organization_name"), s.get("age_group"),
+                            f"{s.get('height') or '—'}/{s.get('weight') or '—'}"] if x
+            ),
+            "ref_id": s.get("id"),
+        })
     items.sort(key=lambda x: x.get("date") or "", reverse=True)
     return items
+
+
+# ---------------- Athlete seasons (stacked under permanent ID) ----------------
+
+class SeasonBody(BaseModel):
+    year: int
+    team: str | None = None
+    organization_name: str | None = None
+    age_group: str | None = None
+    height: str | None = None
+    weight: str | None = None
+
+
+class SeasonPatch(BaseModel):
+    year: int | None = None
+    team: str | None = None
+    organization_name: str | None = None
+    age_group: str | None = None
+    height: str | None = None
+    weight: str | None = None
+
+
+async def _get_org_athlete(athlete_id: str, org_id: str):
+    a = await db.athletes.find_one({"id": athlete_id, "organization_id": org_id}, {"_id": 0})
+    if not a:
+        raise HTTPException(status_code=404, detail="Player not found.")
+    return a
+
+
+@router.get("/athletes/{athlete_id}/seasons")
+async def list_seasons(athlete_id: str, user=Depends(require_roles(*STAFF_ROLES))):
+    await _get_org_athlete(athlete_id, user["organization_id"])
+    return await db.athlete_seasons.find(
+        {"athlete_id": athlete_id, "organization_id": user["organization_id"]}, {"_id": 0}
+    ).sort("year", -1).to_list(100)
+
+
+@router.post("/athletes/{athlete_id}/seasons")
+async def create_season(athlete_id: str, body: SeasonBody, user=Depends(require_roles(*COACH_ROLES))):
+    await _get_org_athlete(athlete_id, user["organization_id"])
+    doc = {
+        "id": new_id(),
+        "athlete_id": athlete_id,
+        "organization_id": user["organization_id"],
+        "year": body.year,
+        "team": body.team,
+        "organization_name": body.organization_name,
+        "age_group": body.age_group,
+        "height": body.height,
+        "weight": body.weight,
+        "created_by": user["id"],
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    await db.athlete_seasons.insert_one(doc)
+    await log_audit(user["organization_id"], user, "season_created", "athlete_season", doc["id"],
+                    {"athlete_id": athlete_id, "year": body.year})
+    return clean(doc)
+
+
+@router.patch("/athletes/{athlete_id}/seasons/{season_id}")
+async def patch_season(athlete_id: str, season_id: str, body: SeasonPatch,
+                       user=Depends(require_roles(*COACH_ROLES))):
+    await _get_org_athlete(athlete_id, user["organization_id"])
+    existing = await db.athlete_seasons.find_one({
+        "id": season_id, "athlete_id": athlete_id, "organization_id": user["organization_id"],
+    })
+    if not existing:
+        raise HTTPException(status_code=404, detail="Season not found.")
+    updates = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None or k in body.model_fields_set}
+    # Allow clearing optional string fields when explicitly set to null via model
+    raw = body.model_dump(exclude_unset=True)
+    updates = {**raw, "updated_at": now_iso()}
+    await db.athlete_seasons.update_one(
+        {"id": season_id, "organization_id": user["organization_id"]}, {"$set": updates})
+    await log_audit(user["organization_id"], user, "season_updated", "athlete_season", season_id,
+                    {"athlete_id": athlete_id})
+    doc = await db.athlete_seasons.find_one({"id": season_id}, {"_id": 0})
+    return clean(doc)
 
 
 # ---------------- CSV import / export ----------------

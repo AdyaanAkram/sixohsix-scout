@@ -122,8 +122,8 @@ export default function Dashboard() {
     return (
       <div className="space-y-5" data-testid="head-scout-dashboard">
         <div>
-          <h1 className="font-display text-4xl text-foreground">Scout Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Review submitted evaluations and track top performers.</p>
+          <h1 className="font-display text-4xl text-foreground">Dashboard</h1>
+          <p className="text-sm text-muted-foreground">Review evaluations and track top performers.</p>
         </div>
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
           <StatCard label="Awaiting Review" value={data.awaiting_review} icon={ClipboardList} accent="hsl(var(--warning))" testId="stat-awaiting-review" />

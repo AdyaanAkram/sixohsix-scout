@@ -893,7 +893,7 @@ export default function EvaluationForm() {
         <DialogContent className="rounded-2xl max-w-sm">
           <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Add Media</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <Input type="file" accept="image/*,video/*" onChange={(e) => setMediaFile(e.target.files?.[0] || null)} className="rounded-xl h-11 pt-2" data-testid="media-file-input" />
+            <Input type="file" accept="image/*,video/*" capture="environment" onChange={(e) => setMediaFile(e.target.files?.[0] || null)} className="rounded-xl h-11 pt-2" data-testid="media-file-input" />
             <Textarea value={mediaDesc} onChange={(e) => setMediaDesc(e.target.value)} rows={2} placeholder="Description (optional)" className="rounded-xl" />
             <label className="flex items-start gap-2 text-xs text-muted-foreground">
               <Checkbox checked={mediaConsent} onCheckedChange={setMediaConsent} data-testid="media-consent-checkbox" className="mt-0.5" />

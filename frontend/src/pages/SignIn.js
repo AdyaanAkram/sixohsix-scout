@@ -37,16 +37,17 @@ export default function SignIn() {
   return (
     <div className="min-h-screen bg-background flex flex-col hero-sweep">
       <div className="px-5 pt-5">
-        <Link to="/" className="font-display text-xl text-foreground hover:text-brand transition-colors" data-testid="signin-back-home">
-          60&apos;6&quot;
+        <Link to="/" className="block hover:opacity-90 transition-opacity" data-testid="signin-back-home">
+          <p className="font-display text-xl text-foreground">60&apos;6&quot; ID</p>
+          <p className="text-[10px] uppercase tracking-[0.14em] text-brand">Train. Elevate. Succeed.</p>
         </Link>
       </div>
       <div className="flex-1 flex items-center justify-center px-4 py-10">
         <div className="w-full max-w-md relative z-10">
           <div className="flex flex-col items-center mb-8">
             <h1 className="font-display text-5xl text-foreground">Sign in</h1>
-            <p className="text-sm text-muted-foreground mt-2 text-center">
-              Access your dashboard, evaluations, or My ID.
+            <p className="text-sm text-muted-foreground mt-2 text-center max-w-xs">
+              Access your 60&apos;6&quot; ID dashboard, evaluations, or player profile.
             </p>
           </div>
           <Card className="rounded-2xl border-border bg-card">

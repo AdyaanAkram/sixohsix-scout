@@ -592,12 +592,60 @@ async def list_event_invites(event_id: str, user=Depends(require_roles(*ADMIN_RO
     ).sort("invited_at", -1).to_list(100)
 
 
+def _parse_iso(value: str | None):
+    if not value:
+        return None
+    try:
+        dt = _dt.fromisoformat(str(value).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_tz.utc)
+        return dt
+    except Exception:
+        return None
+
+
+async def _access_expires_for_invite(inv: dict) -> str:
+    """Membership/assignment expiry = later of invite TTL and event end (date + end_time)."""
+    candidates = []
+    inv_exp = _parse_iso(inv.get("expires_at"))
+    if inv_exp:
+        candidates.append(inv_exp)
+    ev = await db.events.find_one({"id": inv["event_id"]}, {"_id": 0, "date": 1, "end_time": 1})
+    if ev and ev.get("date"):
+        day = str(ev["date"])[:10]
+        end_t = (ev.get("end_time") or "23:59").strip()
+        if len(end_t) == 5:
+            end_t = f"{end_t}:00"
+        event_end = _parse_iso(f"{day}T{end_t}+00:00")
+        if event_end:
+            # grace through end of event day for late wrap-up
+            candidates.append(event_end + _td(hours=12))
+    if not candidates:
+        return (_dt.now(_tz.utc) + _td(hours=48)).isoformat()
+    return max(candidates).isoformat()
+
+
 @router.post("/events/invites/{invite_id}/revoke")
 async def revoke_event_invite(invite_id: str, user=Depends(require_roles(*ADMIN_ROLES))):
     inv = await db.event_invites.find_one({"id": invite_id, "organization_id": user["organization_id"]})
     if not inv:
         raise HTTPException(status_code=404, detail="Invite not found.")
-    await db.event_invites.update_one({"id": invite_id}, {"$set": {"revoked": True}})
+    await db.event_invites.update_one({"id": invite_id}, {"$set": {"revoked": True, "revoked_at": now_iso()}})
+    # Deactivate temporary membership created via this invite (leave permanent staff alone)
+    uid = inv.get("accepted_by_user_id")
+    if uid:
+        mem = await db.memberships.find_one({
+            "user_id": uid, "organization_id": inv["organization_id"],
+        })
+        if mem and (mem.get("temporary") or mem.get("event_invite_id") == invite_id):
+            await db.memberships.update_one(
+                {"id": mem["id"]},
+                {"$set": {"active": False, "revoked_at": now_iso(), "updated_at": now_iso()}},
+            )
+        await db.evaluator_assignments.update_many(
+            {"event_id": inv["event_id"], "evaluator_id": uid, "organization_id": inv["organization_id"]},
+            {"$set": {"active": False, "revoked_at": now_iso(), "updated_at": now_iso()}},
+        )
     return {"message": "Invite revoked."}
 
 
@@ -613,6 +661,8 @@ async def redeem_event_invite(body: RedeemBody):
         raise HTTPException(status_code=400, detail="This code was already used.")
     try:
         exp = _dt.fromisoformat(inv["expires_at"].replace("Z", "+00:00"))
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=_tz.utc)
         if exp < _dt.now(_tz.utc):
             raise HTTPException(status_code=400, detail="This invite code has expired.")
     except HTTPException:
@@ -625,6 +675,16 @@ async def redeem_event_invite(body: RedeemBody):
     if len(body.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
     org_id = inv["organization_id"]
+    access_expires = await _access_expires_for_invite(inv)
+    membership_fields = {
+        "role": inv["role"],
+        "active": True,
+        "temporary": True,
+        "expires_at": access_expires,
+        "event_invite_id": inv["id"],
+        "event_id": inv["event_id"],
+        "updated_at": now_iso(),
+    }
     existing = await db.users.find_one({"email": email})
     if existing:
         uid = existing["id"]
@@ -632,10 +692,14 @@ async def redeem_event_invite(body: RedeemBody):
         if not mem:
             await db.memberships.insert_one({
                 "id": new_id(), "user_id": uid, "organization_id": org_id,
-                "role": inv["role"], "active": True, "created_at": now_iso(),
+                "created_at": now_iso(), **membership_fields,
             })
+        elif mem.get("temporary") or not mem.get("active"):
+            # Refresh temporary access; do not demote permanent staff on re-redeem edge cases
+            await db.memberships.update_one({"id": mem["id"]}, {"$set": membership_fields})
         else:
-            await db.memberships.update_one({"id": mem["id"]}, {"$set": {"role": inv["role"], "active": True}})
+            # Permanent member redeeming an event invite — keep role, attach event expiry only on assignment
+            pass
     else:
         uid = new_id()
         await db.users.insert_one({
@@ -645,7 +709,7 @@ async def redeem_event_invite(body: RedeemBody):
         })
         await db.memberships.insert_one({
             "id": new_id(), "user_id": uid, "organization_id": org_id,
-            "role": inv["role"], "active": True, "created_at": now_iso(),
+            "created_at": now_iso(), **membership_fields,
         })
     if inv.get("station_id") and inv["role"] == "evaluator":
         existing_a = await db.evaluator_assignments.find_one({
@@ -654,10 +718,17 @@ async def redeem_event_invite(body: RedeemBody):
             await db.evaluator_assignments.insert_one({
                 "id": new_id(), "organization_id": org_id, "event_id": inv["event_id"],
                 "station_id": inv["station_id"], "evaluator_id": uid, "group_ids": [],
+                "expires_at": access_expires, "active": True,
                 "created_by": inv.get("invited_by"), "created_at": now_iso(), "updated_at": now_iso(),
             })
+        else:
+            await db.evaluator_assignments.update_one(
+                {"id": existing_a["id"]},
+                {"$set": {"expires_at": access_expires, "active": True, "updated_at": now_iso()}},
+            )
     await db.event_invites.update_one({"id": inv["id"]}, {"$set": {
         "accepted_at": now_iso(), "accepted_by_user_id": uid,
+        "access_expires_at": access_expires,
     }})
     from auth import create_token
     await db.users.update_one(
@@ -669,6 +740,8 @@ async def redeem_event_invite(body: RedeemBody):
             "id": uid, "email": email, "full_name": body.full_name.strip(),
             "role": inv["role"], "organization_id": org_id,
             "organization_name": (org or {}).get("name"),
+            "membership_expires_at": access_expires,
         },
         "event_id": inv["event_id"],
+        "expires_at": access_expires,
     }

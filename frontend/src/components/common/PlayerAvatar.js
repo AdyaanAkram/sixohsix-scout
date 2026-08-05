@@ -30,14 +30,17 @@ export const PlayerAvatar = ({ firstName = "", lastName = "", photoUrl, size = "
     md: "h-11 w-11 text-sm",
     lg: "h-16 w-16 text-lg",
     xl: "h-24 w-24 text-2xl",
+    hero: "h-40 w-40 text-4xl",
   };
   const src = !imgFailed ? resolvePhotoSrc(photoUrl) : null;
+  const rounded = size === "hero" ? "rounded-2xl ring-2 ring-brand/40" : "rounded-full ring-2 ring-white";
 
   return (
     <div className={cn("relative shrink-0", className)}>
       <div
         className={cn(
-          "flex items-center justify-center rounded-full font-bold overflow-hidden ring-2 ring-white",
+          "flex items-center justify-center font-bold overflow-hidden",
+          rounded,
           sizes[size],
           COLORS[colorIdx]
         )}

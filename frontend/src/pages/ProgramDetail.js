@@ -149,7 +149,7 @@ export default function ProgramDetail() {
               <Input type="date" value={sessionDate} onChange={(e) => setSessionDate(e.target.value)} className="h-11 rounded-lg w-44" data-testid="session-date-input" />
             </div>
             <div className="space-y-1 flex-1 min-w-[160px]"><Label className="text-xs">Focus (optional)</Label>
-              <Input value={sessionFocus} onChange={(e) => setSessionFocus(e.target.value)} className="h-11 rounded-lg" placeholder="Velo, defense…" data-testid="session-focus-input" />
+              <Input value={sessionFocus} onChange={(e) => setSessionFocus(e.target.value)} className="h-11 rounded-lg" placeholder="Hitting, defense…" data-testid="session-focus-input" />
             </div>
             <Button onClick={addSession} disabled={busy || !sessionDate} className="rounded-xl bg-brand h-11" data-testid="session-add-button">
               <Plus className="h-4 w-4 mr-1" /> Add

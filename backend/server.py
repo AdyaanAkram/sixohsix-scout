@@ -75,7 +75,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="60'6\" Athletics Scout API",
+    title="60'6\" ID API",
     version="1.1.0",
     docs_url="/docs" if settings.app_env != "production" else None,
     redoc_url="/redoc" if settings.app_env != "production" else None,
@@ -146,8 +146,8 @@ async def debug_mongo():
 @api_router.get("/")
 async def root():
     return {
-        "app": "60'6\" Athletics Scout",
-        "tagline": "Identify. Evaluate. Develop. Train.",
+        "app": "60'6\" ID",
+        "tagline": "Every Player. Every Rep. Every Season Tells the Story.",
         "status": "ok",
         "version": "1.1.0",
     }

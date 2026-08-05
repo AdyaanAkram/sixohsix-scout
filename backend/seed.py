@@ -216,9 +216,11 @@ async def main():
                 "created_by": user_ids["admin@pbgscout.com"],
                 "created_at": now_iso(), "updated_at": now_iso()}
 
-    tpl_8u = station_template("8U-10U Skills Evaluation", rating_metrics_8u(), "10U", is_default=True)
-    tpl_11u = station_template("11U-13U Skills Evaluation", metrics_11u(), "12U")
-    tpl_14u = station_template("14U-18U Showcase Evaluation", metrics_14u(), "14U")
+    # Age template keys: prefer band labels so resolve_template can match athlete age_group
+    # (exact 7U/…/18U/College/Pro also work; blank age_group = all ages)
+    tpl_8u = station_template("8U-10U Skills Evaluation", rating_metrics_8u(), "8U-10U", is_default=True)
+    tpl_11u = station_template("11U-13U Skills Evaluation", metrics_11u(), "11U-13U")
+    tpl_14u = station_template("14U-18U Showcase Evaluation", metrics_14u(), "14U-18U")
 
     # station-specific templates
     tpl_athletic = station_template("Athletic Testing", (

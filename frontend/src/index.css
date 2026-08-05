@@ -5,7 +5,7 @@
 @tailwind utilities;
 
 /*
-  Velo City design tokens → HSL triplets (no units).
+  60'6" ID design tokens — black / white / athletic red.
   Dark is the shipped default. Light kept for prefers / future toggle.
 */
 @layer base {
@@ -17,80 +17,80 @@
     --card-foreground: 0 0% 8%;
     --popover: 0 0% 100%;
     --popover-foreground: 0 0% 8%;
-    --primary: 12 87% 54%;
+    --primary: 0 72% 47%;
     --primary-foreground: 0 0% 100%;
     --secondary: 0 0% 94%;
     --secondary-foreground: 0 0% 8%;
     --muted: 0 0% 94%;
     --muted-foreground: 0 0% 40%;
-    --accent: 12 55% 96%;
-    --accent-foreground: 12 87% 40%;
-    --destructive: 354 70% 54%;
+    --accent: 0 40% 96%;
+    --accent-foreground: 0 72% 40%;
+    --destructive: 0 72% 47%;
     --destructive-foreground: 0 0% 100%;
     --border: 0 0% 88%;
     --input: 0 0% 88%;
-    --ring: 12 87% 54%;
+    --ring: 0 72% 47%;
     --radius: 0.75rem;
 
     --surface: 0 0% 98%;
     --surface-2: 0 0% 100%;
     --surface-3: 0 0% 94%;
-    --brand: 12 87% 54%;
-    --brand-secondary: 14 92% 64%;
-    --brand-tertiary: 12 55% 13%;
+    --brand: 0 72% 47%;
+    --brand-secondary: 0 78% 56%;
+    --brand-tertiary: 0 40% 12%;
     --success: 134 61% 41%;
     --warning: 42 100% 50%;
-    --error: 354 70% 54%;
-    --info: 188 78% 41%;
+    --error: 0 72% 47%;
+    --info: 210 80% 48%;
     --border-strong: 0 0% 70%;
     --divider: 0 0% 90%;
 
-    --chart-1: 12 87% 54%;
-    --chart-2: 188 78% 41%;
+    --chart-1: 0 72% 47%;
+    --chart-2: 210 80% 48%;
     --chart-3: 42 100% 50%;
     --chart-4: 134 61% 41%;
-    --chart-5: 14 92% 64%;
+    --chart-5: 0 78% 56%;
   }
 
   .dark {
-    /* surface #080808 */ --background: 0 0% 3%;
-    /* onSurface #FFF */ --foreground: 0 0% 100%;
-    /* surfaceSecondary #121212 */ --card: 0 0% 7%;
+    --background: 0 0% 4%;
+    --foreground: 0 0% 100%;
+    --card: 0 0% 7%;
     --card-foreground: 0 0% 100%;
     --popover: 0 0% 7%;
     --popover-foreground: 0 0% 100%;
-    /* brand #F04C23 */ --primary: 12 87% 54%;
+    --primary: 0 72% 50%;
     --primary-foreground: 0 0% 100%;
-    /* surfaceTertiary #1C1C1C */ --secondary: 0 0% 11%;
+    --secondary: 0 0% 11%;
     --secondary-foreground: 0 0% 100%;
     --muted: 0 0% 11%;
-    /* onSurfaceSecondary #A3A3A3 */ --muted-foreground: 0 0% 64%;
-    /* brandTertiary #33150F */ --accent: 12 55% 13%;
-    /* brandSecondary #F8714F */ --accent-foreground: 14 92% 64%;
-    --destructive: 354 70% 54%;
+    --muted-foreground: 0 0% 64%;
+    --accent: 0 40% 12%;
+    --accent-foreground: 0 78% 62%;
+    --destructive: 0 72% 50%;
     --destructive-foreground: 0 0% 100%;
-    /* border #262626 */ --border: 0 0% 15%;
+    --border: 0 0% 15%;
     --input: 0 0% 15%;
-    --ring: 12 87% 54%;
+    --ring: 0 72% 50%;
 
-    --surface: 0 0% 3%;
+    --surface: 0 0% 4%;
     --surface-2: 0 0% 7%;
     --surface-3: 0 0% 11%;
-    --brand: 12 87% 54%;
-    --brand-secondary: 14 92% 64%;
-    --brand-tertiary: 12 55% 13%;
+    --brand: 0 72% 50%;
+    --brand-secondary: 0 78% 58%;
+    --brand-tertiary: 0 40% 12%;
     --success: 134 61% 41%;
     --warning: 42 100% 50%;
-    --error: 354 70% 54%;
-    --info: 188 78% 41%;
+    --error: 0 72% 50%;
+    --info: 210 80% 52%;
     --border-strong: 0 0% 25%;
     --divider: 0 0% 12%;
 
-    --chart-1: 12 87% 54%;
-    --chart-2: 188 78% 41%;
+    --chart-1: 0 72% 50%;
+    --chart-2: 210 80% 52%;
     --chart-3: 42 100% 50%;
     --chart-4: 134 61% 41%;
-    --chart-5: 14 92% 64%;
+    --chart-5: 0 78% 58%;
   }
 }
 
@@ -209,7 +209,7 @@ input[type="datetime-local"]::-moz-focus-inner {
     hsl(var(--background));
 }
 
-/* —— Public landing (Velo welcome → web) —— */
+/* —— Public landing —— */
 .landing-hero-img {
   background-size: cover;
   background-position: center 30%;

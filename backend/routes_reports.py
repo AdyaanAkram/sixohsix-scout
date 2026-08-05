@@ -316,7 +316,9 @@ async def player_pdf(athlete_id: str, event_id: str | None = None, user=Depends(
             story.append(Spacer(1, 8))
 
     # head scout summary
-    scout_note = await db.athlete_notes.find_one({"athlete_id": athlete_id, "note_type": "scout_assessment"}, {"_id": 0}, sort=[("created_at", -1)])
+    scout_note = await db.athlete_notes.find_one(
+        {"athlete_id": athlete_id, "note_type": {"$in": ["scout_assessment", "scout"]}},
+        {"_id": 0}, sort=[("created_at", -1)])
     if scout_note:
         story.append(Paragraph("Head Scout Summary", h2))
         story.append(Paragraph(scout_note.get("summary", ""), body))

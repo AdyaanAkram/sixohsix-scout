@@ -195,6 +195,18 @@ async def athlete_invite_status(athlete_id: str, user=Depends(require_roles(*ADM
 
 # ---------- Athlete self-service ----------
 
+@router.get("/me/notes")
+async def me_notes(user=Depends(get_current_user)):
+    """Parent/athlete-visible notes only — private staff/scout notes are filtered out."""
+    from routes_development import _note_visible_to_role, _strip_note_for_role
+    a = await _own_athlete(user)
+    role = "parent" if user.get("role") in ("parent", "guardian") else "athlete"
+    notes = await db.athlete_notes.find(
+        {"athlete_id": a["id"], "organization_id": user["organization_id"]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    return [_strip_note_for_role(n, role) for n in notes if _note_visible_to_role(n, role)]
+
+
 @router.get("/me/athlete")
 async def me_athlete(user=Depends(get_current_user)):
     a = await _own_athlete(user)

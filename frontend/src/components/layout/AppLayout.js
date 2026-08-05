@@ -5,8 +5,8 @@ import { api } from "@/lib/api";
 import {
   LayoutDashboard, CalendarDays, Users, ClipboardList, BarChart3, TrendingUp,
   UserCog, FileSpreadsheet, Settings, LogOut, Home, ClipboardCheck,
-  MoreHorizontal, ScrollText, ShieldCheck, IdCard, CalendarRange, Bell, Dumbbell,
-  ChevronsUpDown, Building2, Check,
+  MoreHorizontal, ScrollText, IdCard, CalendarRange, Bell, Dumbbell,
+  ChevronsUpDown, Building2, Check, Crosshair,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -16,26 +16,38 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+/** Primary nav keys by role (order = display order). Admin keys listed separately. */
 const NAV_BY_ROLE = {
-  owner: ["dashboard", "programs", "events", "players", "review", "reports", "development", "staff", "templates", "drills", "audit", "settings"],
-  admin: ["dashboard", "programs", "events", "players", "review", "reports", "development", "staff", "templates", "drills", "audit", "settings"],
-  head_scout: ["dashboard", "programs", "events", "players", "review", "reports", "development", "settings"],
-  coach: ["dashboard", "programs", "events", "players", "development", "reports", "settings"],
-  evaluator: ["dashboard", "events", "evaluate", "my-evaluations", "settings"],
+  owner: ["dashboard", "players", "review", "events", "programs", "development", "scout", "reports"],
+  admin: ["dashboard", "players", "review", "events", "programs", "development", "scout", "reports"],
+  head_scout: ["dashboard", "players", "review", "events", "programs", "development", "scout", "reports"],
+  coach: ["dashboard", "players", "events", "programs", "development", "reports"],
+  evaluator: ["dashboard", "events", "evaluate", "my-evaluations"],
   athlete: ["my-id", "settings"],
   parent: ["my-id", "settings"],
 };
 
+const ADMIN_BY_ROLE = {
+  owner: ["staff", "templates", "drills", "audit", "settings"],
+  admin: ["staff", "templates", "drills", "audit", "settings"],
+  head_scout: ["settings"],
+  coach: ["settings"],
+  evaluator: ["settings"],
+  athlete: [],
+  parent: [],
+};
+
 const NAV_ITEMS = {
   dashboard: { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  programs: { to: "/programs", label: "Programs", icon: CalendarRange }, // long-term
-  events: { to: "/events", label: "Events", icon: CalendarDays }, // short-term camps/clinics
+  programs: { to: "/programs", label: "Programs", icon: CalendarRange },
+  events: { to: "/events", label: "Events", icon: CalendarDays },
   players: { to: "/players", label: "Players", icon: Users },
   evaluate: { to: "/evaluate", label: "Evaluate", icon: ClipboardCheck },
   "my-evaluations": { to: "/my-evaluations", label: "My Evaluations", icon: ClipboardList },
   review: { to: "/review", label: "Evaluations", icon: ClipboardList },
+  scout: { to: "/scout", label: "Scout", icon: Crosshair },
   reports: { to: "/reports", label: "Reports", icon: BarChart3 },
-  development: { to: "/development", label: "Development", icon: TrendingUp },
+  development: { to: "/development", label: "Progress", icon: TrendingUp },
   staff: { to: "/staff", label: "Staff", icon: UserCog },
   templates: { to: "/templates", label: "Templates", icon: FileSpreadsheet },
   drills: { to: "/drills", label: "Drills", icon: Dumbbell },
@@ -49,16 +61,16 @@ const ROLE_LABELS = {
   coach: "Coach", evaluator: "Evaluator", athlete: "Athlete", parent: "Guardian",
 };
 
-const Logo = ({ compact, orgName }) => (
+const Logo = ({ compact }) => (
   <div className="flex items-center gap-2.5">
-    <div className="h-9 w-9 rounded-xl bg-brand-tertiary flex items-center justify-center ring-1 ring-brand/40">
-      <ShieldCheck className="h-5 w-5 text-brand" />
+    <div className="h-9 w-9 rounded-xl bg-brand-tertiary flex items-center justify-center ring-1 ring-brand/50">
+      <span className="font-display text-[11px] font-extrabold text-brand leading-none">60</span>
     </div>
     {!compact && (
-      <div className="leading-none">
-        <p className="font-display text-xl text-foreground">60&apos;6&quot;</p>
-        <p className="text-[10px] text-muted-foreground tracking-wide uppercase truncate max-w-[140px]">
-          {orgName || "Athletics Scout"}
+      <div className="leading-none min-w-0">
+        <p className="font-display text-xl text-foreground">60&apos;6&quot; ID</p>
+        <p className="text-[10px] text-muted-foreground tracking-wide uppercase truncate">
+          Athletics
         </p>
       </div>
     )}
@@ -89,28 +101,28 @@ const SidebarLink = ({ item, onClick }) => {
 };
 
 const MOBILE_PRIMARY = {
-  owner: ["dashboard", "programs", "players", "review"],
-  admin: ["dashboard", "programs", "players", "review"],
-  head_scout: ["dashboard", "programs", "players", "review"],
-  coach: ["dashboard", "programs", "players", "development"],
+  owner: ["dashboard", "players", "review", "events"],
+  admin: ["dashboard", "players", "review", "events"],
+  head_scout: ["dashboard", "players", "review", "events"],
+  coach: ["dashboard", "players", "events", "development"],
   evaluator: ["dashboard", "events", "evaluate", "my-evaluations"],
   athlete: ["my-id", "settings"],
   parent: ["my-id", "settings"],
 };
 
 const MOBILE_LABELS = {
-  dashboard: "Home", programs: "Programs", events: "Events", players: "Players", review: "Evaluate",
-  evaluate: "Evaluate", development: "Develop", "my-evaluations": "My Evals",
-  "my-id": "My ID", settings: "Settings",
+  dashboard: "Home", programs: "Programs", events: "Events", players: "Players", review: "Evals",
+  evaluate: "Evaluate", development: "Progress", scout: "Scout", "my-evaluations": "My Evals",
+  "my-id": "My ID", settings: "Settings", reports: "Reports",
 };
 const MOBILE_ICONS = {
   dashboard: Home, programs: CalendarRange, events: CalendarDays, players: Users, review: ClipboardList,
-  evaluate: ClipboardCheck, development: TrendingUp, "my-evaluations": ClipboardList,
-  "my-id": IdCard, settings: Settings,
+  evaluate: ClipboardCheck, development: TrendingUp, scout: Crosshair, "my-evaluations": ClipboardList,
+  "my-id": IdCard, settings: Settings, reports: BarChart3,
 };
 
 const STAFF_ONLY_PREFIXES = [
-  "/players", "/evaluate", "/evaluation", "/events", "/review", "/reports",
+  "/players", "/evaluate", "/evaluation", "/events", "/review", "/reports", "/scout",
   "/staff", "/templates", "/drills", "/audit-log", "/development", "/my-evaluations", "/programs",
 ];
 
@@ -206,9 +218,9 @@ export const AppLayout = ({ children }) => {
   const location = useLocation();
   const role = user?.role || "evaluator";
   const navKeys = NAV_BY_ROLE[role] || NAV_BY_ROLE.evaluator;
+  const adminKeys = ADMIN_BY_ROLE[role] || [];
   const mobileKeys = MOBILE_PRIMARY[role] || MOBILE_PRIMARY.evaluator;
-  const moreKeys = navKeys.filter((k) => !mobileKeys.includes(k));
-  // Full-screen scoring — hide chrome so metrics get the viewport
+  const moreKeys = [...navKeys, ...adminKeys].filter((k) => !mobileKeys.includes(k));
   const focusMode = location.pathname.startsWith("/evaluation/");
 
   const loadNotifs = () => {
@@ -230,7 +242,6 @@ export const AppLayout = ({ children }) => {
     } catch { /* ignore */ }
   };
 
-  // Athlete/parent route guard (client) — server also rejects
   if (role === "athlete" || role === "parent") {
     const path = location.pathname;
     const blocked = STAFF_ONLY_PREFIXES.some((p) => path === p || path.startsWith(p + "/"));
@@ -241,16 +252,23 @@ export const AppLayout = ({ children }) => {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Desktop sidebar ≥768px */}
       <aside className={cn("hidden md:flex fixed inset-y-0 left-0 w-[268px] flex-col border-r border-border bg-surface-2 z-40", focusMode && "md:hidden")} data-testid="desktop-sidebar-nav">
         <div className="px-5 py-5 border-b border-divider space-y-3">
-          <Logo orgName={user?.organization_name} />
+          <Logo />
           <OrgSwitcher />
         </div>
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {navKeys.map((k) => (
             <SidebarLink key={k} item={NAV_ITEMS[k]} />
           ))}
+          {adminKeys.length > 0 && (
+            <>
+              <p className="px-3 pt-4 pb-1 text-[10px] uppercase tracking-widest text-muted-foreground">Administration</p>
+              {adminKeys.map((k) => (
+                <SidebarLink key={k} item={NAV_ITEMS[k]} />
+              ))}
+            </>
+          )}
         </nav>
         <div className="border-t border-divider px-4 py-4 space-y-2">
           <Button variant="ghost" className="w-full justify-start gap-2 relative" onClick={openNotifs} data-testid="sidebar-notifications-button">
@@ -288,7 +306,6 @@ export const AppLayout = ({ children }) => {
         </SheetContent>
       </Sheet>
 
-      {/* Mobile top bar — glass (hidden in evaluation focus mode) */}
       {!focusMode && (
         <header className="md:hidden sticky top-0 z-40 glass-bar border-b">
           <div className="flex items-center justify-between px-4 h-14 gap-2">
@@ -310,7 +327,6 @@ export const AppLayout = ({ children }) => {
       )}
 
       <main className={cn(!focusMode && "md:pl-[268px]")}>
-        {/* pt-* only — py-* would override bottom-nav clearance */}
         <div
           className={cn(
             "mx-auto max-w-[1200px] px-4 sm:px-6 pt-5 sm:pt-7",
@@ -323,15 +339,15 @@ export const AppLayout = ({ children }) => {
         </div>
       </main>
 
-      {/* Mobile bottom tabs — hidden while scoring so form footer isn't stacked */}
       {!focusMode && (
       <nav
         className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t glass-bar"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
         data-testid="mobile-bottom-nav"
       >
-        <div className={cn("grid", mobileKeys.length + (moreKeys.length ? 1 : 0) <= 5 ? `grid-cols-${Math.min(5, mobileKeys.length + (moreKeys.length ? 1 : 0))}` : "grid-cols-5")}
+        <div
           style={{ gridTemplateColumns: `repeat(${Math.min(5, mobileKeys.length + (moreKeys.length ? 1 : 0))}, minmax(0, 1fr))` }}
+          className="grid"
         >
           {mobileKeys.map((k) => {
             const item = NAV_ITEMS[k];

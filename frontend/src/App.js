@@ -31,6 +31,8 @@ import ProgramDetail from "@/pages/ProgramDetail";
 import Story from "@/pages/Story";
 import Redeem from "@/pages/Redeem";
 import Drills from "@/pages/Drills";
+import Scout from "@/pages/Scout";
+import PlayerCompare from "@/pages/PlayerCompare";
 
 const Protected = ({ children }) => {
   const { user, loading } = useAuth();
@@ -79,6 +81,8 @@ function App() {
             <Route path="/evaluation/:evaluationId" element={<Protected><StaffOnly><EvaluationForm /></StaffOnly></Protected>} />
             <Route path="/my-evaluations" element={<Protected><StaffOnly><MyEvaluations /></StaffOnly></Protected>} />
             <Route path="/review" element={<Protected><StaffOnly><ReviewQueue /></StaffOnly></Protected>} />
+            <Route path="/scout" element={<Protected><StaffOnly><Scout /></StaffOnly></Protected>} />
+            <Route path="/scout/compare" element={<Protected><StaffOnly><PlayerCompare /></StaffOnly></Protected>} />
             <Route path="/reports" element={<Protected><StaffOnly><Reports /></StaffOnly></Protected>} />
             <Route path="/development" element={<Protected><StaffOnly><Development /></StaffOnly></Protected>} />
             <Route path="/staff" element={<Protected><StaffOnly><Staff /></StaffOnly></Protected>} />
