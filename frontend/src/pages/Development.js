@@ -44,9 +44,21 @@ export default function Development() {
                     </div>
                     <StatusBadge status={g.status} />
                   </div>
+                  {g.description && <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{g.description}</p>}
+                  {(g.recommended_action || g.recommended_drills) && (
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                      <span className="text-foreground/70 font-medium">Action:</span> {g.recommended_action || g.recommended_drills}
+                    </p>
+                  )}
                   <div className="mt-3 flex items-center gap-3">
                     <Progress value={g.progress} className="h-2 flex-1" />
                     <span className="text-xs font-mono-num text-muted-foreground">{g.progress}%</span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                    {g.assigned_coach_name && <span>Coach: {g.assigned_coach_name}</span>}
+                    {g.start_date && <span>Start: {g.start_date}</span>}
+                    {g.target_date && <span>Target: {g.target_date}</span>}
+                    {g.follow_up_date && <span>Follow-up: {g.follow_up_date}</span>}
                   </div>
                 </CardContent>
               </Card>
@@ -72,6 +84,12 @@ export default function Development() {
                   </div>
                   <p className="text-xs text-muted-foreground mt-0.5">{n.assessment_type} · {n.author_name}</p>
                   {n.strengths && <p className="text-sm text-muted-foreground mt-1.5 line-clamp-2">{n.strengths}</p>}
+                  {(n.related_event_name || n.follow_up_date) && (
+                    <p className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-3">
+                      {n.related_event_name && <span>Event: {n.related_event_name}</span>}
+                      {n.follow_up_date && <span>Follow-up: {n.follow_up_date}</span>}
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             ))}

@@ -29,7 +29,13 @@ export default function MyEvaluations() {
       ) : (
         <div className="space-y-2">
           {evals.map((ev) => (
-            <button key={ev.id} className="w-full text-left" onClick={() => navigate(`/evaluation/${ev.id}`)} data-testid={`my-eval-${ev.id}`}>
+            <button
+              key={ev.id}
+              className="w-full text-left"
+              // A submitted evaluation opens its results summary; a draft reopens the form.
+              onClick={() => navigate(ev.status === "draft" ? `/evaluation/${ev.id}` : `/evaluation/${ev.id}/results`)}
+              data-testid={`my-eval-${ev.id}`}
+            >
               <Card className="rounded-2xl border-border hover:bg-secondary transition">
                 <CardContent className="py-3.5 flex items-center gap-3">
                   <PlayerAvatar firstName={ev.athlete?.first_name} lastName={ev.athlete?.last_name} size="sm" />

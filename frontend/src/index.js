@@ -4,6 +4,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@/index.css";
 import App from "@/App";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { registerAppShell } from "@/lib/templateCache";
+
+// Register the offline app-shell service worker at boot so a cold reload while
+// offline still loads the app — not only after the evaluate flow has been opened.
+registerAppShell();
 
 const queryClient = new QueryClient({
   defaultOptions: {

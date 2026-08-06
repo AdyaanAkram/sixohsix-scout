@@ -12,23 +12,56 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { PlayerAvatar } from "@/components/common/PlayerAvatar";
-import { StatusBadge } from "@/components/common/StatusBadge";
+import { StatusBadge, VerificationBadge } from "@/components/common/StatusBadge";
 import { EmptyState } from "@/components/common/EmptyState";
+import { TimelineItem } from "@/components/common/TimelineItem";
 import { IdRadarChart } from "@/components/common/IdRadarChart";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import {
   ArrowLeft, FileDown, Flag, Plus, TrendingUp, TrendingDown, Minus,
   ClipboardList, Image as ImageIcon, StickyNote, CalendarClock, Target, Archive, Camera, Mail,
-  Gauge, Trophy, Sparkles,
+  Gauge, Trophy, Sparkles, ChevronDown, Check, X,
 } from "lucide-react";
 import {
-  ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
 } from "recharts";
 
 function formatPermanentId(id) {
   return `606-${String(id || "").slice(0, 8).toUpperCase()}`;
+}
+
+const RECENT_EVAL_MONTHS = 12;
+
+function latestEvaluationDate(summary) {
+  const dates = (summary?.event_scores || [])
+    .map((e) => e.event_date)
+    .concat([summary?.last_evaluation_date])
+    .filter(Boolean)
+    .map((d) => new Date(d))
+    .filter((d) => !Number.isNaN(d.getTime()));
+  if (!dates.length) return null;
+  return new Date(Math.max(...dates.map((d) => d.getTime())));
+}
+
+function hasRecentEvaluation(summary) {
+  if ((summary?.evaluation_count || 0) === 0) return false;
+  const latest = latestEvaluationDate(summary);
+  if (!latest) return false;
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - RECENT_EVAL_MONTHS);
+  return latest >= cutoff;
+}
+
+// Media rows are keyed on file_type ("photo" | "video"), which is what the rest
+// of this page renders off. Consent must be approved — never count a video that
+// is still pending guardian consent.
+function hasApprovedVideo(mediaList) {
+  return (mediaList || []).some(
+    (m) => m.file_type === "video" && (m.consent_status === "approved" || m.status === "approved")
+  );
 }
 
 function computeProfileCompletion(athlete, summary, mediaList) {
@@ -36,12 +69,143 @@ function computeProfileCompletion(athlete, summary, mediaList) {
     { key: "photo", label: "Updated photo", ok: Boolean(athlete?.photo_url) },
     { key: "height", label: "Current height", ok: Boolean(athlete?.height) },
     { key: "weight", label: "Current weight", ok: Boolean(athlete?.weight) },
-    { key: "eval", label: "Recent evaluation", ok: (summary?.evaluation_count || 0) > 0 },
-    { key: "video", label: "Approved video", ok: (mediaList || []).some((m) => (m.media_type || m.content_type || "").includes("video") && (m.consent_status === "approved" || m.status === "approved" || m.consent_verified)) },
+    { key: "eval", label: `Evaluation in last ${RECENT_EVAL_MONTHS} months`, ok: hasRecentEvaluation(summary) },
+    { key: "video", label: "Approved video", ok: hasApprovedVideo(mediaList) },
   ];
   const done = checks.filter((c) => c.ok).length;
   return { pct: Math.round((done / checks.length) * 100), missing: checks.filter((c) => !c.ok).map((c) => c.label), checks };
 }
+
+const METRIC_SOURCES = [
+  { value: "athlete_submitted", label: "Athlete submitted" },
+  { value: "parent_submitted", label: "Parent submitted" },
+  { value: "coach_submitted", label: "Coach submitted" },
+  { value: "event_verified", label: "Event verified" },
+  { value: "device_verified", label: "Device verified" },
+  { value: "id_verified", label: "60'6\" ID verified" },
+];
+
+const SourceBadge = ({ source, compact }) =>
+  source ? <VerificationBadge source={source} compact={compact} /> : null;
+
+// The API returns measurement points as objects; tolerate a bare number too.
+function pointValue(p) {
+  if (typeof p === "number") return Number.isFinite(p) ? p : null;
+  return typeof p?.value === "number" && Number.isFinite(p.value) ? p.value : null;
+}
+
+// Benchmarks are two-point (floor → elite). Chart the elite target and label it
+// as such — never invent a single "benchmark value" when none is defined.
+function benchmarkPoint(b) {
+  if (typeof b === "number") return Number.isFinite(b) ? { value: b, elite: false } : null;
+  if (!b) return null;
+  if (typeof b.elite_value === "number") return { value: b.elite_value, elite: true, floor: b.floor_value };
+  if (typeof b.value === "number") return { value: b.value, elite: false };
+  return null;
+}
+
+// Only comparators the API actually returned are charted — a missing benchmark
+// is omitted entirely, never estimated.
+function comparisonSeries(item) {
+  const age = benchmarkPoint(item?.age_group_benchmark ?? item?.age_benchmark);
+  const pos = benchmarkPoint(item?.position_benchmark);
+  return [
+    { key: "current", name: "Current", value: pointValue(item?.current) },
+    { key: "previous", name: "Previous", value: pointValue(item?.previous) },
+    { key: "personal_best", name: "Personal best", value: pointValue(item?.personal_best) },
+    { key: "age_benchmark", name: age?.elite ? "Age group elite" : "Age group", value: age?.value ?? null },
+    { key: "position_benchmark", name: pos?.elite ? "Position elite" : "Position", value: pos?.value ?? null },
+  ].filter((s) => typeof s.value === "number" && Number.isFinite(s.value));
+}
+
+function deltaLabel(current, other, lowerBetter, unit) {
+  if (typeof current !== "number" || typeof other !== "number") return null;
+  const diff = Math.round((current - other) * 100) / 100;
+  if (diff === 0) return { text: "even", tone: "text-muted-foreground" };
+  const text = `${diff > 0 ? "+" : ""}${diff}${unit ? ` ${unit}` : ""}`;
+  // Direction unknown (legacy metric with no catalog entry) — stay neutral
+  // rather than implying a higher number is better.
+  if (typeof lowerBetter !== "boolean") return { text, tone: "text-muted-foreground" };
+  const better = lowerBetter ? diff < 0 : diff > 0;
+  return { text, tone: better ? "text-success" : "text-destructive" };
+}
+
+const MetricRow = ({ m }) => (
+  <Card className="rounded-2xl border-border">
+    <CardContent className="py-3 flex justify-between gap-2">
+      <div>
+        <p className="text-sm font-semibold capitalize">{m.label || String(m.metric_key || "").replace(/_/g, " ")}</p>
+        <p className="text-xs text-muted-foreground">{m.measured_at} · {m.verified_by_name || "Staff"}</p>
+        {m.source && <div className="mt-1"><SourceBadge source={m.source} compact /></div>}
+      </div>
+      <p className="font-mono-num font-bold text-lg text-brand">{m.value} {m.unit}</p>
+    </CardContent>
+  </Card>
+);
+
+const MetricComparisonCard = ({ item }) => {
+  const series = comparisonSeries(item);
+  const current = pointValue(item?.current);
+  const comparators = series.filter((s) => s.key !== "current");
+  const unit = item?.unit || "";
+  const lower = item?.lower_better;
+  return (
+    <Card className="rounded-2xl border-border" data-testid={`metric-comparison-${item.metric_key}`}>
+      <CardContent className="py-4 space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-foreground">{item.label || String(item.metric_key || "").replace(/_/g, " ")}</p>
+            <p className="text-xs text-muted-foreground">
+              {item?.current?.measured_at || "—"}
+              {lower === true && <span className="ml-2 text-[10px] uppercase tracking-wide">Lower is better</span>}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="font-mono-num font-bold text-2xl text-brand">{typeof current === "number" ? current : "—"} {unit}</p>
+            {item?.current?.source && <div className="mt-1 flex justify-end"><SourceBadge source={item.current.source} /></div>}
+          </div>
+        </div>
+
+        {comparators.length > 0 ? (
+          <>
+            <ResponsiveContainer width="100%" height={40 + series.length * 26}>
+              <BarChart data={series} layout="vertical" margin={{ top: 4, right: 16, bottom: 4, left: 10 }}>
+                <CartesianGrid stroke="hsl(var(--divider))" strokeDasharray="3 3" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 10 }} />
+                <YAxis type="category" dataKey="name" width={92} tick={{ fontSize: 10 }} />
+                <Tooltip formatter={(v) => `${v} ${unit}`} />
+                <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={14}>
+                  {series.map((s) => (
+                    <Cell key={s.key} fill={s.key === "current" ? "hsl(var(--brand))" : "hsl(var(--surface-3))"} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            <div className="flex flex-wrap gap-2">
+              {comparators.map((c) => {
+                const d = deltaLabel(current, c.value, lower, unit);
+                if (!d) return null;
+                return (
+                  <span key={c.key} className="rounded-full bg-secondary px-2.5 py-0.5 text-[11px]">
+                    <span className="text-muted-foreground">vs {c.name.toLowerCase()} </span>
+                    <span className={`font-mono-num font-semibold ${d.tone}`}>{d.text}</span>
+                  </span>
+                );
+              })}
+              {typeof item?.percentile === "number" && (
+                <span className="rounded-full bg-brand/15 border border-brand/40 text-brand px-2.5 py-0.5 text-[11px] font-semibold font-mono-num">
+                  {Math.round(item.percentile)}th percentile
+                </span>
+              )}
+            </div>
+          </>
+        ) : (
+          <p className="text-xs text-muted-foreground">No previous result, personal best or benchmark on file to compare against yet.</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
 
 const ASSESSMENT_TYPES = ["Practice Observation", "Game Observation", "Training Assessment", "Tryout Assessment", "Showcase Assessment", "Development Check-In", "Injury Return Observation", "Position Review", "Scout Follow-Up"];
 const NOTE_TYPES = [
@@ -247,8 +411,6 @@ const UploadPhotoDialog = ({ athleteId, onDone }) => {
   );
 };
 
-const TIMELINE_ICONS = { evaluation: ClipboardList, note: StickyNote, scout_note: Flag, goal: Target, media: ImageIcon };
-
 export default function PlayerProfile() {
   const { athleteId } = useParams();
   const navigate = useNavigate();
@@ -266,8 +428,11 @@ export default function PlayerProfile() {
   const [metrics, setMetrics] = useState(null);
   const [milestones, setMilestones] = useState(null);
   const [catalog, setCatalog] = useState([]);
-  const [metricForm, setMetricForm] = useState({ metric_key: "exit_velo", value: "", measured_at: "", source: "" });
+  const [sources, setSources] = useState([]);
+  const [comparison, setComparison] = useState(null);
+  const [metricForm, setMetricForm] = useState({ metric_key: "exit_velo", value: "", measured_at: "", source: "coach_submitted" });
   const [metricBusy, setMetricBusy] = useState(false);
+  const [metricError, setMetricError] = useState("");
   const [awards, setAwards] = useState(null);
   const [awardForm, setAwardForm] = useState({ title: "", category: "overall", description: "" });
   const [awardBusy, setAwardBusy] = useState(false);
@@ -283,6 +448,13 @@ export default function PlayerProfile() {
     api.get(`/athletes/${athleteId}/summary`).then((r) => setSummary(r.data)).catch((e) => { toast.error(errMsg(e)); navigate("/players"); });
   }, [athleteId, navigate]);
   useEffect(() => { loadSummary(); }, [loadSummary]);
+
+  // Media must load on mount, not only when the Media tab opens: profile
+  // completion counts an approved video and otherwise caps at 80% for everyone.
+  const loadMedia = useCallback(() => {
+    api.get(`/athletes/${athleteId}/media`).then((r) => setMedia(r.data)).catch(() => setMedia([]));
+  }, [athleteId]);
+  useEffect(() => { loadMedia(); }, [loadMedia]);
 
   useEffect(() => {
     if (!canCoach) return;
@@ -315,27 +487,63 @@ export default function PlayerProfile() {
       api.get(`/athletes/${athleteId}/goals`).then((r) => setGoals(r.data)).catch(() => setGoals([]));
       api.get(`/athletes/${athleteId}/development-plan/latest`).then((r) => setPlan(r.data)).catch(() => setPlan(false));
     }
-    if (tab === "media" && !media) api.get(`/athletes/${athleteId}/media`).then((r) => setMedia(r.data)).catch(() => setMedia([]));
-    if (tab === "timeline" && !timeline) api.get(`/athletes/${athleteId}/timeline`).then((r) => setTimeline(r.data)).catch(() => setTimeline([]));
+    if (tab === "story" && !timeline) {
+      // Unified staff timeline — same item shape as the public ID Story. Media
+      // bytes are served by an authenticated route, so resolve the signed
+      // thumbnail URL here from the media_id the API returns.
+      api.get(`/athletes/${athleteId}/story-timeline`)
+        .then((r) => setTimeline((r.data || []).map((e) => (
+          e.media_id && e.subtitle === "photo"
+            ? { ...e, thumbnail_url: signedUrl(`/media/${e.media_id}/file`) }
+            : e
+        ))))
+        .catch(() => setTimeline([]));
+    }
     if (tab === "verified" && !metrics) {
       api.get(`/metrics/athlete/${athleteId}`).then((r) => setMetrics(r.data)).catch(() => setMetrics([]));
       api.get(`/milestones/athlete/${athleteId}`).then((r) => setMilestones(r.data)).catch(() => setMilestones([]));
-      if (canCoach) api.get("/metrics/catalog").then((r) => setCatalog(r.data)).catch(() => {});
+      // Per-metric comparison (previous / personal best / age + position benchmark).
+      // Degrades to the plain measurement list while the endpoint is unavailable.
+      api.get(`/metrics/athlete/${athleteId}/comparison`)
+        .then((r) => setComparison(Array.isArray(r.data) ? r.data : (r.data?.metrics || [])))
+        .catch(() => setComparison([]));
     }
     if (tab === "awards" && !awards) {
       api.get(`/awards/athlete/${athleteId}`).then((r) => setAwards(r.data)).catch(() => setAwards([]));
     }
-  }, [tab, athleteId, evaluations, notes, goals, media, timeline, metrics, awards, canCoach]);
+  }, [tab, athleteId, evaluations, notes, goals, timeline, metrics, awards]);
+
+  // Catalog carries each metric's unit and lower_better direction, which the
+  // career-best aggregation needs regardless of which tab is open.
+  useEffect(() => {
+    api.get("/metrics/catalog").then((r) => {
+      const list = r.data || [];
+      setCatalog(list);
+      setMetricForm((f) => (list.some((c) => c.key === f.metric_key)
+        ? f
+        : { ...f, metric_key: (list.find((c) => !c.legacy) || {}).key || f.metric_key }));
+    }).catch(() => {});
+  }, []);
+
+  // Only offer sources this role may actually write — the API rejects the rest.
+  useEffect(() => {
+    api.get("/metrics/sources").then((r) => {
+      setSources((r.data?.sources || []).filter((s) => s.allowed_for_me !== false));
+      if (r.data?.default_for_me) setMetricForm((f) => ({ ...f, source: r.data.default_for_me }));
+    }).catch(() => {});
+  }, []);
 
   const refreshAll = () => {
     loadSummary();
-    setNotes(null); setGoals(null); setMedia(null); setTimeline(null);
-    setMetrics(null); setMilestones(null); setAwards(null); setPlan(null);
+    loadMedia();
+    setNotes(null); setGoals(null); setTimeline(null);
+    setMetrics(null); setMilestones(null); setComparison(null); setAwards(null); setPlan(null);
   };
 
   const logMetric = async () => {
     if (!metricForm.value) return;
     setMetricBusy(true);
+    setMetricError("");
     try {
       const r = await api.post("/metrics", {
         athlete_id: athleteId,
@@ -345,9 +553,15 @@ export default function PlayerProfile() {
         source: metricForm.source || undefined,
       });
       toast.success(r.data.is_personal_best ? "Logged — new personal best!" : "Metric logged.");
-      setMetricForm((f) => ({ ...f, value: "", source: "" }));
-      setMetrics(null); setMilestones(null);
-    } catch (e) { toast.error(errMsg(e)); } finally { setMetricBusy(false); }
+      setMetricForm((f) => ({ ...f, value: "" }));
+      setMetrics(null); setMilestones(null); setComparison(null);
+    } catch (e) {
+      // The API rejects verified-tier sources for unauthorized roles — show the
+      // reason inline instead of leaving the form looking successful.
+      const msg = errMsg(e);
+      setMetricError(msg);
+      toast.error(msg);
+    } finally { setMetricBusy(false); }
   };
 
   const submitAward = async () => {
@@ -383,7 +597,7 @@ export default function PlayerProfile() {
     try {
       await api.post(`/media/${mediaId}/consent`, { approve });
       toast.success(approve ? "Media approved." : "Media rejected.");
-      setMedia(null);
+      loadMedia();
     } catch (e) { toast.error(errMsg(e)); }
   };
 
@@ -407,6 +621,18 @@ export default function PlayerProfile() {
   const a = summary.athlete;
   const cats = summary.category_scores || {};
   const radarData = Object.entries(cats).map(([name, d]) => ({ category: name, score: d.score }));
+  // Strengths / needs come from the structured category scores only — never from
+  // parsing the free-text assessment blobs.
+  const rankedCats = Object.entries(cats)
+    .filter(([, d]) => typeof d?.score === "number")
+    .map(([name, d]) => ({ name, score: d.score }))
+    .sort((x, y) => y.score - x.score);
+  const sideCount = rankedCats.length > 1 ? Math.max(1, Math.min(3, Math.floor(rankedCats.length / 2))) : rankedCats.length;
+  const topStrengths = rankedCats.slice(0, sideCount);
+  const topNeeds = rankedCats.length > 1 ? rankedCats.slice(-sideCount).reverse() : [];
+  const growthRows = summary.metric_history || [];
+  const improvedCount = growthRows.filter((m) => m.improved === true).length;
+  const declinedCount = growthRows.filter((m) => m.improved === false && m.change !== 0 && m.change != null).length;
   const trendData = (summary.event_scores || []).map((e) => ({ name: e.event_name?.slice(0, 14) || "Event", date: e.event_date, score: e.overall_score }));
   const change = summary.score_change;
   const completion = computeProfileCompletion(a, summary, media || []);
@@ -423,7 +649,7 @@ export default function PlayerProfile() {
     story: "Player Story", media: "Videos & Photos", notes: "Coach Notes", development: "Development Goals",
     events: "Events", seasons: "Seasons", rankings: "Rankings", private: "Private", awards: "Awards", timeline: "Timeline",
   };
-  const PROFILE_TABS = ["overview", "evaluations", "progress", "verified", "story", "media", "notes", "development", "events", "seasons", "rankings", "private"];
+  const PROFILE_TABS = ["overview", "evaluations", "progress", "verified", "story", "media", "notes", "development", "awards", "events", "seasons", "rankings", "private"];
 
   return (
     <div className="space-y-4">
@@ -532,6 +758,16 @@ export default function PlayerProfile() {
               <p className="text-xs text-muted-foreground mb-2">Profile completion</p>
               <Progress value={completion.pct} className="h-3" />
               <p className="text-2xl font-bold font-mono-num text-brand mt-2">{completion.pct}%</p>
+              <ul className="mt-2 space-y-1" data-testid="completion-checklist">
+                {completion.checks.map((c) => (
+                  <li key={c.key} className="flex items-center gap-1.5 text-xs">
+                    {c.ok
+                      ? <Check className="h-3.5 w-3.5 text-success shrink-0" />
+                      : <X className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                    <span className={c.ok ? "text-muted-foreground" : "text-foreground"}>{c.label}</span>
+                  </li>
+                ))}
+              </ul>
             </CardContent></Card>
             {prevScore != null && summary.latest_overall != null && (
               <Card className="rounded-2xl border-border sm:col-span-2"><CardContent className="py-3">
@@ -546,6 +782,39 @@ export default function PlayerProfile() {
               </CardContent></Card>
             )}
           </div>
+
+          {rankedCats.length > 0 && (
+            <Card className="rounded-2xl border-border" data-testid="strengths-needs-card">
+              <CardContent className="pt-4 pb-4 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-success font-semibold mb-1.5">Strongest skills</p>
+                  <ul className="space-y-1" data-testid="overview-strengths">
+                    {topStrengths.map((c) => (
+                      <li key={c.name} className="flex items-center justify-between gap-2 text-sm">
+                        <span className="truncate">{c.name}</span>
+                        <span className="font-mono-num font-semibold text-foreground">{c.score}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-warning font-semibold mb-1.5">Main development needs</p>
+                  {topNeeds.length > 0 ? (
+                    <ul className="space-y-1" data-testid="overview-needs">
+                      {topNeeds.map((c) => (
+                        <li key={c.name} className="flex items-center justify-between gap-2 text-sm">
+                          <span className="truncate">{c.name}</span>
+                          <span className="font-mono-num font-semibold text-foreground">{c.score}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">More scored categories are needed to rank development needs.</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Card className="rounded-2xl border-border">
@@ -587,12 +856,21 @@ export default function PlayerProfile() {
             </Card>
           </div>
 
-          {(summary.metric_history || []).length > 0 && (
+          {growthRows.length > 0 && (
             <Card className="rounded-2xl border-border" data-testid="metric-growth-card">
               <CardContent className="pt-4 pb-4">
                 <p className="font-semibold text-sm text-foreground mb-1">Metric Growth (trainer view)</p>
-                <p className="text-xs text-muted-foreground mb-3">Raw measurements and ratings across events — what improved, what needs work.</p>
-                <div className="overflow-x-auto">
+                <p className="text-xs text-muted-foreground">
+                  {growthRows.length} tracked {growthRows.length === 1 ? "metric" : "metrics"} ·{" "}
+                  <span className="text-success font-semibold">{improvedCount} improved</span> ·{" "}
+                  <span className="text-destructive font-semibold">{declinedCount} declined</span>
+                </p>
+                <Collapsible>
+                  <CollapsibleTrigger className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-info hover:underline [&[data-state=open]>svg]:rotate-180" data-testid="metric-growth-expander">
+                    View Full Report <ChevronDown className="h-3.5 w-3.5" />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                <div className="overflow-x-auto pt-3">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground border-b">
@@ -626,16 +904,34 @@ export default function PlayerProfile() {
                     </tbody>
                   </table>
                 </div>
+                  </CollapsibleContent>
+                </Collapsible>
               </CardContent>
             </Card>
           )}
 
           {summary.latest_scout_assessment && (
-            <Card className="rounded-2xl border-border">
+            <Card className="rounded-2xl border-border" data-testid="scout-assessment-card">
               <CardContent className="pt-4 pb-4">
                 <p className="font-semibold text-sm text-foreground flex items-center gap-2"><Flag className="h-4 w-4 text-destructive" /> Latest Head Scout Assessment</p>
-                <p className="text-sm text-muted-foreground mt-2">{summary.latest_scout_assessment.summary}</p>
-                <p className="text-xs text-muted-foreground mt-2">{summary.latest_scout_assessment.author_name} · {summary.latest_scout_assessment.assessment_date}</p>
+                <p className="text-xs text-muted-foreground mt-1">{summary.latest_scout_assessment.author_name} · {summary.latest_scout_assessment.assessment_date}</p>
+                <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{summary.latest_scout_assessment.summary}</p>
+                <Collapsible>
+                  <CollapsibleTrigger className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-info hover:underline [&[data-state=open]>svg]:rotate-180" data-testid="scout-assessment-expander">
+                    View Details <ChevronDown className="h-3.5 w-3.5" />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="pt-2 space-y-2 text-sm text-muted-foreground">
+                      <p className="whitespace-pre-line">{summary.latest_scout_assessment.summary}</p>
+                      {summary.latest_scout_assessment.position_recommendation && (
+                        <p><span className="font-semibold text-foreground">Position projection:</span> {summary.latest_scout_assessment.position_recommendation}</p>
+                      )}
+                      {summary.latest_scout_assessment.development_recommendation && (
+                        <p><span className="font-semibold text-foreground">Development recommendation:</span> {summary.latest_scout_assessment.development_recommendation}</p>
+                      )}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
               </CardContent>
             </Card>
           )}
@@ -708,11 +1004,11 @@ export default function PlayerProfile() {
             <Card className="rounded-2xl border-border">
               <CardContent className="py-4 space-y-3">
                 <p className="font-semibold text-sm flex items-center gap-2"><Gauge className="h-4 w-4 text-brand" /> Log verified metric</p>
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
                   <Select value={metricForm.metric_key} onValueChange={(v) => setMetricForm((f) => ({ ...f, metric_key: v }))}>
                     <SelectTrigger className="h-10 rounded-lg" data-testid="metric-key-select"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {(catalog.length ? catalog : [
+                      {(catalog.length ? catalog.filter((c) => !c.legacy) : [
                         { key: "exit_velo", label: "Exit Velocity" },
                         { key: "pitch_velo", label: "Pitch Velocity" },
                         { key: "sixty_yd", label: "60-Yard Dash" },
@@ -721,10 +1017,18 @@ export default function PlayerProfile() {
                   </Select>
                   <Input type="number" step="0.01" placeholder="Value" value={metricForm.value} onChange={(e) => setMetricForm((f) => ({ ...f, value: e.target.value }))} className="h-10 rounded-lg" data-testid="metric-value-input" />
                   <Input type="date" value={metricForm.measured_at} onChange={(e) => setMetricForm((f) => ({ ...f, measured_at: e.target.value }))} className="h-10 rounded-lg" />
+                  <Select value={metricForm.source} onValueChange={(v) => setMetricForm((f) => ({ ...f, source: v }))}>
+                    <SelectTrigger className="h-10 rounded-lg" data-testid="metric-source-select"><SelectValue placeholder="Source" /></SelectTrigger>
+                    <SelectContent>
+                      {(sources.length ? sources.map((s) => ({ value: s.key, label: s.label })) : METRIC_SOURCES)
+                        .map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                   <Button className="rounded-xl bg-primary h-10" disabled={metricBusy || !metricForm.value} onClick={logMetric} data-testid="metric-log-button">
                     {metricBusy ? "Saving…" : "Log metric"}
                   </Button>
                 </div>
+                {metricError && <p className="text-xs text-destructive" data-testid="metric-log-error">{metricError}</p>}
               </CardContent>
             </Card>
           )}
@@ -741,30 +1045,25 @@ export default function PlayerProfile() {
               </CardContent>
             </Card>
           )}
+          {(comparison || []).length > 0 && (
+            <div className="space-y-2" data-testid="metric-comparison-list">
+              {comparison.map((item) => <MetricComparisonCard key={item.metric_key} item={item} />)}
+            </div>
+          )}
           {!metrics ? <Skeleton className="h-32 rounded-2xl" /> : metrics.length === 0 ? (
             <EmptyState icon={Gauge} title="No verified metrics" hint="Coaches can log exit velo, 60-yard, pop time, and other objective measures." />
+          ) : (comparison || []).length > 0 ? (
+            <Collapsible>
+              <CollapsibleTrigger className="inline-flex items-center gap-1 text-xs font-semibold text-info hover:underline [&[data-state=open]>svg]:rotate-180" data-testid="metric-log-expander">
+                View Details — all logged measurements ({metrics.length}) <ChevronDown className="h-3.5 w-3.5" />
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="space-y-2 pt-2">{metrics.map((m) => <MetricRow key={m.id} m={m} />)}</div>
+              </CollapsibleContent>
+            </Collapsible>
           ) : (
             <div className="space-y-2">
-              {metrics.map((m) => (
-                <Card key={m.id} className="rounded-2xl border-border">
-                  <CardContent className="py-3 flex justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-semibold capitalize">{m.metric_key.replace(/_/g, " ")}</p>
-                    <p className="text-xs text-muted-foreground">{m.measured_at} · {m.verified_by_name || "Staff"}</p>
-                      {m.source && (
-                        <span className={`inline-flex mt-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                          String(m.source).toLowerCase().includes("verified") || m.verified
-                            ? "bg-brand/20 text-brand border border-brand/40"
-                            : "bg-secondary text-muted-foreground border border-border"
-                        }`}>
-                          {m.source}
-                        </span>
-                      )}
-                  </div>
-                    <p className="font-mono-num font-bold text-lg text-brand">{m.value} {m.unit}</p>
-                  </CardContent>
-                </Card>
-              ))}
+              {metrics.map((m) => <MetricRow key={m.id} m={m} />)}
             </div>
           )}
         </TabsContent>
@@ -898,7 +1197,7 @@ export default function PlayerProfile() {
 
         {/* ---- Media ---- */}
         <TabsContent value="media" className="mt-4 space-y-3">
-          {canCoach && <UploadPhotoDialog athleteId={athleteId} onDone={() => { setMedia(null); loadSummary(); }} />}
+          {canCoach && <UploadPhotoDialog athleteId={athleteId} onDone={() => { loadMedia(); loadSummary(); }} />}
           {!media ? <Skeleton className="h-32 rounded-2xl" /> : media.length === 0 ? (
             <EmptyState icon={ImageIcon} title="No media yet" hint="Photos and videos uploaded during evaluations appear here. Consent is required for all uploads." />
           ) : (
@@ -1042,23 +1341,8 @@ export default function PlayerProfile() {
           {!timeline ? <Skeleton className="h-40 rounded-2xl" /> : timeline.length === 0 ? (
             <EmptyState icon={CalendarClock} title="No story yet" hint="Evaluations, goals, media, and milestones build the player's story." />
           ) : (
-            <div className="relative pl-6 space-y-4 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-px before:bg-[hsl(var(--border-strong))]" data-testid="player-timeline">
-              {timeline.map((t, i) => {
-                const Icon = TIMELINE_ICONS[t.type] || StickyNote;
-                return (
-                  <div key={i} className="relative">
-                    <span className="absolute -left-6 top-0.5 h-4 w-4 rounded-full bg-card border-2 border-brand flex items-center justify-center" />
-                    <div className="rounded-2xl bg-card border border-border px-4 py-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-semibold text-foreground flex items-center gap-1.5"><Icon className="h-3.5 w-3.5 text-brand" /> {t.title}</p>
-                        <span className="text-xs text-muted-foreground whitespace-nowrap">{(t.date || "").slice(0, 10)}</span>
-                      </div>
-                      {t.detail && <p className="text-xs text-muted-foreground mt-1">{t.detail}</p>}
-                      {t.author && <p className="text-[11px] text-muted-foreground mt-0.5">{t.author}</p>}
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="space-y-2" data-testid="player-timeline">
+              {timeline.map((t, i) => <TimelineItem key={i} entry={t} />)}
             </div>
           )}
         </TabsContent>
@@ -1080,7 +1364,7 @@ export default function PlayerProfile() {
         </TabsContent>
 
         <TabsContent value="seasons" className="mt-4" data-testid="profile-seasons-tab">
-          <SeasonsPanel athleteId={athleteId} canEdit={canCoach} />
+          <SeasonsPanel athleteId={athleteId} canEdit={canCoach} summary={summary} catalog={catalog} />
         </TabsContent>
 
         <TabsContent value="rankings" className="mt-4">
@@ -1111,8 +1395,47 @@ export default function PlayerProfile() {
   );
 }
 
-function SeasonsPanel({ athleteId, canEdit }) {
+// Career aggregates are computed only from rows the API actually returned —
+// a metric with no known direction in the catalog is skipped, never guessed.
+function careerBests(metricRows, catalog) {
+  const byKey = {};
+  (metricRows || []).forEach((m) => {
+    const meta = (catalog || []).find((c) => c.key === m.metric_key) || {};
+    const lower = typeof m.lower_better === "boolean" ? m.lower_better : meta.lower_better;
+    // Without a known direction there is no defensible "best" — skip the metric.
+    if (typeof lower !== "boolean" || typeof m.value !== "number") return;
+    const cur = byKey[m.metric_key];
+    if (!cur || (lower ? m.value < cur.value : m.value > cur.value)) {
+      byKey[m.metric_key] = {
+        key: m.metric_key,
+        label: m.label || meta.label || String(m.metric_key).replace(/_/g, " "),
+        unit: m.unit || meta.unit,
+        value: m.value,
+        measured_at: m.measured_at,
+        source: m.source,
+      };
+    }
+  });
+  return Object.values(byKey);
+}
+
+function scoreByYear(eventScores) {
+  const acc = {};
+  (eventScores || []).forEach((e) => {
+    const year = String(e.event_date || "").slice(0, 4);
+    if (!/^\d{4}$/.test(year) || typeof e.overall_score !== "number") return;
+    acc[year] = acc[year] || { sum: 0, n: 0 };
+    acc[year].sum += e.overall_score;
+    acc[year].n += 1;
+  });
+  return Object.entries(acc)
+    .map(([year, v]) => ({ year, score: Math.round((v.sum / v.n) * 100) / 100 }))
+    .sort((x, y) => x.year.localeCompare(y.year));
+}
+
+function SeasonsPanel({ athleteId, canEdit, summary, catalog }) {
   const [seasons, setSeasons] = useState(null);
+  const [careerMetrics, setCareerMetrics] = useState([]);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ year: String(new Date().getFullYear()), team: "", organization_name: "", age_group: "", height: "", weight: "" });
 
@@ -1120,6 +1443,9 @@ function SeasonsPanel({ athleteId, canEdit }) {
     api.get(`/athletes/${athleteId}/seasons`)
       .then((r) => setSeasons(r.data || []))
       .catch(() => setSeasons([]));
+    api.get(`/metrics/athlete/${athleteId}`)
+      .then((r) => setCareerMetrics(r.data || []))
+      .catch(() => setCareerMetrics([]));
   }, [athleteId]);
 
   const create = async () => {
@@ -1144,11 +1470,89 @@ function SeasonsPanel({ athleteId, canEdit }) {
 
   if (!seasons) return <Skeleton className="h-32 rounded-2xl" />;
 
+  const bests = careerBests(careerMetrics, catalog);
+  const yearScores = scoreByYear(summary?.event_scores);
+  const teams = Array.from(new Set(
+    seasons.map((s) => s.team).concat([summary?.athlete?.current_team]).filter(Boolean)
+  ));
+  const seasonYears = seasons.map((s) => s.year).filter((y) => y != null);
+  const careerSpan = seasonYears.length ? `${Math.min(...seasonYears)}–${Math.max(...seasonYears)}` : null;
+
   return (
     <div className="space-y-3" data-testid="seasons-panel">
       <p className="text-sm text-muted-foreground">
         One permanent 60&apos;6&quot; ID — each season stacks underneath without erasing history.
       </p>
+
+      <Card className="rounded-2xl border-border" data-testid="career-overview-card">
+        <CardContent className="py-4 space-y-4">
+          <p className="font-semibold text-sm text-foreground">Career Overview</p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="rounded-xl bg-surface-2 border border-border py-3 text-center">
+              <p className="text-2xl font-bold font-mono-num">{summary?.evaluation_count ?? 0}</p>
+              <p className="text-[10px] uppercase text-muted-foreground mt-1">Career evaluations</p>
+            </div>
+            <div className="rounded-xl bg-surface-2 border border-border py-3 text-center">
+              <p className="text-2xl font-bold font-mono-num">{(summary?.event_scores || []).length}</p>
+              <p className="text-[10px] uppercase text-muted-foreground mt-1">Events scored</p>
+            </div>
+            <div className="rounded-xl bg-surface-2 border border-border py-3 text-center">
+              <p className="text-2xl font-bold font-mono-num">{seasons.length}</p>
+              <p className="text-[10px] uppercase text-muted-foreground mt-1">Seasons {careerSpan ? `· ${careerSpan}` : ""}</p>
+            </div>
+            <div className="rounded-xl bg-surface-2 border border-border py-3 text-center">
+              <p className="text-2xl font-bold font-mono-num">{careerMetrics.length}</p>
+              <p className="text-[10px] uppercase text-muted-foreground mt-1">Verified measurements</p>
+            </div>
+          </div>
+
+          {teams.length > 0 && (
+            <div>
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Teams played for</p>
+              <div className="flex flex-wrap gap-1.5">
+                {teams.map((t) => (
+                  <span key={t} className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium">{t}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {bests.length > 0 && (
+            <div>
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Best verified measurements</p>
+              <div className="grid gap-1.5 sm:grid-cols-2" data-testid="career-bests">
+                {bests.map((b) => (
+                  <div key={b.key} className="flex items-center justify-between gap-2 rounded-lg bg-surface-2 border border-border px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{b.label}</p>
+                      <p className="text-[11px] text-muted-foreground">{b.measured_at || "—"}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="font-mono-num font-bold text-brand">{b.value} {b.unit}</p>
+                      {b.source && <div className="mt-0.5 flex justify-end"><SourceBadge source={b.source} compact /></div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {yearScores.length >= 2 && (
+            <div>
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Overall score by year</p>
+              <ResponsiveContainer width="100%" height={160}>
+                <LineChart data={yearScores} margin={{ top: 8, right: 10, bottom: 0, left: -20 }}>
+                  <CartesianGrid stroke="hsl(var(--divider))" strokeDasharray="3 3" />
+                  <XAxis dataKey="year" tick={{ fontSize: 10 }} />
+                  <YAxis domain={[0, 10]} tick={{ fontSize: 10 }} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="score" stroke="hsl(var(--brand))" strokeWidth={2.5} dot={{ r: 4, fill: "hsl(var(--brand))" }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </CardContent>
+      </Card>
       {canEdit && (
         <Card className="rounded-2xl border-border">
           <CardContent className="py-4 space-y-2">

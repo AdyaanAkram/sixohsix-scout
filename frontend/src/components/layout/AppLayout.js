@@ -17,21 +17,24 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 /** Primary nav keys by role (order = display order). Admin keys listed separately. */
+// Primary nav follows the §20 list: Dashboard, Players, Evaluations, Events,
+// Progress, Scout, Reports. Programs lives under Administration (it is deferred
+// scope per §24, not a day-to-day tab).
 const NAV_BY_ROLE = {
-  owner: ["dashboard", "players", "review", "events", "programs", "development", "scout", "reports"],
-  admin: ["dashboard", "players", "review", "events", "programs", "development", "scout", "reports"],
-  head_scout: ["dashboard", "players", "review", "events", "programs", "development", "scout", "reports"],
-  coach: ["dashboard", "players", "events", "programs", "development", "reports"],
+  owner: ["dashboard", "players", "review", "events", "development", "scout", "reports"],
+  admin: ["dashboard", "players", "review", "events", "development", "scout", "reports"],
+  head_scout: ["dashboard", "players", "review", "events", "development", "scout", "reports"],
+  coach: ["dashboard", "players", "events", "development", "reports"],
   evaluator: ["dashboard", "events", "evaluate", "my-evaluations"],
   athlete: ["my-id", "settings"],
   parent: ["my-id", "settings"],
 };
 
 const ADMIN_BY_ROLE = {
-  owner: ["staff", "templates", "drills", "audit", "settings"],
-  admin: ["staff", "templates", "drills", "audit", "settings"],
-  head_scout: ["settings"],
-  coach: ["settings"],
+  owner: ["programs", "staff", "templates", "drills", "audit", "settings"],
+  admin: ["programs", "staff", "templates", "drills", "audit", "settings"],
+  head_scout: ["programs", "settings"],
+  coach: ["programs", "settings"],
   evaluator: ["settings"],
   athlete: [],
   parent: [],

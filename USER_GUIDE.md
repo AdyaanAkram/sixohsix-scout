@@ -72,6 +72,51 @@ Every query is filtered by `organization_id`. Org A never sees Org B’s athlete
 
 ---
 
+## 2a. What the revision added (feature map)
+
+The product was revised into **60'6" ID** — *Every Player. Every Rep. Every Season Tells the
+Story.* These are the capabilities added or completed in the revision; the rest of this guide covers
+each in its own section.
+
+- **Permanent 60'6" ID + seasons.** Every athlete has one permanent ID (`606-XXXXXXXX`). Seasons
+  stack under that single profile with date ranges; evaluations, metrics, media and goals group by
+  season, and a **Career Overview** aggregates across years. History is never overwritten — an
+  in-place edit snapshots prior physicals and logs position/team changes.
+- **Player profile that passes the five-second test.** Large photo, hero header, six quick cards,
+  and a Level-1 visual summary with full detail behind *View Details* / *View Full Report*.
+- **Evaluation results page.** Overall score, score change, top-3 strengths and needs, skill radar,
+  progress line, verified measurements, coach recommendation and next date — the written evaluation
+  sits behind *View Full Evaluation*. Open it from Review or My Evaluations.
+- **Charts on real data.** Skill radar, overall-progress line, previous-vs-current bar, verified-
+  metric comparison (vs previous, personal best, age-group and position benchmarks), profile-
+  completion and event-completion. Benchmarks render only when actually defined — never fabricated.
+- **Verified metrics + trust badges.** Six sources — Athlete / Parent / Coach Submitted, Event /
+  Device / 60'6" Verified — visually distinct, enforced server-side (athletes/parents cannot claim a
+  verified tier).
+- **Age- and position-aware evaluation templates.** Eight bands (7U-8U → Professional). A 10U and a
+  17U pitcher automatically get different, age-appropriate forms. Category display is filtered to the
+  player's positions (an infielder isn't shown catching metrics), with a *Show all* override.
+- **Template admin.** Create, edit, delete, and reorder categories/metrics; set age band and
+  applicable positions.
+- **Event manager dashboard.** Live KPIs (checked-in, in-progress, complete, missing, flagged,
+  active evaluators, videos awaiting approval, average eval time, device-sync problems), a
+  completion funnel, and a per-player drill-down showing exactly which metrics are missing.
+- **Mobile evaluation, offline-hardened.** Autosave to IndexedDB + localStorage, a service worker so
+  a cold reload works offline, an offline media queue, and camera capture with preview/retake.
+- **Player comparison.** Compare up to four players with side-by-side cards and charts (coaches/
+  scouts only).
+- **Development goals & notes.** Full goal fields (recommended action, assigned coach, start/target/
+  follow-up dates, progress). Six note types with visibility; notes carry related event + follow-up.
+- **Expiring coach access with emailed access codes.** A site manager grants a coach temporary
+  station access; a secure code is emailed; access ends with the event and can be revoked instantly.
+- **Media privacy + consent.** Under-13 media stays pending consent; "mark private" is enforced
+  (staff-only), independent of consent.
+- **Reports.** Player PDF with charts, a progress report, category ranking, position comparison, and
+  a severity-scored evaluator-disagreement view. CSV unchanged.
+- **60'6" branding only.** No Velo City / PBG Scout product chrome anywhere in the UI or the PDF.
+
+---
+
 ## 3. Roles & powers
 
 ### Summary matrix
@@ -296,7 +341,7 @@ Opened drafts can keep working on device; starting a brand-new player or final s
 3. Stores weekly/monthly goals and recommended drills.
 
 ### Drills library
-- Owner/admin: **Drills** nav — org catalog (seeded from Velo-style taxonomy).
+- Owner/admin: **Drills** nav — org catalog, seeded with a position-keyed drill taxonomy.
 
 ### Awards
 1. Staff submits on **Players → Awards**.
@@ -361,32 +406,47 @@ Opened drafts can keep working on device; starting a brand-new player or final s
 
 ## 13. What each nav item is for
 
-| Nav | Who sees it | Purpose |
-|---|---|---|
-| Dashboard | Staff | Day hub, start evaluating, counts |
-| Programs | Owner–Coach | Long-term training |
-| Events | Staff (evaluators: assigned) | Short-term camps / eval days |
-| Players | Owner–Coach (+ head scout) | Directory & profiles |
-| Evaluate | Evaluator (+ staff who score) | Station scoring |
-| My Evaluations | Evaluator | Own sheets |
-| Evaluations (Review) | Owner, Admin, Head Scout | Approve / return |
-| Reports | Staff (varies) | Leaderboards, PDFs, CSV |
-| Development | Owner–Coach | Goals / assessments hub |
-| Staff | Owner, Admin | Memberships & invites |
-| Templates | Owner, Admin | Metric sheets |
-| Drills | Owner, Admin | Drill catalog |
-| Audit Log | Owner, Admin | Who did what |
-| Settings | Most roles | Org/account context |
-| My ID | Athlete, Parent | Athlete-facing portal |
+Primary nav follows the §20 list: **Dashboard · Players · Evaluations · Events · Progress · Scout ·
+Reports**. Admin-only items (Programs, Staff, Templates, Drills, Audit Log, Settings) live under the
+**Administration** group, not the primary bar.
+
+| Nav | Group | Who sees it | Purpose |
+|---|---|---|---|
+| Dashboard | Primary | Staff | Day hub, start evaluating, counts |
+| Players | Primary | Owner–Coach (+ head scout) | Directory & profiles |
+| Evaluations (Review) | Primary | Owner, Admin, Head Scout | Approve / return; open a **results summary** |
+| Events | Primary | Staff (evaluators: assigned) | Camps / eval days; **live manager dashboard** |
+| Progress (Development) | Primary | Owner–Coach | Goals / assessments hub |
+| Scout | Primary | Review roles + coach | Player search & **comparison** (up to 4) |
+| Reports | Primary | Staff (varies) | Leaderboards, PDFs w/ charts, progress report, CSV |
+| Evaluate | Primary (evaluator) | Evaluator (+ staff who score) | Station scoring (offline-capable) |
+| My Evaluations | Primary (evaluator) | Evaluator | Own sheets |
+| Programs | Administration | Owner–Coach | Long-term training (deferred scope) |
+| Staff | Administration | Owner, Admin | Memberships & invites (email) |
+| Templates | Administration | Owner, Admin | Age/position metric sheets — create/edit/reorder |
+| Drills | Administration | Owner, Admin | Drill catalog |
+| Audit Log | Administration | Owner, Admin | Who did what |
+| Settings | Administration | Most roles | Org/account context |
+| My ID | Primary | Athlete, Parent | Athlete-facing portal (permanent 60'6" ID) |
 
 ---
 
 ## 14. Security & tenancy notes (for operators)
 
 - JWT identifies the user; **active org** is in the token (`org` claim) after login/switch.
-- Cross-org reads return 403/404 — covered by `tests/test_org_isolation.py`.
-- Evaluators are scoped to assignments; guardian fields are hidden from evaluator list views.
+- Cross-org reads return 403/404 — covered by `tests/test_org_isolation.py` and
+  `tests/test_revision_features.py`.
+- Evaluators are scoped to assignments; guardian **and** medical/insurance/financial/SSN fields are
+  hidden from evaluator views (unified redaction).
+- **Temporary event access expires.** A revoked or expired evaluator assignment denies access on
+  every request, and a permanent member who redeems an event invite gets access that ends with the
+  event. Membership-level revoke also takes effect immediately despite the 7-day JWT.
+- **Metric trust is enforced server-side.** Athletes/parents can only self-report unverified
+  sources; coach/event/device/60'6"-verified tiers require staff roles. Nothing trusts a
+  client-supplied source.
+- Confidential scout notes are filtered by role on every path (summary, PDF, notes list).
 - Seed script **wipes** the local DB — never run against production.
+- Demo passwords in this guide are for the seeded demo only — rotate before any real athlete data.
 - Production checklist: `DEPLOY.md` (Atlas, R2/S3, Resend, strong `JWT_SECRET`).
 
 ---

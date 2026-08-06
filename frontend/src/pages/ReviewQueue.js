@@ -12,7 +12,7 @@ import { StatusBadge } from "@/components/common/StatusBadge";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { CheckCircle2, Undo2, ClipboardList, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
+import { CheckCircle2, Undo2, ClipboardList, AlertTriangle, ChevronDown, ChevronUp, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const EvalDetail = ({ ev }) => {
@@ -151,6 +151,13 @@ export default function ReviewQueue() {
                   >
                     {expanded[ev.id] ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />} {expanded[ev.id] ? "Hide detail" : "View detail"}
                   </button>
+                  <Link
+                    to={`/evaluation/${ev.id}/results`}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-brand"
+                    data-testid={`review-results-${ev.id}`}
+                  >
+                    <BarChart3 className="h-3.5 w-3.5" /> Results summary
+                  </Link>
                   <div className="flex-1" />
                   {ev.status === "submitted" && (
                     <>

@@ -7,7 +7,7 @@ from auth import (ADMIN_ROLES, create_token, get_current_user, hash_password,
                   rate_limit, require_roles, resolve_membership, verify_password)
 from config import settings
 from db import clean, db, log_audit, new_id, now_iso
-from mailer import send_template
+from mailer import safe_send, send_template
 
 router = APIRouter()
 
@@ -250,14 +250,16 @@ async def invite_staff(body: InviteBody, user=Depends(require_roles(*ADMIN_ROLES
     }
     await db.invitations.insert_one(inv)
     await log_audit(user["organization_id"], user, "invite_sent", "invitation", inv["id"], {"email": body.email, "role": body.role})
-    # Do not return raw token — email it (dev: stdout / prod: Resend)
+    # Do not return raw token — email it (dev: stdout / prod: Resend).
+    # safe_send never raises: a mail outage must not orphan the invitation row.
     link = f"{settings.app_public_url}/accept-invitation?token={token}"
-    send_template(body.email.lower(), "staff_invitation", {
+    result = safe_send(body.email.lower(), "staff_invitation", {
         "name": body.full_name, "org": user.get("organization_name") or "60'6\"", "link": link,
     })
     local, _, domain = body.email.lower().partition("@")
     masked = f"{local[0]}***@{domain}" if local else f"***@{domain}"
-    return {"sent": True, "email": masked, "invitation_id": inv["id"], "expires_at": expires_at}
+    return {"sent": bool(result.get("sent")), "email": masked,
+            "invitation_id": inv["id"], "expires_at": expires_at}
 
 
 @router.get("/invitations")

@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { BadgeCheck, ShieldCheck, CircleDashed } from "lucide-react";
 
 const STYLES = {
   // event statuses
@@ -59,6 +60,85 @@ export const StatusBadge = ({ status, className, testId }) => {
       )}
     >
       {LABELS[status] || status}
+    </span>
+  );
+};
+
+/*
+  Verification sources (spec §16). The keys are exactly what the backend stores on a
+  measurement — do not localise or re-key them. Unverified tiers must stay visually
+  weaker than verified tiers so a coach can triage trustworthiness at a glance.
+*/
+const VERIFICATION_SOURCES = {
+  athlete_submitted: {
+    label: "Athlete Submitted",
+    verified: false,
+    style: "border-dashed border-border-strong bg-transparent text-muted-foreground",
+    Icon: CircleDashed,
+  },
+  parent_submitted: {
+    label: "Parent Submitted",
+    verified: false,
+    style: "border-dashed border-border-strong bg-transparent text-muted-foreground",
+    Icon: CircleDashed,
+  },
+  coach_submitted: {
+    label: "Coach Submitted",
+    verified: true,
+    style: "bg-success/15 text-success border-success/40",
+    Icon: BadgeCheck,
+  },
+  event_verified: {
+    label: "Event Verified",
+    verified: true,
+    style: "bg-success/15 text-success border-success/40",
+    Icon: BadgeCheck,
+  },
+  device_verified: {
+    label: "Device Verified",
+    verified: true,
+    style: "bg-[hsl(var(--info)_/_0.15)] text-info border-[hsl(var(--info)_/_0.4)]",
+    Icon: BadgeCheck,
+  },
+  id_verified: {
+    label: "60'6\" Verified",
+    verified: true,
+    style: "bg-brand text-white border-brand",
+    Icon: ShieldCheck,
+  },
+};
+
+const UNKNOWN_VERIFICATION = {
+  label: "Unverified",
+  verified: false,
+  style: "border-dashed border-border-strong bg-transparent text-muted-foreground",
+  Icon: CircleDashed,
+};
+
+/** True only for the four trusted sources — never for unknown/missing input. */
+export const isVerifiedSource = (source) => Boolean(VERIFICATION_SOURCES[source]?.verified);
+
+export const verificationLabel = (source) =>
+  (VERIFICATION_SOURCES[source] || UNKNOWN_VERIFICATION).label;
+
+export const VerificationBadge = ({ source, compact, className, testId }) => {
+  const cfg = VERIFICATION_SOURCES[source] || UNKNOWN_VERIFICATION;
+  const { Icon } = cfg;
+  return (
+    <span
+      data-testid={testId || "verification-badge"}
+      data-source={VERIFICATION_SOURCES[source] ? source : "unknown"}
+      data-verified={cfg.verified ? "true" : "false"}
+      title={cfg.verified ? `${cfg.label} measurement` : `${cfg.label} — not independently verified`}
+      className={cn(
+        "inline-flex items-center gap-1 whitespace-nowrap rounded-full border font-semibold uppercase tracking-wide",
+        compact ? "px-1.5 py-0 text-[10px]" : "px-2.5 py-0.5 text-xs",
+        cfg.style,
+        className
+      )}
+    >
+      <Icon className={compact ? "h-2.5 w-2.5 shrink-0" : "h-3 w-3 shrink-0"} />
+      {cfg.label}
     </span>
   );
 };

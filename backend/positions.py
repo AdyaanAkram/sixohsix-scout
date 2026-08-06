@@ -1,13 +1,35 @@
-"""Canonical baseball position taxonomy and evaluation-template resolution.
+"""Canonical baseball position taxonomy, age bands, and evaluation-template resolution.
 
 Resolution order:
-  0. Prefer templates matching athlete age_group (when age_group provided)
-  1. Template whose applies_to_positions contains athlete primary (or override)
-  2. Template matching position group (OF for LF/CF/RF, IF for 1B/2B/3B/SS)
-  3. station.template_id
-  4. Org default template (is_default=True)
-  5. Fail — never render an empty form
+  1. age_group + exact position
+  2. age_group + position group (OF for LF/CF/RF, IF for 1B/2B/3B/SS)
+  3. exact position (any age)
+  4. position group (any age)
+  5. age_group only (template carries no position filter)
+  6. station.template_id
+  7. Org default template (is_default=True)
+  8. Fail — never render an empty form
 """
+
+# Canonical age bands (spec §8). Single source of truth — importers must not
+# redefine this list. "Professional" is set manually and never auto-computed.
+AGE_BANDS = [
+    "7U-8U", "9U-10U", "11U-12U", "13U-14U", "15U-16U", "17U-18U",
+    "College", "Professional",
+]
+
+# Numeric age span per band. The youngest band is open downward and Professional
+# open upward so legacy labels ("6U", "Pro") still land inside a band.
+AGE_BAND_SPANS = {
+    "7U-8U": (0, 8),
+    "9U-10U": (9, 10),
+    "11U-12U": (11, 12),
+    "13U-14U": (13, 14),
+    "15U-16U": (15, 16),
+    "17U-18U": (17, 18),
+    "College": (19, 22),
+    "Professional": (23, 99),
+}
 
 POSITION_TAXONOMY = [
     "P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "OF", "IF", "DH", "UTIL",
@@ -59,47 +81,135 @@ def position_matches_template(position: str | None, applies_to: list | None) -> 
     return position in applies_to
 
 
-def _age_rank(token: str | None) -> int | None:
+def _canon_age(token: str | None) -> str | None:
     if not token:
         return None
-    t = str(token).strip().upper().replace("–", "-")
+    return str(token).strip().upper().replace("–", "-")
+
+
+def _age_rank(token: str | None) -> int | None:
+    t = _canon_age(token)
+    if not t:
+        return None
     if t == "COLLEGE":
         return 19
-    if t == "PRO":
+    if t in ("PRO", "PROFESSIONAL"):
         return 25
     if t.endswith("U") and t[:-1].isdigit():
         return int(t[:-1])
+    if t.isdigit():
+        return int(t)
     return None
 
 
+def _age_span(token: str | None) -> tuple[int, int] | None:
+    """Numeric (lo, hi) for a canonical band, a legacy band, a single-year label,
+    College or Pro/Professional. None when the label is unparseable."""
+    t = _canon_age(token)
+    if not t:
+        return None
+    for band, span in AGE_BAND_SPANS.items():
+        if t == band.upper():
+            return span
+    if t in ("PRO", "PROFESSIONAL"):
+        return AGE_BAND_SPANS["Professional"]
+    if "-" in t:
+        parts = [p.strip() for p in t.split("-", 1)]
+        if len(parts) == 2:
+            lo, hi = _age_rank(parts[0]), _age_rank(parts[1])
+            if lo is not None and hi is not None:
+                return (min(lo, hi), max(lo, hi))
+        return None
+    r = _age_rank(t)
+    return (r, r) if r is not None else None
+
+
+def age_band_for_age(age: int | None) -> str | None:
+    """Map a numeric age onto a canonical band. Never returns "Professional" —
+    that band is assigned manually, never derived from a birth date."""
+    if age is None:
+        return None
+    try:
+        age = int(age)
+    except (TypeError, ValueError):
+        return None
+    if age <= 8:
+        return "7U-8U"
+    if age >= 19:
+        return "College"
+    for band in ("9U-10U", "11U-12U", "13U-14U", "15U-16U", "17U-18U"):
+        lo, hi = AGE_BAND_SPANS[band]
+        if lo <= age <= hi:
+            return band
+    return "College"
+
+
+def normalize_age_band(token: str | None) -> str | None:
+    """Map any stored age label onto a canonical band. Accepts the canonical bands,
+    single-year labels ("12U"), legacy bands ("8U-10U", "14U-18U") and Pro."""
+    t = _canon_age(token)
+    if not t:
+        return None
+    for band in AGE_BANDS:
+        if t == band.upper():
+            return band
+    if t in ("PRO", "PROFESSIONAL"):
+        return "Professional"
+    span = _age_span(t)
+    if span is None:
+        return None
+    if span == AGE_BAND_SPANS["Professional"]:
+        return "Professional"
+    return age_band_for_age((span[0] + span[1]) // 2)
+
+
+def is_valid_age_band(token: str | None) -> bool:
+    return token in AGE_BANDS
+
+
 def _age_matches(athlete_age: str | None, template_age: str | None) -> bool:
-    """True when template age_group equals or covers athlete age (incl. bands)."""
+    """True when the template's age_group covers the athlete's age label.
+    Spans overlap rather than nest, so legacy labels on either side still match."""
     if not template_age:
         return True
     if not athlete_age:
         return False
-    ta = str(template_age).strip().upper().replace("–", "-")
-    aa = str(athlete_age).strip().upper()
+    ta, aa = _canon_age(template_age), _canon_age(athlete_age)
     if ta == aa:
         return True
-    if "-" in ta:
-        parts = [p.strip() for p in ta.split("-", 1)]
-        if len(parts) == 2:
-            lo, hi = _age_rank(parts[0]), _age_rank(parts[1])
-            ar = _age_rank(aa)
-            if lo is not None and hi is not None and ar is not None:
-                return lo <= ar <= hi
-    return False
+    tspan, aspan = _age_span(ta), _age_span(aa)
+    if tspan is None or aspan is None:
+        return False
+    return aspan[0] <= tspan[1] and tspan[0] <= aspan[1]
 
 
-def _prefer_age(candidates: list[dict], age_group: str | None):
-    if not candidates:
-        return None
-    if age_group:
-        for t in candidates:
-            if t.get("age_group") and _age_matches(age_group, t.get("age_group")):
-                return t
-    return candidates[0]
+def _age_specificity(template: dict) -> int:
+    """Narrower age bands win ties. Unparseable/blank sort last."""
+    span = _age_span(template.get("age_group"))
+    return (span[1] - span[0]) if span else 999
+
+
+def _age_distance(template: dict, age_group: str | None) -> int:
+    """Gap in years between a template's band and the athlete's. Age-neutral templates
+    sort first — they are authored to cover every band."""
+    tspan = _age_span(template.get("age_group"))
+    if tspan is None:
+        return -1
+    aspan = _age_span(age_group)
+    if aspan is None:
+        return 999
+    return max(0, aspan[0] - tspan[1], tspan[0] - aspan[1])
+
+
+def _age_hits(candidates: list[dict], age_group: str | None) -> list[dict]:
+    """Candidates that carry an age_group compatible with the athlete, tightest first."""
+    if not age_group:
+        return []
+    hits = [
+        t for t in candidates
+        if t.get("age_group") and _age_matches(age_group, t.get("age_group"))
+    ]
+    return sorted(hits, key=_age_specificity)
 
 
 def resolve_template(
@@ -109,42 +219,54 @@ def resolve_template(
     station_template_id: str | None,
     age_group: str | None = None,
 ):
-    """Pick a template from an org-scoped list. Returns (template, reason) or (None, None)."""
+    """Pick a template from an org-scoped list. Returns (template, reason) or (None, None).
+
+    Age is part of the lookup, not a tiebreaker: an age+position template outranks a
+    position-only one. When a position template exists but none matches the athlete's
+    age the reason says so ("*_no_age") instead of passing off the mismatch as a hit.
+    """
     position = normalize_position(position)
     by_id = {t["id"]: t for t in templates if t.get("id")}
 
-    # 1. Exact position match — prefer age-compatible
+    exact = []
+    group_hits = []
     if position:
         exact = [t for t in templates if position_matches_template(position, t.get("applies_to_positions") or [])]
-        picked = _prefer_age(exact, age_group)
-        if picked:
-            aged = bool(age_group and picked.get("age_group") and _age_matches(age_group, picked.get("age_group")))
-            return picked, "position_match_age" if aged else "position_match"
-
-        # 2. Position group (OF / IF) — prefer age
         group = POSITION_TO_GROUP.get(position)
         if group:
             group_hits = [t for t in templates if group in (t.get("applies_to_positions") or [])]
-            picked = _prefer_age(group_hits, age_group)
-            if picked:
-                aged = bool(age_group and picked.get("age_group") and _age_matches(age_group, picked.get("age_group")))
-                return picked, "position_group_age" if aged else "position_group"
 
-    # 3. Age-band templates without position filters
-    if age_group:
-        age_hits = [
-            t for t in templates
-            if t.get("age_group") and _age_matches(age_group, t.get("age_group"))
-            and not (t.get("applies_to_positions") or [])
-        ]
-        if age_hits:
-            return age_hits[0], "age_match"
+    # 1. age_group + exact position
+    aged_exact = _age_hits(exact, age_group)
+    if aged_exact:
+        return aged_exact[0], "position_match_age"
 
-    # 4. Station default
+    # 2. age_group + position group
+    aged_group = _age_hits(group_hits, age_group)
+    if aged_group:
+        return aged_group[0], "position_group_age"
+
+    # 3. exact position, any age — nearest band, age-neutral templates first
+    if exact:
+        picked = min(exact, key=lambda t: _age_distance(t, age_group))
+        return picked, "position_match_no_age" if age_group else "position_match"
+
+    # 4. position group, any age
+    if group_hits:
+        picked = min(group_hits, key=lambda t: _age_distance(t, age_group))
+        return picked, "position_group_no_age" if age_group else "position_group"
+
+    # 5. age_group only — template carries no position filter
+    age_only = _age_hits(
+        [t for t in templates if not (t.get("applies_to_positions") or [])], age_group)
+    if age_only:
+        return age_only[0], "age_match"
+
+    # 6. Station default
     if station_template_id and station_template_id in by_id:
         return by_id[station_template_id], "station_default"
 
-    # 5. Org catch-all
+    # 7. Org catch-all
     for t in templates:
         if t.get("is_default"):
             return t, "org_default"

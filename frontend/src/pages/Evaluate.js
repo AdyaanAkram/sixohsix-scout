@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, errMsg } from "@/lib/api";
-import { saveStationTemplates } from "@/lib/templateCache";
+import { saveStationTemplates, registerAppShell } from "@/lib/templateCache";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -23,6 +23,15 @@ function isInProgress(status) {
   return ["draft", "returned"].includes(status);
 }
 
+/** Bib is the station-day identifier; jersey is shown too when the roster
+ *  carries one and it differs. Safe when jersey_number is absent entirely. */
+function idLabel(p) {
+  const bib = p.bib_number;
+  const jersey = p.jersey_number;
+  if (bib && jersey && String(bib) !== String(jersey)) return `#${bib} · Jersey ${jersey}`;
+  return `#${bib || jersey || "—"}`;
+}
+
 export default function Evaluate() {
   const { assignmentId } = useParams();
   const navigate = useNavigate();
@@ -40,6 +49,9 @@ export default function Evaluate() {
   const handoffAbort = useRef(null);
 
   useEffect(() => {
+    // Warm the offline app shell as soon as an evaluator enters the flow, so a
+    // cold reload later in the camp still boots. No-op if unsupported.
+    registerAppShell();
     api.get("/my-assignments").then((r) => setAssignments(r.data));
   }, []);
 
@@ -128,14 +140,28 @@ export default function Evaluate() {
     };
   }, [athletes]);
 
+  // The roster endpoint may or may not return jersey_number. Detect it rather
+  // than assuming: search and labels adapt if it is present and are unaffected
+  // if it is absent.
+  const hasJersey = useMemo(
+    () => (athletes || []).some((p) => p.jersey_number !== undefined && p.jersey_number !== null && p.jersey_number !== ""),
+    [athletes],
+  );
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
+    const numeric = /^\d+$/.test(q);
     let list = (athletes || []).filter((p) => {
       if (filter === "todo" && isDone(p.evaluation_status)) return false;
       if (filter === "done" && !isDone(p.evaluation_status)) return false;
       if (!q) return true;
-      const hay = `${p.first_name} ${p.last_name} ${p.bib_number || ""} ${p.jersey_number || ""}`.toLowerCase();
-      return hay.includes(q);
+      const name = `${p.first_name || ""} ${p.last_name || ""}`.toLowerCase();
+      const bib = String(p.bib_number ?? "").toLowerCase();
+      const jersey = String(p.jersey_number ?? "").toLowerCase();
+      // A digits-only query is almost always a bib/jersey number being called
+      // out at the station — match those by prefix so "7" finds #7, not #17.
+      if (numeric) return bib.startsWith(q) || jersey.startsWith(q) || name.includes(q);
+      return name.includes(q) || bib.includes(q) || jersey.includes(q);
     });
     list = [...list].sort((a, b) => {
       const ra = STATUS_RANK[a.evaluation_status] ?? 0;
@@ -239,7 +265,8 @@ export default function Evaluate() {
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Name or bib #…"
+              inputMode="search"
+              placeholder={hasJersey ? "Name, bib # or jersey #…" : "Name or bib #…"}
               className="pl-9 h-12 rounded-xl bg-card"
               data-testid="evaluate-player-search"
             />
@@ -268,7 +295,7 @@ export default function Evaluate() {
               type="button"
               onClick={() => setFilter(f.id)}
               className={cn(
-                "h-9 px-3 rounded-full text-xs font-semibold border transition",
+                "h-11 px-4 rounded-full text-xs font-semibold border transition active:scale-[0.97]",
                 filter === f.id
                   ? "bg-brand text-primary-foreground border-brand"
                   : "bg-card text-muted-foreground border-border"
@@ -314,7 +341,7 @@ export default function Evaluate() {
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-sm text-foreground truncate">{p.first_name} {p.last_name}</p>
                       <p className="text-xs text-muted-foreground">
-                        #{p.bib_number || p.jersey_number || "—"} · {p.age_group || "—"} · {p.primary_position || "—"}
+                        {idLabel(p)} · {p.age_group || "—"} · {p.primary_position || "—"}
                       </p>
                     </div>
                     {starting === p.athlete_id ? <Loader2 className="h-4 w-4 animate-spin text-brand" /> : <StatusBadge status={p.evaluation_status} />}
@@ -353,7 +380,7 @@ export default function Evaluate() {
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-foreground truncate">{p.first_name} {p.last_name}</p>
                     <p className="text-xs text-muted-foreground">
-                      #{p.bib_number || p.jersey_number || "—"} · {p.age_group || "—"} · {p.primary_position || "—"}
+                      {idLabel(p)} · {p.age_group || "—"} · {p.primary_position || "—"}
                       {p.group_name ? ` · ${p.group_name}` : ""}
                     </p>
                   </div>

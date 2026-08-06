@@ -74,6 +74,23 @@ def membership_expired(membership: dict | None) -> bool:
         return False
 
 
+def active_assignment_filter() -> dict:
+    """Mongo fragment for evaluator_assignments: not revoked, not past expiry.
+
+    Mirrors membership expiry so temporary event access ends on both paths.
+    Callers that already use $or must merge this with $and instead of spreading.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    return {
+        "active": {"$ne": False},
+        "$or": [
+            {"expires_at": None},
+            {"expires_at": {"$exists": False}},
+            {"expires_at": {"$gt": now}},
+        ],
+    }
+
+
 async def resolve_membership(user_id: str, preferred_org_id: str | None = None):
     """Pick active membership: preferred → user.active_organization_id → first by created_at.
     Skips expired temporary access and deactivates those memberships."""

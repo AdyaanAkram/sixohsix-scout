@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -22,6 +24,16 @@ ATHLETE_HIDDEN_TYPES = {"private_staff", "scout", "follow_up", "scout_assessment
 EVALUATOR_HIDDEN_TYPES = {"private_staff", "scout"}
 
 GOAL_STATUSES = ["Not Started", "Active", "Improving", "Needs Attention", "Completed", "Archived"]
+
+
+def _validate_date(value, field):
+    """Normalize an optional YYYY-MM-DD date; raise 422 on a malformed value."""
+    if value is None or value == "":
+        return None
+    try:
+        return datetime.strptime(str(value)[:10], "%Y-%m-%d").date().isoformat()
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=422, detail=f"{field} must be a YYYY-MM-DD date.")
 
 
 def _normalize_note_type(raw: str | None, assessment_type: str | None = None) -> str:
@@ -84,6 +96,7 @@ class NoteBody(BaseModel):
     recommended_drills: str | None = None
     position_recommendation: str | None = None
     follow_up_date: str | None = None
+    related_event: str | None = None  # optional event_id this note relates to
     internal_note: str | None = None
     parent_visible_note: str | None = None
     summary: str | None = None
@@ -110,6 +123,15 @@ async def create_note(athlete_id: str, body: NoteBody, user=Depends(require_role
     if body.assessment_type not in ASSESSMENT_TYPES:
         raise HTTPException(status_code=400, detail="Invalid assessment type.")
     note_type = _normalize_note_type(body.visibility or body.note_type, body.assessment_type)
+    # Resolve/validate the optional related event within this org (never cross-tenant).
+    related_event_name = None
+    if body.related_event:
+        ev = await db.events.find_one(
+            {"id": body.related_event, "organization_id": user["organization_id"]},
+            {"_id": 0, "name": 1})
+        if not ev:
+            raise HTTPException(status_code=422, detail="Related event not found in this organization.")
+        related_event_name = ev.get("name")
     doc = body.model_dump()
     doc.update({
         "id": new_id(), "organization_id": user["organization_id"],
@@ -118,6 +140,9 @@ async def create_note(athlete_id: str, body: NoteBody, user=Depends(require_role
         "visibility": note_type,
         "author_id": user["id"], "author_name": user.get("full_name"), "author_role": user["role"],
         "assessment_date": body.assessment_date or now_iso()[:10],
+        "follow_up_date": _validate_date(body.follow_up_date, "follow_up_date"),
+        "related_event": body.related_event or None,
+        "related_event_name": related_event_name,
         "created_at": now_iso(), "updated_at": now_iso(),
         # AI-ready fields (unused in MVP)
         "ai_draft": None, "ai_model": None, "ai_generated_at": None,
@@ -200,16 +225,20 @@ async def flag_athlete(athlete_id: str, body: FlagBody, user=Depends(require_rol
 class GoalBody(BaseModel):
     athlete_id: str
     title: str
-    description: str | None = None
+    description: str | None = None            # what needs improvement
     category: str | None = None
     starting_point: str | None = None
     target: str | None = None
-    target_date: str | None = None
-    assigned_coach_id: str | None = None
+    recommended_action: str | None = None     # spec §15: recommended action
     recommended_drills: str | None = None
+    assigned_coach_id: str | None = None
+    start_date: str | None = None
+    target_date: str | None = None
+    follow_up_date: str | None = None         # follow-up evaluation date
     progress: int = 0
     status: str = "Not Started"
     notes: str | None = None
+    season_id: str | None = None              # optional; validated / date-resolved
 
 
 class GoalUpdateBody(BaseModel):
@@ -218,19 +247,36 @@ class GoalUpdateBody(BaseModel):
     category: str | None = None
     starting_point: str | None = None
     target: str | None = None
-    target_date: str | None = None
+    recommended_action: str | None = None
     recommended_drills: str | None = None
+    assigned_coach_id: str | None = None
+    start_date: str | None = None
+    target_date: str | None = None
+    follow_up_date: str | None = None
     progress: int | None = None
     status: str | None = None
     notes: str | None = None
 
 
 @router.get("/athletes/{athlete_id}/goals")
-async def list_goals(athlete_id: str, user=Depends(require_roles(*STAFF_ROLES))):
+async def list_goals(athlete_id: str, season_id: str | None = None,
+                     user=Depends(require_roles(*STAFF_ROLES))):
     a = await db.athletes.find_one({"id": athlete_id, "organization_id": user["organization_id"]})
     if not a:
         raise HTTPException(status_code=404, detail="Player not found.")
-    return await db.athlete_goals.find({"athlete_id": athlete_id, "organization_id": user["organization_id"]}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    org = user["organization_id"]
+    goals = await db.athlete_goals.find(
+        {"athlete_id": athlete_id, "organization_id": org}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    if season_id:
+        # Deferred import: routes_players imports this module (circular at top level).
+        from routes_players import resolve_record_season_id, _athlete_seasons
+        seasons = await _athlete_seasons(athlete_id, org)
+        if not any(s["id"] == season_id for s in seasons):
+            raise HTTPException(status_code=422, detail="Season not found for this athlete.")
+        goals = [g for g in goals
+                 if resolve_record_season_id(g, seasons, ("start_date", "created_at")) == season_id]
+    return goals
 
 
 @router.post("/goals")
@@ -243,14 +289,39 @@ async def create_goal(body: GoalBody, user=Depends(require_roles(*COACH_ROLES)))
     doc = body.model_dump()
     coach_name = user.get("full_name")
     if body.assigned_coach_id:
-        coach = await db.users.find_one({"id": body.assigned_coach_id}, {"_id": 0, "full_name": 1})
-        if coach:
-            coach_name = coach["full_name"]
+        # Resolve the assigned coach to a real staff user in this org (never cross-tenant).
+        coach = await db.users.find_one(
+            {"id": body.assigned_coach_id, "organization_id": user["organization_id"]},
+            {"_id": 0, "full_name": 1})
+        if not coach:
+            raise HTTPException(status_code=422, detail="Assigned coach not found in this organization.")
+        coach_name = coach["full_name"]
+    org = user["organization_id"]
+    ts = now_iso()
+    start_date = _validate_date(body.start_date, "start_date")
+    # Optional season link: validate an explicit id, else resolve from the goal's
+    # start date (falling back to creation date). Deferred import avoids the
+    # circular dependency with routes_players.
+    from routes_players import season_for_date, _athlete_seasons
+    seasons = await _athlete_seasons(body.athlete_id, org)
+    if body.season_id:
+        if not any(s["id"] == body.season_id for s in seasons):
+            raise HTTPException(status_code=422, detail="Season not found for this athlete.")
+        season_id = body.season_id
+    else:
+        matched = season_for_date(seasons, start_date or ts[:10])
+        season_id = matched["id"] if matched else None
     doc.update({
-        "id": new_id(), "organization_id": user["organization_id"],
+        "id": new_id(), "organization_id": org,
         "assigned_coach_id": body.assigned_coach_id or user["id"],
         "assigned_coach_name": coach_name,
-        "created_by": user["id"], "created_at": now_iso(), "updated_at": now_iso(),
+        "start_date": start_date,
+        "target_date": _validate_date(body.target_date, "target_date"),
+        "follow_up_date": _validate_date(body.follow_up_date, "follow_up_date"),
+        "progress": max(0, min(100, body.progress or 0)),
+        "completed": body.status == "Completed",
+        "season_id": season_id,
+        "created_by": user["id"], "created_at": ts, "updated_at": ts,
     })
     await db.athlete_goals.insert_one(doc)
     await log_audit(user["organization_id"], user, "goal_created", "athlete_goal", doc["id"], {"athlete_id": body.athlete_id, "title": body.title})
@@ -267,6 +338,18 @@ async def update_goal(goal_id: str, body: GoalUpdateBody, user=Depends(require_r
         raise HTTPException(status_code=400, detail="Invalid goal status.")
     if "progress" in updates:
         updates["progress"] = max(0, min(100, updates["progress"]))
+    for date_field in ("start_date", "target_date", "follow_up_date"):
+        if date_field in updates:
+            updates[date_field] = _validate_date(updates[date_field], date_field)
+    if "assigned_coach_id" in updates:
+        coach = await db.users.find_one(
+            {"id": updates["assigned_coach_id"], "organization_id": user["organization_id"]},
+            {"_id": 0, "full_name": 1})
+        if not coach:
+            raise HTTPException(status_code=422, detail="Assigned coach not found in this organization.")
+        updates["assigned_coach_name"] = coach["full_name"]
+    if "status" in updates:
+        updates["completed"] = updates["status"] == "Completed"
     updates["updated_at"] = now_iso()
     await db.athlete_goals.update_one({"id": goal_id}, {"$set": updates})
     await log_audit(user["organization_id"], user, "goal_updated", "athlete_goal", goal_id, updates)
@@ -281,7 +364,13 @@ async def development_overview(user=Depends(require_roles(*COACH_ROLES))):
     amap = {a["id"]: a for a in athletes}
     for g in goals:
         g["athlete"] = amap.get(g["athlete_id"])
-    recent_notes = await db.athlete_notes.find({"organization_id": user["organization_id"], "note_type": "assessment"}, {"_id": 0}).sort("created_at", -1).to_list(20)
+    # Assessment-style notes: writes normalize "assessment" -> "development", so
+    # match the stored types (plus legacy values) and honor per-role visibility.
+    assessment_types = ["development", "scout", "assessment", "scout_assessment"]
+    candidate_notes = await db.athlete_notes.find(
+        {"organization_id": user["organization_id"], "note_type": {"$in": assessment_types}},
+        {"_id": 0}).sort("created_at", -1).to_list(60)
+    recent_notes = [n for n in candidate_notes if _note_visible_to_role(n, user["role"])][:20]
     for n in recent_notes:
         n["athlete"] = amap.get(n["athlete_id"]) or await db.athletes.find_one(
             {"id": n["athlete_id"], "organization_id": user["organization_id"]},

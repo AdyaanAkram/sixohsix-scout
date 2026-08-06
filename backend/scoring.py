@@ -8,7 +8,111 @@ Rules:
 - Timed metrics: lower is better. Velocities/distances: higher is better
   (direction always comes from metric/benchmark definition).
 - Preserve raw, normalized, weighted, category, and overall scores.
+- Metric keys are namespaced canonically (see CANONICAL_METRIC_CATALOG). Legacy
+  keys stored in older documents are aliased on read so historical data keeps
+  matching benchmarks instead of silently scoring as "no benchmark".
 """
+
+from positions import POSITION_TO_GROUP
+
+# ---------------------------------------------------------------------------
+# Canonical metric keys (spec §4D)
+# ---------------------------------------------------------------------------
+
+CANONICAL_METRIC_CATALOG = {
+    "sixty_yard_dash": {"label": "60-Yard Dash", "unit": "sec", "lower_better": True},
+    "home_to_first": {"label": "Home to First", "unit": "sec", "lower_better": True},
+    "exit_velocity": {"label": "Exit Velocity", "unit": "mph", "lower_better": False},
+    "throwing_velocity": {"label": "Throwing Velocity", "unit": "mph", "lower_better": False},
+    "pitching_velocity": {"label": "Pitch Velocity", "unit": "mph", "lower_better": False},
+    "pop_time": {"label": "Pop Time", "unit": "sec", "lower_better": True},
+    "bat_speed": {"label": "Bat Speed", "unit": "mph", "lower_better": False},
+    "broad_jump": {"label": "Broad Jump", "unit": "in", "lower_better": False},
+    "vertical_jump": {"label": "Vertical Jump", "unit": "in", "lower_better": False},
+}
+
+# Keys that predate the canonical namespace and have no canonical equivalent.
+# They stay writable/readable (never silently dropped) but are flagged legacy.
+LEGACY_METRIC_CATALOG = {
+    "ten_yd": {"label": "10-Yard Split", "unit": "sec", "lower_better": True},
+}
+
+# old/alternate spelling -> canonical key. `ten_yd` maps to itself on purpose.
+METRIC_KEY_ALIASES = {
+    # legacy METRIC_CATALOG keys (routes_metrics.py, pre-spec-§4D)
+    "exit_velo": "exit_velocity",
+    "pitch_velo": "pitching_velocity",
+    "pitch_velocity": "pitching_velocity",
+    "pitching_velo": "pitching_velocity",
+    "throwing_velo": "throwing_velocity",
+    "throw_velo": "throwing_velocity",
+    "sixty_yd": "sixty_yard_dash",
+    "sixty_yard": "sixty_yard_dash",
+    "60_yd": "sixty_yard_dash",
+    "60yd": "sixty_yard_dash",
+    "60_yard_dash": "sixty_yard_dash",
+    "ten_yd": "ten_yd",
+    "ten_yard": "ten_yd",
+    "ten_yd_split": "ten_yd",
+    "10_yd": "ten_yd",
+    "10yd": "ten_yd",
+    # other spellings seen in evaluation templates / imports
+    "home_to_1st": "home_to_first",
+    "h2f": "home_to_first",
+    "vert_jump": "vertical_jump",
+    "vertical_leap": "vertical_jump",
+    "broad_jmp": "broad_jump",
+    "batspeed": "bat_speed",
+    "poptime": "pop_time",
+}
+
+# canonical key -> every stored spelling that resolves to it (for Mongo $in reads)
+_EQUIVALENT_KEYS: dict[str, list[str]] = {}
+for _k in list(CANONICAL_METRIC_CATALOG) + list(LEGACY_METRIC_CATALOG):
+    _EQUIVALENT_KEYS.setdefault(_k, [_k])
+for _alias, _canon in METRIC_KEY_ALIASES.items():
+    bucket = _EQUIVALENT_KEYS.setdefault(_canon, [_canon])
+    if _alias not in bucket:
+        bucket.append(_alias)
+
+
+def canonical_metric_key(key):
+    """Normalise any stored/incoming metric key to its canonical spelling.
+
+    Permissive by design: an unrecognised key is returned normalised (never
+    dropped) so unknown historical rows still round-trip. Use `metric_meta` to
+    decide whether a key is actually a supported one.
+    """
+    if not key:
+        return None
+    k = str(key).strip().lower().replace("-", "_").replace(" ", "_")
+    return METRIC_KEY_ALIASES.get(k, k)
+
+
+def metric_meta(key):
+    """Return {key,label,unit,lower_better,legacy} for a supported key, else None."""
+    ck = canonical_metric_key(key)
+    if ck in CANONICAL_METRIC_CATALOG:
+        return {"key": ck, "legacy": False, **CANONICAL_METRIC_CATALOG[ck]}
+    if ck in LEGACY_METRIC_CATALOG:
+        return {"key": ck, "legacy": True, **LEGACY_METRIC_CATALOG[ck]}
+    return None
+
+
+def equivalent_metric_keys(key):
+    """All stored spellings that resolve to the same canonical metric.
+
+    Used to query `verified_metrics` so rows written under the old namespace
+    (exit_velo, sixty_yd, …) are found alongside newly written canonical rows.
+    """
+    ck = canonical_metric_key(key)
+    if ck is None:
+        return []
+    return list(_EQUIVALENT_KEYS.get(ck, [ck]))
+
+
+def supported_metric_keys():
+    return list(CANONICAL_METRIC_CATALOG) + list(LEGACY_METRIC_CATALOG)
 
 
 def normalize_rating(metric, raw):
@@ -43,18 +147,102 @@ def normalize_with_benchmark(benchmark, raw):
     return normalized, percentile
 
 
+def _age_range(token):
+    """Parse an age-band token into an inclusive (lo, hi) numeric range.
+
+    Handles "14U", "13U-14U", "8U-10U", "College", "Pro"/"Professional".
+    Returns None when the token is not parseable.
+    """
+    if not token:
+        return None
+    t = str(token).strip().upper().replace("–", "-").replace(" ", "")
+    if t in ("COLLEGE", "NCAA"):
+        return (19, 22)
+    if t in ("PRO", "PROFESSIONAL"):
+        return (23, 99)
+    if "-" in t:
+        parts = t.split("-", 1)
+        lo = _age_range(parts[0])
+        hi = _age_range(parts[1])
+        if lo and hi:
+            return (min(lo[0], hi[0]), max(lo[1], hi[1]))
+        return None
+    if t.endswith("U"):
+        t = t[:-1]
+    if t.isdigit():
+        n = int(t)
+        return (n, n)
+    return None
+
+
+def _age_rank(athlete_age_group, benchmark_age_group):
+    """Match rank for a benchmark's age band against an athlete's.
+
+    Returns None for "does not apply", otherwise higher = more specific:
+      2 = exact band match, 1 = overlapping band, 0 = benchmark applies to all ages.
+    Permissive on read so legacy bands ("12U", "8U-10U") and the new bands
+    ("11U-12U", "College", "Professional") both resolve.
+    """
+    if not benchmark_age_group:
+        return 0
+    if not athlete_age_group:
+        return None
+    ba = str(benchmark_age_group).strip().upper().replace("–", "-")
+    aa = str(athlete_age_group).strip().upper().replace("–", "-")
+    if ba == aa:
+        return 2
+    br, ar = _age_range(ba), _age_range(aa)
+    if br and ar and br[0] <= ar[1] and ar[0] <= br[1]:
+        return 1
+    return None
+
+
+def _position_rank(athlete_position, benchmark_position):
+    """None = does not apply; 2 = exact, 1 = position group, 0 = any position."""
+    if not benchmark_position:
+        return 0
+    if not athlete_position:
+        # A position-specific benchmark must never be claimed for an athlete
+        # whose position we do not know.
+        return None
+    bp = str(benchmark_position).strip().upper()
+    ap = str(athlete_position).strip().upper()
+    if bp == ap:
+        return 2
+    if POSITION_TO_GROUP.get(ap) == bp or POSITION_TO_GROUP.get(bp) == ap:
+        return 1
+    return None
+
+
+def _band_width(token):
+    r = _age_range(token)
+    return (r[1] - r[0]) if r else 99
+
+
 def find_benchmark(benchmarks, metric_key, age_group, position=None):
+    """Most specific benchmark for a metric + athlete age band / position.
+
+    Preference: position-specific > age-only, then exact age band > overlapping
+    band > any-age, then the narrower band. Metric keys are compared
+    canonically, so a benchmark seeded as `exit_velocity` matches a legacy
+    `exit_velo` record. Returns None when nothing is defined — callers must
+    never substitute a fabricated benchmark.
+    """
+    wanted = canonical_metric_key(metric_key)
     best = None
+    best_rank = None
     for b in benchmarks:
-        if b.get("metric_key") != metric_key:
+        if canonical_metric_key(b.get("metric_key")) != wanted:
             continue
-        if b.get("age_group") and b.get("age_group") != age_group:
+        pos_rank = _position_rank(position, b.get("position"))
+        if pos_rank is None:
             continue
-        if b.get("position") and position and b.get("position") != position:
+        age_rank = _age_rank(age_group, b.get("age_group"))
+        if age_rank is None:
             continue
-        # prefer more specific benchmark (with position)
-        if best is None or (b.get("position") and not best.get("position")):
-            best = b
+        rank = (pos_rank, age_rank, -_band_width(b.get("age_group")))
+        if best_rank is None or rank > best_rank:
+            best, best_rank = b, rank
     return best
 
 

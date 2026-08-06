@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from auth import hash_password
 from db import db, new_id, now_iso
+from positions import AGE_BANDS, age_band_for_age, resolve_template
 from scoring import compute_evaluation_scores
 
 random.seed(42)
@@ -50,8 +51,13 @@ def dob_for_age(age):
 
 
 def age_group_for_age(age):
-    bracket = min(max(age + (age % 2), 8), 18)
-    return f"{bracket}U"
+    return age_band_for_age(age)
+
+
+# Bands that get position-specific templates. "Professional" gets the general
+# skills form only — it is assigned manually and carries no seeded athletes.
+TEMPLATE_BANDS = [b for b in AGE_BANDS if b != "Professional"]
+YOUNGER_BANDS = ["7U-8U", "9U-10U", "11U-12U"]
 
 
 def iso(dt):
@@ -109,9 +115,10 @@ async def main():
 
     # ---- Athletes (30) ----
     athletes = []
-    age_pools = [(9, 10), (11, 12), (13, 14)]
+    # One pool per canonical band (7U-8U through College) so every band is populated.
+    age_pools = [(7, 8), (9, 10), (11, 12), (13, 14), (15, 16), (17, 18), (19, 21)]
     for i in range(30):
-        age = random.randint(*age_pools[i % 3])
+        age = random.randint(*age_pools[i % len(age_pools)])
         first = FIRST_NAMES[i]
         last = LAST_NAMES[i]
         city, state = random.choice(CITIES)
@@ -143,67 +150,204 @@ async def main():
         await db.athletes.insert_one(a)
 
     # ---- Templates ----
-    def rating_metrics_8u():
-        cats = [{"name": "Athleticism", "weight": 20}, {"name": "Hitting", "weight": 25},
-                {"name": "Defense", "weight": 25}, {"name": "Arm Strength", "weight": 15},
-                {"name": "Baseball IQ", "weight": 10}, {"name": "Coachability", "weight": 5}]
+    # Two metric vocabularies per position category: younger bands score movement,
+    # fundamentals and makeup; older bands score verified measurements, position
+    # tools, game performance and recruitability (spec §8/§9).
+    CORE_CATS = [{"name": "Athleticism", "weight": 20}, {"name": "Hitting", "weight": 25},
+                 {"name": "Defense", "weight": 25}, {"name": "Arm Strength", "weight": 15},
+                 {"name": "Baseball IQ", "weight": 10}, {"name": "Coachability", "weight": 5}]
+
+    def cats(*names):
+        return [c for c in CORE_CATS if c["name"] in names]
+
+    def general_young(band):
         ms = [
             metric("Athletic Movement", "Athleticism", "rating_5", weight=2, required=True, order=1),
-            metric("Balance", "Athleticism", "rating_5", order=2),
-            metric("Effort", "Coachability", "rating_5", required=True, order=3),
-            metric("Coachability", "Coachability", "rating_5", weight=2, required=True, order=4),
+            metric("Coordination and Balance", "Athleticism", "rating_5", order=2),
+            metric("Running Mechanics", "Athleticism", "rating_5", order=3),
+            metric("Hitting Fundamentals", "Hitting", "rating_5", weight=2, required=True, order=4),
+            metric("Contact Consistency", "Hitting", "rating_5", weight=2, order=5),
+            metric("Confidence in the Box", "Hitting", "rating_5", order=6),
+            metric("Throwing Fundamentals", "Arm Strength", "rating_5", weight=2, order=7),
+            metric("Throwing Accuracy", "Arm Strength", "rating_5", order=8),
+            metric("Catching Fundamentals", "Defense", "rating_5", weight=2, required=True, order=9),
+            metric("Ground-Ball Fundamentals", "Defense", "rating_5", weight=2, order=10),
+            metric("Baseball Awareness", "Baseball IQ", "rating_5", weight=2, order=11),
+            metric("Base-Running Awareness", "Baseball IQ", "rating_5", order=12),
+            metric("Effort", "Coachability", "rating_5", required=True, order=13),
+            metric("Coachability", "Coachability", "rating_5", weight=2, required=True, order=14),
+            metric("Evaluator Notes", "Coachability", "comment", order=16),
+        ]
+        if band != "7U-8U":
+            ms.insert(3, metric("Home-to-First Time", "Athleticism", "time", unit="sec",
+                                higher=False, key="home_to_first", order=15))
+        return CORE_CATS, ms
+
+    def general_old(band):
+        return CORE_CATS, [
+            metric("Sixty-Yard Dash", "Athleticism", "time", unit="sec", weight=2, higher=False,
+                   key="sixty_yard_dash", required=True, order=1),
+            metric("Home-to-First Time", "Athleticism", "time", unit="sec", higher=False,
+                   key="home_to_first", order=2),
+            metric("Broad Jump", "Athleticism", "numeric", unit="in", key="broad_jump", order=3),
+            metric("Vertical Jump", "Athleticism", "numeric", unit="in", key="vertical_jump", order=4),
+            metric("Physical Projection", "Athleticism", "rating_5", weight=2, order=5),
+            metric("Exit Velocity", "Hitting", "velocity", unit="mph", weight=2,
+                   key="exit_velocity", required=True, order=6),
+            metric("Bat Speed", "Hitting", "velocity", unit="mph", weight=2, key="bat_speed", order=7),
+            metric("Hitting Approach", "Hitting", "rating_5", weight=2, order=8),
+            metric("Game Performance - Hitting", "Hitting", "rating_5", key="game_performance_hitting", order=9),
+            metric("Throwing Velocity", "Arm Strength", "velocity", unit="mph", weight=2,
+                   key="throwing_velocity", order=10),
+            metric("Arm Accuracy and Carry", "Arm Strength", "rating_5", order=11),
+            metric("Defensive Impact", "Defense", "rating_5", weight=2, required=True, order=12),
+            metric("Fielding Consistency", "Defense", "rating_5", weight=2, order=13),
+            metric("Baseball IQ", "Baseball IQ", "rating_5", weight=2, key="baseball_iq_rating", order=14),
+            metric("Competitive Consistency", "Baseball IQ", "rating_5", order=15),
+            metric("Coachability", "Coachability", "rating_5", weight=2, required=True, order=16),
+            metric("Recruitability", "Coachability", "rating_5", weight=2, order=17),
+            metric("Evaluator Summary", "Coachability", "comment", order=18),
+        ]
+
+    def pitching_young(band):
+        return cats("Arm Strength", "Defense", "Baseball IQ", "Coachability"), [
+            metric("Throwing Fundamentals", "Arm Strength", "rating_5", weight=2, required=True, order=1),
+            metric("Arm Action", "Arm Strength", "rating_5", weight=2, order=2),
+            metric("Strike-Throwing Consistency", "Arm Strength", "rating_5", weight=2, required=True, order=3),
+            metric("Balance on the Mound", "Defense", "rating_5", order=4),
+            metric("Fielding the Position", "Defense", "rating_5", order=5),
+            metric("Pitch Awareness", "Baseball IQ", "rating_5", order=6),
+            metric("Effort", "Coachability", "rating_5", required=True, order=7),
+            metric("Coachability", "Coachability", "rating_5", weight=2, order=8),
+        ]
+
+    def pitching_old(band):
+        return cats("Arm Strength", "Defense", "Baseball IQ", "Coachability"), [
+            metric("Pitching Velocity", "Arm Strength", "velocity", unit="mph", weight=2,
+                   key="pitching_velocity", required=True, order=1),
+            metric("Fastball Command", "Arm Strength", "rating_5", weight=2, required=True, order=2),
+            metric("Breaking Ball", "Arm Strength", "rating_5", order=3),
+            metric("Changeup", "Arm Strength", "rating_5", order=4),
+            metric("Mechanical Repeatability", "Arm Strength", "rating_5", weight=2, order=5),
+            metric("Fielding the Position", "Defense", "rating_5", order=6),
+            metric("Holding Runners", "Defense", "rating_5", order=7),
+            metric("Pitch Sequencing", "Baseball IQ", "rating_5", weight=2, order=8),
+            metric("Mound Presence", "Baseball IQ", "rating_5", order=9),
+            metric("Recruitability", "Coachability", "rating_5", weight=2, order=10),
+            metric("Evaluator Summary", "Coachability", "comment", order=11),
+        ]
+
+    def catching_young(band):
+        return cats("Defense", "Arm Strength", "Baseball IQ", "Coachability"), [
+            metric("Receiving Fundamentals", "Defense", "rating_5", weight=2, required=True, order=1),
+            metric("Blocking Fundamentals", "Defense", "rating_5", weight=2, order=2),
+            metric("Catching Stance and Footwork", "Defense", "rating_5", order=3),
+            metric("Throwing Fundamentals", "Arm Strength", "rating_5", weight=2, order=4),
+            metric("Baseball Awareness", "Baseball IQ", "rating_5", order=5),
+            metric("Effort", "Coachability", "rating_5", required=True, order=6),
+            metric("Coachability", "Coachability", "rating_5", weight=2, order=7),
+        ]
+
+    def catching_old(band):
+        return cats("Defense", "Arm Strength", "Baseball IQ", "Coachability"), [
+            metric("Pop Time", "Arm Strength", "time", unit="sec", weight=2, higher=False,
+                   key="pop_time", required=True, order=1),
+            metric("Throwing Velocity", "Arm Strength", "velocity", unit="mph", weight=2,
+                   key="throwing_velocity", order=2),
+            metric("Transfer and Exchange", "Arm Strength", "rating_5", order=3),
+            metric("Receiving and Framing", "Defense", "rating_5", weight=2, required=True, order=4),
+            metric("Blocking", "Defense", "rating_5", weight=2, order=5),
+            metric("Defensive Impact", "Defense", "rating_5", weight=2, order=6),
+            metric("Game Calling", "Baseball IQ", "rating_5", weight=2, order=7),
+            metric("Pitcher Management", "Baseball IQ", "rating_5", order=8),
+            metric("Recruitability", "Coachability", "rating_5", weight=2, order=9),
+            metric("Evaluator Summary", "Coachability", "comment", order=10),
+        ]
+
+    def infield_young(band):
+        return cats("Defense", "Arm Strength", "Athleticism", "Coachability"), [
+            metric("Ground-Ball Fundamentals", "Defense", "rating_5", weight=2, required=True, order=1),
+            metric("Glove Work", "Defense", "rating_5", weight=2, order=2),
+            metric("Infield Footwork", "Defense", "rating_5", order=3),
+            metric("First-Base Footwork and Scoop", "Defense", "rating_5", key="first_base_footwork", order=4),
             metric("Throwing Fundamentals", "Arm Strength", "rating_5", weight=2, order=5),
             metric("Throwing Accuracy", "Arm Strength", "rating_5", order=6),
-            metric("Catching Fundamentals", "Defense", "rating_5", weight=2, order=7),
-            metric("Ground-Ball Fundamentals", "Defense", "rating_5", weight=2, order=8),
-            metric("Hitting Contact", "Hitting", "rating_5", weight=2, required=True, order=9),
-            metric("Base-Running Awareness", "Baseball IQ", "rating_5", order=10),
-            metric("Baseball Instincts", "Baseball IQ", "rating_5", weight=2, order=11),
+            metric("Lateral Movement", "Athleticism", "rating_5", order=7),
+            metric("Effort", "Coachability", "rating_5", required=True, order=8),
+            metric("Coachability", "Coachability", "rating_5", weight=2, order=9),
         ]
-        return cats, ms
 
-    def metrics_11u():
-        cats = [{"name": "Athleticism", "weight": 20}, {"name": "Hitting", "weight": 25},
-                {"name": "Defense", "weight": 25}, {"name": "Arm Strength", "weight": 15},
-                {"name": "Baseball IQ", "weight": 10}, {"name": "Coachability", "weight": 5}]
-        ms = [
-            metric("Home-to-First Time", "Athleticism", "time", unit="sec", weight=2, higher=False, key="home_to_first", order=1),
-            metric("Arm Strength", "Arm Strength", "rating_5", weight=2, required=True, order=2),
-            metric("Throwing Accuracy", "Arm Strength", "rating_5", order=3),
-            metric("Infield Mechanics", "Defense", "rating_5", weight=2, order=4),
-            metric("Outfield Routes", "Defense", "rating_5", order=5),
-            metric("Catching Ability", "Defense", "rating_5", order=6),
-            metric("Bat Speed", "Hitting", "rating_5", weight=2, required=True, order=7),
-            metric("Contact Quality", "Hitting", "rating_5", weight=2, required=True, order=8),
-            metric("Pitch Recognition", "Hitting", "rating_5", order=9),
-            metric("Base-Running Instincts", "Baseball IQ", "rating_5", order=10),
-            metric("Competitive Response", "Baseball IQ", "rating_5", order=11),
-            metric("Baseball IQ", "Baseball IQ", "rating_5", weight=2, order=12),
-            metric("Coachability", "Coachability", "rating_5", weight=2, required=True, order=13),
+    def infield_old(band):
+        return cats("Defense", "Arm Strength", "Athleticism", "Baseball IQ", "Coachability"), [
+            metric("Throwing Velocity", "Arm Strength", "velocity", unit="mph", weight=2,
+                   key="throwing_velocity", required=True, order=1),
+            metric("Arm Accuracy and Carry", "Arm Strength", "rating_5", weight=2, order=2),
+            metric("Infield Actions", "Defense", "rating_5", weight=2, required=True, order=3),
+            metric("Range", "Defense", "rating_5", weight=2, order=4),
+            metric("Double-Play Turn", "Defense", "rating_5", order=5),
+            metric("First-Base Footwork and Scoop", "Defense", "rating_5", key="first_base_footwork", order=6),
+            metric("Defensive Consistency", "Defense", "rating_5", weight=2, order=7),
+            metric("Home-to-First Time", "Athleticism", "time", unit="sec", higher=False,
+                   key="home_to_first", order=8),
+            metric("Physical Projection", "Athleticism", "rating_5", order=9),
+            metric("Baseball IQ", "Baseball IQ", "rating_5", weight=2, key="baseball_iq_rating", order=10),
+            metric("Recruitability", "Coachability", "rating_5", weight=2, order=11),
+            metric("Evaluator Summary", "Coachability", "comment", order=12),
         ]
-        return cats, ms
 
-    def metrics_14u():
-        cats = [{"name": "Athleticism", "weight": 20}, {"name": "Hitting", "weight": 25},
-                {"name": "Defense", "weight": 25}, {"name": "Arm Strength", "weight": 15},
-                {"name": "Baseball IQ", "weight": 10}, {"name": "Coachability", "weight": 5}]
-        ms = [
-            metric("Sixty-Yard Dash", "Athleticism", "time", unit="sec", weight=2, higher=False, key="sixty_yard_dash", required=True, order=1),
-            metric("Home-to-First Time", "Athleticism", "time", unit="sec", higher=False, key="home_to_first", order=2),
-            metric("Physical Projection", "Athleticism", "rating_5", order=3),
-            metric("Exit Velocity", "Hitting", "velocity", unit="mph", weight=2, key="exit_velocity", required=True, order=4),
-            metric("Bat Speed", "Hitting", "rating_5", weight=2, order=5),
-            metric("Contact Quality", "Hitting", "rating_5", weight=2, order=6),
-            metric("Power Projection", "Hitting", "rating_5", order=7),
-            metric("Throwing Velocity", "Arm Strength", "velocity", unit="mph", weight=2, key="throwing_velocity", order=8),
-            metric("Throwing Accuracy", "Arm Strength", "rating_5", order=9),
-            metric("Defensive Projection", "Defense", "rating_5", weight=2, order=10),
-            metric("Fielding Mechanics", "Defense", "rating_5", weight=2, order=11),
-            metric("Baseball IQ", "Baseball IQ", "rating_5", weight=2, order=12),
-            metric("Competitive Makeup", "Baseball IQ", "rating_5", order=13),
-            metric("Coachability", "Coachability", "rating_5", weight=2, required=True, order=14),
+    def outfield_young(band):
+        return cats("Defense", "Arm Strength", "Athleticism", "Coachability"), [
+            metric("Fly-Ball Fundamentals", "Defense", "rating_5", weight=2, required=True, order=1),
+            metric("Routes to the Ball", "Defense", "rating_5", weight=2, order=2),
+            metric("Communication", "Defense", "rating_5", order=3),
+            metric("Throwing Fundamentals", "Arm Strength", "rating_5", weight=2, order=4),
+            metric("Throwing Accuracy", "Arm Strength", "rating_5", order=5),
+            metric("Running Mechanics", "Athleticism", "rating_5", order=6),
+            metric("Effort", "Coachability", "rating_5", required=True, order=7),
+            metric("Coachability", "Coachability", "rating_5", weight=2, order=8),
         ]
-        return cats, ms
+
+    def outfield_old(band):
+        return cats("Defense", "Arm Strength", "Athleticism", "Baseball IQ", "Coachability"), [
+            metric("Sixty-Yard Dash", "Athleticism", "time", unit="sec", weight=2, higher=False,
+                   key="sixty_yard_dash", required=True, order=1),
+            metric("Physical Projection", "Athleticism", "rating_5", order=2),
+            metric("Throwing Velocity", "Arm Strength", "velocity", unit="mph", weight=2,
+                   key="throwing_velocity", required=True, order=3),
+            metric("Arm Accuracy and Carry", "Arm Strength", "rating_5", weight=2, order=4),
+            metric("Routes and Reads", "Defense", "rating_5", weight=2, required=True, order=5),
+            metric("Closing Speed", "Defense", "rating_5", weight=2, order=6),
+            metric("Defensive Consistency", "Defense", "rating_5", weight=2, order=7),
+            metric("Baseball IQ", "Baseball IQ", "rating_5", weight=2, key="baseball_iq_rating", order=8),
+            metric("Recruitability", "Coachability", "rating_5", weight=2, order=9),
+            metric("Evaluator Summary", "Coachability", "comment", order=10),
+        ]
+
+    def hitting_young(band):
+        return cats("Hitting", "Baseball IQ", "Coachability"), [
+            metric("Hitting Fundamentals", "Hitting", "rating_5", weight=2, required=True, order=1),
+            metric("Contact Consistency", "Hitting", "rating_5", weight=2, order=2),
+            metric("Swing Balance", "Hitting", "rating_5", order=3),
+            metric("Confidence in the Box", "Hitting", "rating_5", order=4),
+            metric("Pitch Awareness", "Baseball IQ", "rating_5", order=5),
+            metric("Effort", "Coachability", "rating_5", required=True, order=6),
+            metric("Coachability", "Coachability", "rating_5", weight=2, order=7),
+        ]
+
+    def hitting_old(band):
+        return cats("Hitting", "Baseball IQ", "Coachability"), [
+            metric("Exit Velocity", "Hitting", "velocity", unit="mph", weight=2,
+                   key="exit_velocity", required=True, order=1),
+            metric("Bat Speed", "Hitting", "velocity", unit="mph", weight=2, key="bat_speed", required=True, order=2),
+            metric("Hitting Approach", "Hitting", "rating_5", weight=2, order=3),
+            metric("Contact Quality", "Hitting", "rating_5", weight=2, order=4),
+            metric("Power Projection", "Hitting", "rating_5", order=5),
+            metric("Game Performance - Hitting", "Hitting", "rating_5", key="game_performance_hitting", order=6),
+            metric("Pitch Recognition", "Baseball IQ", "rating_5", weight=2, order=7),
+            metric("Approach Consistency", "Baseball IQ", "rating_5", order=8),
+            metric("Recruitability", "Coachability", "rating_5", weight=2, order=9),
+            metric("Evaluator Summary", "Coachability", "comment", order=10),
+        ]
 
     def station_template(name, cats_ms, age_group=None, applies_to=None, is_default=False):
         cats, ms = cats_ms
@@ -216,78 +360,159 @@ async def main():
                 "created_by": user_ids["admin@pbgscout.com"],
                 "created_at": now_iso(), "updated_at": now_iso()}
 
-    # Age template keys: prefer band labels so resolve_template can match athlete age_group
-    # (exact 7U/…/18U/College/Pro also work; blank age_group = all ages)
-    tpl_8u = station_template("8U-10U Skills Evaluation", rating_metrics_8u(), "8U-10U", is_default=True)
-    tpl_11u = station_template("11U-13U Skills Evaluation", metrics_11u(), "11U-13U")
-    tpl_14u = station_template("14U-18U Showcase Evaluation", metrics_14u(), "14U-18U")
+    # Every age band gets its own general form, and every band below Professional gets
+    # its own copy of each position form. Both an age_group AND applies_to_positions are
+    # set on the position forms — without both, resolve_template can never match on age.
+    POSITION_FORMS = [
+        ("Pitching", ["P"], pitching_young, pitching_old),
+        ("Catching", ["C"], catching_young, catching_old),
+        ("Infield", ["IF", "1B", "2B", "3B", "SS"], infield_young, infield_old),
+        ("Outfield", ["OF", "LF", "CF", "RF"], outfield_young, outfield_old),
+        ("Hitting", ["DH"], hitting_young, hitting_old),
+    ]
 
-    # station-specific templates
-    tpl_athletic = station_template("Athletic Testing", (
-        [{"name": "Athleticism", "weight": 20}],
+    all_templates = []
+    templates_by_band = {}
+    for band in AGE_BANDS:
+        young = band in YOUNGER_BANDS
+        suffix = "Skills Evaluation" if young else "Showcase Evaluation"
+        gen = station_template(f"{band} General {suffix}",
+                               (general_young if young else general_old)(band), band)
+        all_templates.append(gen)
+        templates_by_band[band] = {"General": gen}
+        if band not in TEMPLATE_BANDS:
+            continue
+        for label, applies_to, build_young, build_old in POSITION_FORMS:
+            tpl = station_template(f"{band} {label} {suffix}",
+                                   (build_young if young else build_old)(band),
+                                   band, applies_to=applies_to)
+            all_templates.append(tpl)
+            templates_by_band[band][label] = tpl
+
+    # Age-neutral station forms: no age_group and no positions, so they are only ever
+    # reached through station.template_id or the org default.
+    tpl_athletic = station_template("Athletic Testing Station", (
+        cats("Athleticism"),
         [metric("Sixty-Yard Dash", "Athleticism", "time", unit="sec", weight=2, higher=False, key="sixty_yard_dash", order=1),
          metric("Home-to-First Time", "Athleticism", "time", unit="sec", higher=False, key="home_to_first", order=2),
-         metric("Athletic Movement", "Athleticism", "rating_5", weight=2, required=True, order=3),
-         metric("Balance", "Athleticism", "rating_5", order=4)]))
-    tpl_hitting = station_template("Hitting Station", (
-        [{"name": "Hitting", "weight": 25}, {"name": "Coachability", "weight": 5}],
+         metric("Broad Jump", "Athleticism", "numeric", unit="in", key="broad_jump", order=3),
+         metric("Vertical Jump", "Athleticism", "numeric", unit="in", key="vertical_jump", order=4),
+         metric("Athletic Movement", "Athleticism", "rating_5", weight=2, required=True, order=5)]))
+    tpl_hitting_station = station_template("Hitting Station", (
+        cats("Hitting", "Coachability"),
         [metric("Exit Velocity", "Hitting", "velocity", unit="mph", weight=2, key="exit_velocity", order=1),
-         metric("Bat Speed", "Hitting", "rating_5", weight=2, required=True, order=2),
-         metric("Contact Quality", "Hitting", "rating_5", weight=2, required=True, order=3),
-         metric("Power Projection", "Hitting", "rating_5", order=4),
-         metric("Pitch Recognition", "Hitting", "rating_5", order=5),
+         metric("Bat Speed", "Hitting", "velocity", unit="mph", weight=2, key="bat_speed", order=2),
+         metric("Hitting Approach", "Hitting", "rating_5", weight=2, required=True, order=3),
+         metric("Contact Quality", "Hitting", "rating_5", weight=2, required=True, order=4),
+         metric("Power Projection", "Hitting", "rating_5", order=5),
          metric("Coachability", "Coachability", "rating_5", order=6)]))
-    tpl_infield = station_template("Infield Station", (
-        [{"name": "Defense", "weight": 25}, {"name": "Arm Strength", "weight": 15}],
-        [metric("Ground-Ball Fundamentals", "Defense", "rating_5", weight=2, required=True, order=1),
-         metric("Infield Mechanics", "Defense", "rating_5", weight=2, order=2),
-         metric("Footwork", "Defense", "rating_5", order=3),
-         metric("Throwing Velocity", "Arm Strength", "velocity", unit="mph", key="throwing_velocity", order=4),
-         metric("Throwing Accuracy", "Arm Strength", "rating_5", weight=2, order=5)]),
-        applies_to=["IF", "1B", "2B", "3B", "SS"])
-    tpl_outfield = station_template("Outfield Station", (
-        [{"name": "Defense", "weight": 25}, {"name": "Arm Strength", "weight": 15}],
-        [metric("Outfield Routes", "Defense", "rating_5", weight=2, required=True, order=1),
-         metric("Fly-Ball Reads", "Defense", "rating_5", weight=2, order=2),
-         metric("Throwing Velocity", "Arm Strength", "velocity", unit="mph", key="throwing_velocity", order=3),
-         metric("Throwing Accuracy", "Arm Strength", "rating_5", order=4)]),
-        applies_to=["OF", "LF", "CF", "RF"])
-    tpl_pitching = station_template("Pitching Station", (
-        [{"name": "Arm Strength", "weight": 15}, {"name": "Baseball IQ", "weight": 10}],
-        [metric("Pitching Velocity", "Arm Strength", "velocity", unit="mph", weight=2, key="pitching_velocity", order=1),
-         metric("Pitching Mechanics", "Arm Strength", "rating_5", weight=2, required=True, order=2),
-         metric("Control", "Arm Strength", "rating_5", weight=2, order=3),
-         metric("Pitch Sequencing", "Baseball IQ", "rating_5", order=4)]),
-        applies_to=["P"])
-    tpl_catching = station_template("Catching Station", (
-        [{"name": "Defense", "weight": 25}, {"name": "Arm Strength", "weight": 15}],
-        [metric("Pop Time", "Arm Strength", "time", unit="sec", higher=False, key="pop_time", order=1),
-         metric("Receiving", "Defense", "rating_5", weight=2, required=True, order=2),
-         metric("Blocking", "Defense", "rating_5", weight=2, order=3),
-         metric("Footwork", "Defense", "rating_5", order=4)]),
-        applies_to=["C"])
+    tpl_baserunning = station_template("Base Running Station", (
+        cats("Athleticism", "Baseball IQ"),
+        [metric("Home-to-First Time", "Athleticism", "time", unit="sec", weight=2, higher=False, key="home_to_first", order=1),
+         metric("Lead and Jump", "Athleticism", "rating_5", order=2),
+         metric("Turns and Reads", "Baseball IQ", "rating_5", weight=2, required=True, order=3),
+         metric("Base-Running Instincts", "Baseball IQ", "rating_5", weight=2, order=4)]))
+    tpl_iq = station_template("Baseball IQ Station", (
+        cats("Baseball IQ"),
+        [metric("Situational Awareness", "Baseball IQ", "rating_5", weight=2, required=True, order=1),
+         metric("Count and Pitch Awareness", "Baseball IQ", "rating_5", weight=2, order=2),
+         metric("Game Decision-Making", "Baseball IQ", "rating_5", weight=2, order=3),
+         metric("On-Field Communication", "Baseball IQ", "rating_5", order=4)]))
+    tpl_character = station_template("Character and Coachability Station", (
+        cats("Coachability"),
+        [metric("Effort", "Coachability", "rating_5", weight=2, required=True, order=1),
+         metric("Coachability", "Coachability", "rating_5", weight=2, required=True, order=2),
+         metric("Confidence", "Coachability", "rating_5", order=3),
+         metric("Teammate Impact", "Coachability", "rating_5", order=4),
+         metric("Response to Failure", "Coachability", "rating_5", order=5),
+         metric("Evaluator Notes", "Coachability", "comment", order=6)]))
+    # Catch-all for athletes with no age band on file. Deliberately age-neutral — the
+    # old default was an 8U-10U form, which mis-scored every older athlete.
+    tpl_default = station_template("General Evaluation (All Ages)", (
+        cats("Athleticism", "Hitting", "Defense", "Arm Strength", "Baseball IQ", "Coachability"),
+        [metric("Athletic Movement", "Athleticism", "rating_5", weight=2, required=True, order=1),
+         metric("Hitting Ability", "Hitting", "rating_5", weight=2, required=True, order=2),
+         metric("Defensive Ability", "Defense", "rating_5", weight=2, required=True, order=3),
+         metric("Arm Strength", "Arm Strength", "rating_5", weight=2, key="arm_strength_rating", order=4),
+         metric("Baseball IQ", "Baseball IQ", "rating_5", weight=2, key="baseball_iq_rating", order=5),
+         metric("Coachability", "Coachability", "rating_5", weight=2, required=True, order=6),
+         metric("Evaluator Summary", "Coachability", "comment", order=7)]), is_default=True)
 
-    all_templates = [tpl_8u, tpl_11u, tpl_14u, tpl_athletic, tpl_hitting, tpl_infield,
-                     tpl_outfield, tpl_pitching, tpl_catching]
+    all_templates += [tpl_athletic, tpl_hitting_station, tpl_baserunning, tpl_iq,
+                      tpl_character, tpl_default]
     for t in all_templates:
         await db.evaluation_templates.insert_one(t)
 
     # ---- Benchmarks ----
-    benchmarks = [
-        # sixty yard dash (lower better): floor 10.0s -> elite 6.6s
-        {"metric_key": "sixty_yard_dash", "age_group": "14U", "unit": "sec", "higher_is_better": False, "floor_value": 10.0, "elite_value": 6.6},
-        {"metric_key": "sixty_yard_dash", "age_group": "12U", "unit": "sec", "higher_is_better": False, "floor_value": 11.0, "elite_value": 7.4},
-        {"metric_key": "home_to_first", "age_group": "14U", "unit": "sec", "higher_is_better": False, "floor_value": 6.2, "elite_value": 4.2},
-        {"metric_key": "home_to_first", "age_group": "12U", "unit": "sec", "higher_is_better": False, "floor_value": 6.8, "elite_value": 4.6},
-        {"metric_key": "home_to_first", "age_group": "10U", "unit": "sec", "higher_is_better": False, "floor_value": 7.4, "elite_value": 5.0},
-        {"metric_key": "exit_velocity", "age_group": "14U", "unit": "mph", "higher_is_better": True, "floor_value": 50, "elite_value": 90},
-        {"metric_key": "exit_velocity", "age_group": "12U", "unit": "mph", "higher_is_better": True, "floor_value": 40, "elite_value": 75},
-        {"metric_key": "throwing_velocity", "age_group": "14U", "unit": "mph", "higher_is_better": True, "floor_value": 45, "elite_value": 80},
-        {"metric_key": "throwing_velocity", "age_group": "12U", "unit": "mph", "higher_is_better": True, "floor_value": 35, "elite_value": 65},
-        {"metric_key": "pitching_velocity", "age_group": "14U", "unit": "mph", "higher_is_better": True, "floor_value": 45, "elite_value": 80},
-        {"metric_key": "pitching_velocity", "age_group": "12U", "unit": "mph", "higher_is_better": True, "floor_value": 35, "elite_value": 65},
-        {"metric_key": "pop_time", "age_group": "14U", "unit": "sec", "higher_is_better": False, "floor_value": 3.0, "elite_value": 1.9},
+    # Canonical metric keys only. scoring.find_benchmark compares age_group by exact
+    # string, so these must be the same canonical bands athletes carry.
+    METRIC_UNITS = {
+        "sixty_yard_dash": ("sec", False), "home_to_first": ("sec", False),
+        "pop_time": ("sec", False), "exit_velocity": ("mph", True),
+        "bat_speed": ("mph", True), "throwing_velocity": ("mph", True),
+        "pitching_velocity": ("mph", True), "broad_jump": ("in", True),
+        "vertical_jump": ("in", True),
+    }
+    # band -> metric_key -> (floor_value, elite_value)
+    BAND_BENCHMARKS = {
+        "7U-8U": {"sixty_yard_dash": (13.5, 10.0), "home_to_first": (8.2, 6.0),
+                  "exit_velocity": (25, 45), "bat_speed": (25, 40),
+                  "throwing_velocity": (20, 38), "pitching_velocity": (20, 35),
+                  "broad_jump": (30, 52), "vertical_jump": (6, 13)},
+        "9U-10U": {"sixty_yard_dash": (12.0, 8.8), "home_to_first": (7.6, 5.4),
+                   "exit_velocity": (32, 55), "bat_speed": (30, 48),
+                   "throwing_velocity": (25, 48), "pitching_velocity": (25, 45),
+                   "pop_time": (3.6, 2.6), "broad_jump": (38, 64), "vertical_jump": (8, 17)},
+        "11U-12U": {"sixty_yard_dash": (11.0, 7.9), "home_to_first": (6.9, 4.9),
+                    "exit_velocity": (40, 68), "bat_speed": (36, 58),
+                    "throwing_velocity": (32, 60), "pitching_velocity": (32, 58),
+                    "pop_time": (3.4, 2.4), "broad_jump": (48, 76), "vertical_jump": (11, 22)},
+        "13U-14U": {"sixty_yard_dash": (10.0, 7.2), "home_to_first": (6.3, 4.5),
+                    "exit_velocity": (50, 85), "bat_speed": (44, 68),
+                    "throwing_velocity": (42, 72), "pitching_velocity": (40, 70),
+                    "pop_time": (3.1, 2.2), "broad_jump": (58, 90), "vertical_jump": (14, 27)},
+        "15U-16U": {"sixty_yard_dash": (8.8, 6.9), "home_to_first": (5.8, 4.3),
+                    "exit_velocity": (58, 92), "bat_speed": (50, 75),
+                    "throwing_velocity": (50, 82), "pitching_velocity": (48, 82),
+                    "pop_time": (2.9, 2.05), "broad_jump": (66, 102), "vertical_jump": (17, 31)},
+        "17U-18U": {"sixty_yard_dash": (8.2, 6.6), "home_to_first": (5.4, 4.1),
+                    "exit_velocity": (65, 100), "bat_speed": (55, 80),
+                    "throwing_velocity": (55, 88), "pitching_velocity": (55, 90),
+                    "pop_time": (2.7, 1.95), "broad_jump": (72, 110), "vertical_jump": (19, 34)},
+        "College": {"sixty_yard_dash": (7.9, 6.4), "home_to_first": (5.2, 4.0),
+                    "exit_velocity": (72, 105), "bat_speed": (60, 85),
+                    "throwing_velocity": (62, 92), "pitching_velocity": (62, 95),
+                    "pop_time": (2.6, 1.85), "broad_jump": (78, 116), "vertical_jump": (21, 37)},
+    }
+    # Position benchmarks — find_benchmark prefers these over the age-only row (spec §4D).
+    POSITION_BENCHMARKS = [
+        ("pop_time", "C", "13U-14U", 3.0, 2.15), ("pop_time", "C", "15U-16U", 2.85, 2.0),
+        ("pop_time", "C", "17U-18U", 2.65, 1.9), ("pop_time", "C", "College", 2.55, 1.82),
+        ("pitching_velocity", "P", "11U-12U", 35, 62), ("pitching_velocity", "P", "13U-14U", 44, 74),
+        ("pitching_velocity", "P", "15U-16U", 52, 85), ("pitching_velocity", "P", "17U-18U", 58, 92),
+        ("pitching_velocity", "P", "College", 65, 97),
+        ("throwing_velocity", "C", "13U-14U", 45, 75), ("throwing_velocity", "C", "15U-16U", 53, 84),
+        ("throwing_velocity", "C", "17U-18U", 58, 90),
+        ("throwing_velocity", "SS", "13U-14U", 46, 76), ("throwing_velocity", "SS", "15U-16U", 54, 85),
+        ("throwing_velocity", "SS", "17U-18U", 60, 91),
+        ("throwing_velocity", "CF", "15U-16U", 55, 86), ("throwing_velocity", "CF", "17U-18U", 60, 92),
+        ("exit_velocity", "1B", "15U-16U", 62, 95), ("exit_velocity", "1B", "17U-18U", 68, 102),
+        ("sixty_yard_dash", "CF", "15U-16U", 8.4, 6.7), ("sixty_yard_dash", "CF", "17U-18U", 7.9, 6.4),
+        ("home_to_first", "C", "17U-18U", 5.8, 4.4),
     ]
+
+    benchmarks = []
+    for band, rows in BAND_BENCHMARKS.items():
+        for key, (floor_v, elite_v) in rows.items():
+            unit, higher = METRIC_UNITS[key]
+            benchmarks.append({"metric_key": key, "age_group": band, "position": None,
+                               "unit": unit, "higher_is_better": higher,
+                               "floor_value": floor_v, "elite_value": elite_v})
+    for key, pos, band, floor_v, elite_v in POSITION_BENCHMARKS:
+        unit, higher = METRIC_UNITS[key]
+        benchmarks.append({"metric_key": key, "age_group": band, "position": pos,
+                           "unit": unit, "higher_is_better": higher,
+                           "floor_value": floor_v, "elite_value": elite_v})
     for b in benchmarks:
         await db.metric_benchmarks.insert_one({"id": new_id(), "organization_id": ORG_ID, "created_at": now_iso(), **b})
 
@@ -300,15 +525,18 @@ async def main():
         "event_type": "Evaluation", "date": event_date,
         "start_time": "09:00", "end_time": "15:00",
         "location": "Diamond Fields Complex, Skokie IL",
-        "description": "Spring player evaluation and development camp for 10U, 12U and 14U age groups.",
-        "age_groups": ["10U", "12U", "14U"], "status": "Evaluation Active",
+        "description": "Spring player evaluation and development camp spanning 7U through College.",
+        "age_groups": list(AGE_BANDS[:-1]), "status": "Evaluation Active",
         "created_by": user_ids["admin@pbgscout.com"],
         "created_at": iso(now - timedelta(days=21)), "updated_at": now_iso(),
     })
 
     # ---- Groups ----
     group_ids = {}
-    for gname in ["Group A - 10U", "Group B - 12U", "Group C - 14U"]:
+    GROUP_BANDS = [("Group A - Youth", ["7U-8U", "9U-10U"]),
+                   ("Group B - Middle", ["11U-12U", "13U-14U"]),
+                   ("Group C - Upper", ["15U-16U", "17U-18U", "College", "Professional"])]
+    for gname, _bands in GROUP_BANDS:
         gid = new_id()
         group_ids[gname] = gid
         await db.event_groups.insert_one({
@@ -319,13 +547,11 @@ async def main():
 
     # ---- Roster + check-in ----
     def group_for(a):
-        ag = a.get("age_group") or "12U"
-        n = int(ag.replace("U", ""))
-        if n <= 10:
-            return glist[0]
-        if n <= 12:
-            return glist[1]
-        return glist[2]
+        ag = a.get("age_group") or "11U-12U"
+        for idx, (gname, bands) in enumerate(GROUP_BANDS):
+            if ag in bands:
+                return glist[idx]
+        return glist[1]
 
     bib = 1
     for a in athletes:
@@ -342,13 +568,18 @@ async def main():
         bib += 1
 
     # ---- Stations ----
+    # A station's template is only the fallback — resolve_template picks the athlete's
+    # own age+position form first. The mid band is the sane default for a mixed camp.
+    mid = templates_by_band["13U-14U"]
     station_defs = [
         ("Athletic Testing", tpl_athletic["id"]),
-        ("Hitting", tpl_hitting["id"]),
-        ("Infield", tpl_infield["id"]),
-        ("Outfield", tpl_outfield["id"]),
-        ("Pitching", tpl_pitching["id"]),
-        ("Catching", tpl_catching["id"]),
+        ("Hitting", tpl_hitting_station["id"]),
+        ("Infield", mid["Infield"]["id"]),
+        ("Outfield", mid["Outfield"]["id"]),
+        ("Pitching", mid["Pitching"]["id"]),
+        ("Catching", mid["Catching"]["id"]),
+        ("Base Running", tpl_baserunning["id"]),
+        ("Character and Coachability", tpl_character["id"]),
     ]
     station_ids = {}
     for name, tid in station_defs:
@@ -389,19 +620,23 @@ async def main():
     bench_list = benchmarks
 
     def gen_scores(template, athlete):
+        """Draw measurements from the athlete's own band benchmark so seeded values are
+        plausible for their age rather than uniform across the whole camp."""
+        band = BAND_BENCHMARKS.get(athlete.get("age_group")) or BAND_BENCHMARKS["11U-12U"]
         scores = {}
         for m in template["metrics"]:
             mt = m["metric_type"]
             if mt == "rating_5":
                 scores[m["id"]] = {"value": random.randint(2, 5)}
-            elif mt == "time":
-                key = m.get("key")
-                base = {"sixty_yard_dash": (7.2, 9.5), "home_to_first": (4.5, 6.5), "pop_time": (2.0, 2.9)}.get(key, (5, 9))
-                scores[m["id"]] = {"value": round(random.uniform(*base), 2)}
-            elif mt == "velocity":
-                key = m.get("key")
-                base = {"exit_velocity": (48, 82), "throwing_velocity": (42, 74), "pitching_velocity": (42, 72)}.get(key, (40, 80))
-                scores[m["id"]] = {"value": round(random.uniform(*base), 1)}
+            elif mt == "rating_10":
+                scores[m["id"]] = {"value": random.randint(4, 10)}
+            elif mt in ("time", "velocity", "numeric"):
+                span = band.get(m.get("key"))
+                if not span:
+                    continue
+                lo, hi = sorted(span)
+                val = random.uniform(lo + (hi - lo) * 0.15, hi - (hi - lo) * 0.1)
+                scores[m["id"]] = {"value": round(val, 2 if mt == "time" else 1)}
         return scores
 
     strengths_pool = ["Quick hands through the zone", "Strong first step", "Consistent throwing slot",
@@ -417,7 +652,6 @@ async def main():
     for (assignment_id, email, station_name) in assignment_ids[:6]:
         sid = station_ids[station_name]
         station = await db.stations.find_one({"id": sid})
-        template = tpl_by_id[station["template_id"]]
         entries = await db.event_athletes.find({"event_id": event_id, "status": "checked_in"}).to_list(100)
         random.shuffle(entries)
         subset = entries[:10]
@@ -425,6 +659,12 @@ async def main():
             athlete = next((a for a in athletes if a["id"] == entry["athlete_id"]), None)
             if not athlete:
                 continue
+            # Seed through the real resolver so stored evaluations carry the same
+            # age+position template the app would serve.
+            template, _reason = resolve_template(
+                all_templates, position=athlete["primary_position"],
+                station_template_id=station["template_id"], age_group=athlete["age_group"])
+            template = template or tpl_by_id[station["template_id"]]
             scores = gen_scores(template, athlete)
             computed = compute_evaluation_scores(template, scores, bench_list,
                                                  age_group=athlete["age_group"], position=athlete["primary_position"])
@@ -530,6 +770,36 @@ async def main():
         "detail": "82.5 mph", "created_at": now_iso(),
     })
 
+    # ---- Two seasons stacked under one permanent ID (spec §6 demo) ----
+    # Same athlete, prior + current season, each with its own date range and a
+    # dated verified metric so /records and /career can prove the split.
+    for yr, team, ev in ((2025, "606 Prospects 13U", 78.0), (2026, "606 Prospects 14U", 84.5)):
+        season = {
+            "id": new_id(), "athlete_id": demo["id"], "organization_id": ORG_ID,
+            "year": yr, "team": team, "organization_name": "60'6\" Athletics",
+            "age_group": demo.get("age_group"), "height": demo.get("height"),
+            "weight": demo.get("weight"),
+            "start_date": f"{yr}-01-01", "end_date": f"{yr}-12-31",
+            "created_by": scout_id, "created_at": now_iso(), "updated_at": now_iso(),
+        }
+        await db.athlete_seasons.insert_one(season)
+        await db.verified_metrics.insert_one({
+            "id": new_id(), "organization_id": ORG_ID, "athlete_id": demo["id"],
+            "metric_key": "exit_velocity", "value": ev, "unit": "mph",
+            "verified_by": scout_id, "verified_by_name": "Ramon Dela Cruz",
+            "is_verified": True, "source": "event_verified",
+            "season_id": season["id"],
+            "measured_at": f"{yr}-06-15", "created_at": now_iso(),
+        })
+    # Append-only physical history → drives position_change / team_change timeline
+    # events (spec §7). Mirrors what PATCH /athletes writes on a real edit.
+    await db.athletes.update_one({"id": demo["id"]}, {"$push": {"physical_history": {"$each": [
+        {"field": "current_team", "from": "606 Prospects 13U", "to": "606 Prospects 14U",
+         "at": "2026-01-05T12:00:00+00:00", "by": scout_id, "by_name": "Ramon Dela Cruz"},
+        {"field": "primary_position", "from": "2B", "to": "SS",
+         "at": "2026-02-10T12:00:00+00:00", "by": scout_id, "by_name": "Ramon Dela Cruz"},
+    ]}}})
+
     # ---- Second org (owner can switch) — own athletes / events / programs ----
     await db.organizations.insert_one({
         "id": ORG_SOUTH_ID, "name": "PBG South",
@@ -560,7 +830,7 @@ async def main():
         a = {
             "id": new_id(), "organization_id": ORG_SOUTH_ID,
             "first_name": FIRST_NAMES[20 + i], "last_name": LAST_NAMES[20 + i],
-            "date_of_birth": dob_for_age(12), "age": 12, "age_group": "12U",
+            "date_of_birth": dob_for_age(12), "age": 12, "age_group": age_group_for_age(12),
             "primary_position": random.choice(POSITIONS), "secondary_positions": [],
             "bats": "R", "throws": "R", "status": "active",
             "city": "Houston", "state": "TX", "country": "USA",
@@ -576,7 +846,7 @@ async def main():
         "name": "PBG South Summer Clinic", "event_type": "Clinic",
         "date": "2026-08-22", "start_time": "09:00", "end_time": "14:00",
         "location": "Houston Sports Complex", "status": "Registration Open",
-        "age_groups": ["12U"], "description": "Short-term clinic for South org.",
+        "age_groups": ["11U-12U"], "description": "Short-term clinic for South org.",
         "created_at": now_iso(), "updated_at": now_iso(),
     })
     await db.programs.insert_one({
@@ -596,7 +866,9 @@ async def main():
     print(f"  Staff: {len(STAFF)} + coach.south@pbgscout.com (password: {PASSWORD})")
     print(f"  Athletes: {len(athletes)} Midwest + {len(south_athletes)} South")
     print(f"  Event: PBG Midwest Spring Evaluation Camp ({event_id})")
-    print(f"  Stations: {len(station_defs)}, Groups: 3, Templates: {len(all_templates)}")
+    print(f"  Stations: {len(station_defs)}, Groups: {len(GROUP_BANDS)}, Templates: {len(all_templates)}")
+    print(f"  Age bands: {', '.join(AGE_BANDS)}")
+    print(f"  Benchmarks: {len(benchmarks)} ({len(POSITION_BENCHMARKS)} position-specific)")
     print(f"  Evaluations: {submitted_count} submitted/approved, {draft_count} drafts")
 
 

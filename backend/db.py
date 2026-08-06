@@ -11,8 +11,14 @@ try:
 except Exception:
     _tls_ca = None
 
+# tlsCAFile implies tls=True in PyMongo, so only set it for URLs that actually use
+# TLS (Atlas/SRV, or an explicit tls/ssl flag). Setting it unconditionally breaks
+# plain mongodb:// connections — local dev and `docker compose --profile local-db`.
+_url = (settings.mongo_url or "").lower()
+_uses_tls = _url.startswith("mongodb+srv://") or "tls=true" in _url or "ssl=true" in _url
+
 _client_kwargs = {"serverSelectionTimeoutMS": 15000}
-if _tls_ca:
+if _tls_ca and _uses_tls:
     _client_kwargs["tlsCAFile"] = _tls_ca
 
 client = AsyncIOMotorClient(settings.mongo_url, **_client_kwargs)

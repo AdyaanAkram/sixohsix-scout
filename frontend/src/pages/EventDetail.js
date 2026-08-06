@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import { PlayerAvatar } from "@/components/common/PlayerAvatar";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -19,6 +20,7 @@ import { toast } from "sonner";
 import {
   ArrowLeft, CalendarDays, MapPin, Users, Plus, Trash2, Search, UserPlus,
   CheckCircle2, XCircle, FileDown, Layers, Trophy, ClipboardList,
+  Clock, Video, AlertTriangle, Activity, RefreshCw, ExternalLink, ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -671,36 +673,200 @@ const EvaluatorsTab = ({ eventId, isAdmin }) => {
 };
 
 // ---------------- Live Progress tab ----------------
+const MIN_EVAL_SAMPLE = 3; // below this we don't trust an average
+
+const fmtMMSS = (secs) => {
+  if (secs == null) return null;
+  const m = Math.floor(secs / 60);
+  const s = Math.round(secs % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+};
+
+const pct = (n, d) => (d > 0 ? Math.round((n / d) * 100) : 0);
+
+// A single scannable stat tile. `value` may be a node (for "Not enough data yet").
+const KpiCard = ({ label, value, sub, tone = "text-foreground", icon: Icon, title }) => (
+  <Card className="rounded-2xl border-border" title={title}>
+    <CardContent className="py-4">
+      <div className="flex items-center gap-1.5 text-muted-foreground">
+        {Icon && <Icon className="h-3.5 w-3.5" />}
+        <p className="text-xs">{label}</p>
+      </div>
+      <p className={cn("text-2xl font-bold font-mono-num mt-1 leading-tight", tone)}>{value}</p>
+      {sub && <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>}
+    </CardContent>
+  </Card>
+);
+
+const STATION_STATUS = {
+  complete: { label: "Complete", cls: "bg-success/15 text-success border-success/30" },
+  draft: { label: "Draft", cls: "bg-warning/15 text-warning border-warning/40" },
+  missing: { label: "Missing", cls: "bg-brand/15 text-brand border-brand/30" },
+  "n/a": { label: "N/A", cls: "bg-muted text-muted-foreground border-border" },
+};
+
+// Per-player incomplete drill-down (spec §13). Fetches only while open.
+const PlayerProgressDialog = ({ eventId, player, open, onOpenChange }) => {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    if (!open || !player) return;
+    setData(null);
+    api.get(`/events/${eventId}/players/${player.athlete_id}/progress`).then((r) => setData(r.data)).catch(() => {});
+  }, [open, eventId, player]);
+
+  const name = player ? `${player.first_name} ${player.last_name}` : "";
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="rounded-2xl max-w-lg max-h-[85vh] flex flex-col" data-testid="player-progress-dialog">
+        <DialogHeader>
+          <DialogTitle className="font-display text-2xl text-foreground">
+            {name}{player?.bib_number ? <span className="text-muted-foreground font-mono-num text-lg"> · #{player.bib_number}</span> : null}
+          </DialogTitle>
+        </DialogHeader>
+        {!data ? <Skeleton className="h-40 rounded-xl" /> : (
+          <div className="overflow-y-auto space-y-3 pr-1">
+            <div className="flex flex-wrap items-center gap-2">
+              {data.complete
+                ? <Badge className="bg-success/15 text-success border border-success/30">All evaluations complete</Badge>
+                : <Badge className="bg-brand/15 text-brand border border-brand/30">{data.stations_missing} station(s) missing</Badge>}
+              {data.stations_draft > 0 && <Badge className="bg-warning/15 text-warning border border-warning/40">{data.stations_draft} draft</Badge>}
+              {data.late_arrival && <Badge className="bg-info/15 text-info border border-info/30">Late arrival</Badge>}
+              {data.walk_up && <Badge className="bg-info/15 text-info border border-info/30">Walk-up</Badge>}
+              {data.flagged_incomplete && <Badge className="bg-brand/15 text-brand border border-brand/30">Flagged</Badge>}
+            </div>
+            <p className="text-xs text-muted-foreground font-mono-num">
+              {data.stations_complete}/{data.stations_applicable} stations complete
+              {data.group_name ? ` · ${data.group_name}` : ""}
+            </p>
+            <div className="space-y-2">
+              {data.stations.filter((s) => s.applies).map((s) => {
+                const meta = STATION_STATUS[s.status] || STATION_STATUS["n/a"];
+                return (
+                  <div key={s.station_id} className="rounded-xl border border-border p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-foreground truncate">{s.station_name}</p>
+                        <p className="text-[11px] text-muted-foreground truncate">{s.evaluator_name || "Unassigned"}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className={cn("text-[11px] font-semibold rounded-full border px-2 py-0.5", meta.cls)}>{meta.label}</span>
+                        {s.evaluation_id && (s.status === "complete" || s.status === "draft") && (
+                          <Link to={`/evaluation/${s.evaluation_id}/results`} className="text-info hover:underline inline-flex items-center gap-0.5 text-xs" data-testid={`player-eval-link-${s.station_id}`}>
+                            Results <ExternalLink className="h-3 w-3" />
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                    {s.status === "missing" && (s.missing_required || []).length > 0 && (
+                      <div className="mt-2">
+                        <p className="text-[11px] text-muted-foreground mb-1">Missing required:</p>
+                        <div className="flex flex-wrap gap-1">
+                          {s.missing_required.map((m) => (
+                            <span key={m.metric_id} className="text-[11px] rounded-md bg-brand/10 text-brand border border-brand/20 px-1.5 py-0.5">
+                              {m.name}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 const ProgressTab = ({ eventId }) => {
   const [data, setData] = useState(null);
+  const [roster, setRoster] = useState(null);
+  const [playerSearch, setPlayerSearch] = useState("");
+  const [selectedPlayer, setSelectedPlayer] = useState(null);
   useEffect(() => {
     const load = () => api.get(`/events/${eventId}/progress`).then((r) => setData(r.data)).catch(() => {});
     load();
     const t = setInterval(load, 15000);
     return () => clearInterval(t);
   }, [eventId]);
+  useEffect(() => {
+    api.get(`/events/${eventId}/roster`).then((r) => setRoster(r.data)).catch(() => setRoster([]));
+  }, [eventId]);
 
   if (!data) return <Skeleton className="h-48 rounded-2xl" />;
-  const inProgress = data.evaluations_draft ?? data.drafts ?? 0;
-  const complete = data.evaluations_completed ?? 0;
-  const missing = data.evaluations_remaining ?? 0;
+
+  // Player pipeline (spec §4F) — uses player-level counts, not evaluation counts.
   const chartRows = [
     { name: "Registered", value: data.total_players || 0, fill: "hsl(var(--muted-foreground))" },
     { name: "Checked in", value: data.checked_in || 0, fill: "hsl(var(--info))" },
-    { name: "In progress", value: inProgress, fill: "hsl(var(--warning))" },
-    { name: "Complete", value: complete, fill: "hsl(var(--success))" },
-    { name: "Missing", value: missing, fill: "hsl(var(--brand))" },
+    { name: "In progress", value: data.players_in_progress || 0, fill: "hsl(var(--warning))" },
+    { name: "Complete", value: data.players_complete || 0, fill: "hsl(var(--success))" },
+    { name: "Missing", value: data.players_missing_scores || 0, fill: "hsl(var(--brand))" },
   ];
+
+  // Honest averages — never dress up a null or a thin sample as a real number.
+  const avgReliable = data.avg_evaluation_seconds != null && (data.avg_evaluation_sample || 0) >= MIN_EVAL_SAMPLE;
+  const avgValue = avgReliable
+    ? fmtMMSS(data.avg_evaluation_seconds)
+    : <span className="text-sm font-normal text-muted-foreground">Not enough data yet</span>;
+  const medianLabel = fmtMMSS(data.median_evaluation_seconds);
+  const avgSub = avgReliable
+    ? `median ${medianLabel || "—"} · n=${data.avg_evaluation_sample}`
+    : `${data.avg_evaluation_sample || 0} timed so far`;
+
+  // Sync health — null = not meaningful yet; 0 = clean; >0 = stale devices.
+  const syncCaveat = "After an event ends, every leftover draft counts as stale.";
+  const syncThresh = data.sync_stale_threshold_minutes;
+  let syncValue, syncSub, syncTone;
+  if (data.sync_problems == null) {
+    syncValue = <span className="text-sm font-normal text-muted-foreground">Not enough data yet</span>;
+    syncSub = "Waiting on device sync data.";
+    syncTone = "text-foreground";
+  } else if (data.sync_problems === 0) {
+    syncValue = "All synced";
+    syncSub = syncCaveat;
+    syncTone = "text-success";
+  } else {
+    syncValue = String(data.sync_problems);
+    syncSub = `device(s) not synced in ${syncThresh ?? 30}+ min. ${syncCaveat}`;
+    syncTone = "text-brand";
+  }
+
+  const filteredRoster = (roster || []).filter((r) => {
+    const q = playerSearch.trim().toLowerCase();
+    if (!q) return true;
+    return `${r.first_name} ${r.last_name}`.toLowerCase().includes(q) || (r.bib_number || "").toString().includes(q);
+  });
+
   return (
     <div className="space-y-4" data-testid="live-progress">
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        {chartRows.map((s) => (
-          <Card key={s.name} className="rounded-2xl border-border"><CardContent className="py-4 text-center">
-            <p className="text-2xl font-bold font-mono-num text-foreground">{s.value}</p>
-            <p className="text-xs text-muted-foreground">{s.name}</p>
-          </CardContent></Card>
-        ))}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        <KpiCard label="Checked in" icon={CheckCircle2} tone="text-info"
+          value={`${data.checked_in ?? 0}/${data.total_players ?? 0}`}
+          sub={`${data.players_not_started ?? 0} not started`} />
+        <KpiCard label="In progress" icon={Activity} tone="text-warning"
+          value={data.players_in_progress ?? 0} />
+        <KpiCard label="Players complete" icon={CheckCircle2} tone="text-success"
+          value={data.players_complete ?? 0}
+          sub={`${pct(data.players_complete ?? 0, data.total_players ?? 0)}% of roster`} />
+        <KpiCard label="Missing scores" icon={XCircle} tone="text-brand"
+          value={data.players_missing_scores ?? 0} />
+        <KpiCard label="Flagged" icon={AlertTriangle} tone={data.players_flagged ? "text-brand" : "text-foreground"}
+          value={data.players_flagged ?? 0} />
+        <KpiCard label="Active evaluators" icon={Users} tone="text-foreground"
+          value={data.active_evaluators ?? 0}
+          sub={`${data.evaluations_completed ?? 0}/${data.evaluations_expected ?? 0} evals done`} />
+        <KpiCard label="Videos to approve" icon={Video} tone={data.videos_awaiting_approval ? "text-warning" : "text-foreground"}
+          value={data.videos_awaiting_approval ?? 0}
+          sub={data.media_awaiting_approval ? `${data.media_awaiting_approval} media total` : undefined} />
+        <KpiCard label="Avg eval time" icon={Clock} value={avgValue} sub={avgSub}
+          title="Average time evaluators spend per evaluation" />
       </div>
+
+      <KpiCard label="Device sync" icon={RefreshCw} value={syncValue} sub={syncSub} tone={syncTone} title={syncCaveat} />
+
       <Card className="rounded-2xl border-border">
         <CardContent className="pt-4 pb-2">
           <p className="font-semibold text-foreground text-sm mb-2">Event completion</p>
@@ -717,6 +883,44 @@ const ProgressTab = ({ eventId }) => {
           </ResponsiveContainer>
         </CardContent>
       </Card>
+
+      {roster && roster.length > 0 && (
+        <Card className="rounded-2xl border-border">
+          <CardContent className="pt-4 pb-4 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="font-semibold text-foreground text-sm">Players</p>
+              <p className="text-[11px] text-muted-foreground">Tap a player to see what's incomplete</p>
+            </div>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input value={playerSearch} onChange={(e) => setPlayerSearch(e.target.value)} placeholder="Search name, bib #…" className="pl-9 h-10 rounded-xl bg-card" data-testid="progress-player-search" />
+            </div>
+            <div className="max-h-80 overflow-y-auto space-y-1.5">
+              {filteredRoster.map((r) => (
+                <button
+                  key={r.athlete_id}
+                  type="button"
+                  onClick={() => setSelectedPlayer(r)}
+                  className="w-full flex items-center gap-3 rounded-xl border border-border px-2.5 py-2 text-left hover:bg-secondary"
+                  data-testid={`progress-player-${r.athlete_id}`}
+                >
+                  <PlayerAvatar firstName={r.first_name} lastName={r.last_name} bib={r.bib_number} size="sm" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-foreground truncate">{r.first_name} {r.last_name}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">#{r.bib_number || "—"} · {r.group_name || "No group"}</p>
+                  </div>
+                  <StatusBadge status={r.status} />
+                  <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                </button>
+              ))}
+              {filteredRoster.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No matching players.</p>}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <PlayerProgressDialog eventId={eventId} player={selectedPlayer} open={!!selectedPlayer} onOpenChange={(o) => { if (!o) setSelectedPlayer(null); }} />
+
       <Card className="rounded-2xl border-border">
         <CardContent className="pt-4 pb-4 space-y-3">
           <p className="font-semibold text-foreground text-sm">Station completion</p>

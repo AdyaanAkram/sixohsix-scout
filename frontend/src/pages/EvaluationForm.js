@@ -12,15 +12,68 @@ import { SaveStatusPill } from "@/components/common/SaveStatusPill";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { ArrowLeft, ChevronLeft, ChevronRight, EyeOff, Camera, CheckCircle2, Lock, Send } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, EyeOff, Camera, CheckCircle2, Lock, Send, CloudUpload, RotateCcw, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { POSITIONS, loadStationTemplates, resolveTemplateLocal, saveStationTemplates } from "@/lib/templateCache";
+import {
+  POSITIONS, loadStationTemplates, resolveTemplateLocal, saveStationTemplates,
+  templateDraftKey, metaDraftKey,
+  saveDraft, readDraftLocal, loadDraftBest, deleteDraft, saveEvalSnapshot,
+  queueMedia, listQueuedMedia, deleteQueuedMedia, countQueuedMedia,
+  registerAppShell, MEDIA_MAX_BYTES, MEDIA_WARN_BYTES, MEDIA_ALLOWED_EXT, mediaExtOf,
+} from "@/lib/templateCache";
 
 const QUICK_TAGS = ["Hustle", "Great attitude", "Quick hands", "Strong arm", "Needs reps", "High motor", "Raw but projectable", "Team leader"];
 
-const draftKey = (id) => `pbg_draft_${id}`;
-const templateDraftKey = (id) => `pbg_eval_template_${id}`;
-const metaDraftKey = (id) => `pbg_eval_meta_${id}`;
+// Spec §11 media categories.
+const MEDIA_CATEGORIES = ["Profile photo", "Hitting", "Pitching", "Defense", "Running", "Other"];
+
+// Spec §9 — only show categories/metrics that apply to the player.
+//
+// The evaluation TEMPLATE is already position-resolved on the server (an
+// infielder gets the infield template, a catcher the catching template, a
+// pitcher the pitching template…), and the per-category / per-metric schema
+// carries NO `positions` / `applies_to_positions` field to key off (verified in
+// backend/routes_evaluations.py MetricBody & CategoryBody). So rather than
+// invent scoring behavior, we treat a category as "position-specific" only when
+// its NAME clearly names a fielding discipline, and hide it unless one of the
+// athlete's positions qualifies. Universal tool categories (Athleticism,
+// Hitting, Defense, Arm Strength, Baseball IQ, Coachability, Comments…) are
+// never hidden. Evaluators override with the "Show all categories" toggle
+// (utility players, or an event that intentionally scores every tool).
+//
+// Each rule: lowercase keywords tested against the category name → the set of
+// position codes (incl. group codes) for which that category applies.
+const POSITION_CATEGORY_RULES = [
+  { match: ["catch", "receiv"], positions: ["C"] },
+  { match: ["pitch", "mound"], positions: ["P", "RHP", "LHP"] },
+  { match: ["infield"], positions: ["1B", "2B", "3B", "SS", "IF"] },
+  { match: ["outfield"], positions: ["LF", "CF", "RF", "OF"] },
+];
+
+// A rule that lists a group code (IF/OF) is satisfied by any group member too.
+const POSITION_GROUP_MEMBERS = {
+  IF: ["1B", "2B", "3B", "SS", "IF"],
+  OF: ["LF", "CF", "RF", "OF"],
+};
+
+const ruleMatchesPositions = (rulePositions, athletePositions) => {
+  const want = new Set();
+  rulePositions.forEach((p) => {
+    want.add(p);
+    (POSITION_GROUP_MEMBERS[p] || []).forEach((m) => want.add(m));
+  });
+  return athletePositions.some((p) => want.has(p));
+};
+
+// { specific: is this category position-gated at all?, applies: should it show? }
+const categoryApplicability = (catName, athletePositions) => {
+  const lc = (catName || "").toLowerCase();
+  const rule = POSITION_CATEGORY_RULES.find((r) => r.match.some((k) => lc.includes(k)));
+  if (!rule) return { specific: false, applies: true };
+  return { specific: true, applies: ruleMatchesPositions(rule.positions, athletePositions) };
+};
+
+const fmtBytes = (n) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
 const NotObservedBtn = ({ notObserved, onToggle, testId }) => (
   <button
@@ -173,10 +226,17 @@ export default function EvaluationForm() {
   const [submitting, setSubmitting] = useState(false);
   const [mediaOpen, setMediaOpen] = useState(false);
   const [mediaFile, setMediaFile] = useState(null);
+  const [mediaPreview, setMediaPreview] = useState(null);
+  const [mediaCategory, setMediaCategory] = useState("Hitting");
+  const [mediaPrivate, setMediaPrivate] = useState(false);
   const [mediaDesc, setMediaDesc] = useState("");
   const [mediaConsent, setMediaConsent] = useState(false);
   const [mediaBusy, setMediaBusy] = useState(false);
+  const [mediaQueued, setMediaQueued] = useState(0);
+  const [storageWarn, setStorageWarn] = useState(null);
   const [evaluateAs, setEvaluateAs] = useState("");
+  // Spec §9: default to the position-filtered view; evaluators can reveal all.
+  const [showAllCategories, setShowAllCategories] = useState(false);
   const [resolutionReason, setResolutionReason] = useState(null);
   const [overrideBusy, setOverrideBusy] = useState(false);
   const saveTimer = useRef(null);
@@ -184,6 +244,27 @@ export default function EvaluationForm() {
   const retryTimer = useRef(null);
   const retryAttempt = useRef(0);
   const inflightRef = useRef(false);
+  // Last draft we produced, in memory. Used only as a read fallback when
+  // localStorage is unavailable/full so a retry still has something to push.
+  const lastDraftRef = useRef(null);
+  const mediaFlushRef = useRef(false);
+  const captureInputRef = useRef(null);
+  const pickInputRef = useRef(null);
+  const mediaUrlRef = useRef(null);
+
+  // Reads the freshest draft available synchronously.
+  const currentDraft = useCallback(
+    () => readDraftLocal(evaluationId) || lastDraftRef.current,
+    [evaluationId],
+  );
+
+  // Clears the draft from BOTH stores. Only ever called after an explicit
+  // server acknowledgement — see the ack checks in pushSave().
+  const clearDraft = useCallback(() => {
+    deleteDraft(evaluationId);
+    lastDraftRef.current = null;
+    setStorageWarn(null);
+  }, [evaluationId]);
 
   const locked = evaluation && ["submitted", "approved"].includes(evaluation.status);
   // Prefer persisted evaluation template; fall back to locally cached station pack (offline)
@@ -197,15 +278,55 @@ export default function EvaluationForm() {
       const pack = loadStationTemplates(evaluation.event_id, evaluation.station_id);
       if (pack?.templates) {
         const pos = evaluateAs || evaluation?.evaluated_as_position || evaluation?.athlete?.primary_position;
+        // Age band matters: a 10U and a 17U pitcher resolve to different
+        // templates on the server, so the offline mirror must be given it too.
         const { template: t } = resolveTemplateLocal(pack.templates, {
           position: pos,
           stationTemplateId: pack.station_template_id || evaluation.station_template_id,
+          ageGroup: evaluation?.athlete?.age_group || null,
         });
         return t;
       }
     }
     return null;
   }, [evaluation, evaluationId, evaluateAs]);
+
+  // ---------- Position-based category filter (spec §9) ----------
+  // Athlete's positions = the override we're evaluating them as (if any) +
+  // registered primary + secondaries. If none are known, degrade to showing
+  // everything (never hide a category we can't reason about).
+  const athletePositions = useMemo(() => {
+    const a = evaluation?.athlete || {};
+    const list = [
+      evaluateAs || evaluation?.evaluated_as_position,
+      a.primary_position,
+      ...(Array.isArray(a.secondary_positions) ? a.secondary_positions : []),
+    ];
+    return [...new Set(list.filter(Boolean).map((p) => String(p).toUpperCase()))];
+  }, [evaluation, evaluateAs]);
+  const positionsKnown = athletePositions.length > 0;
+
+  const isCategoryVisible = useCallback((cat) => {
+    if (showAllCategories || !positionsKnown) return true;
+    return categoryApplicability(cat, athletePositions).applies;
+  }, [showAllCategories, positionsKnown, athletePositions]);
+
+  // Position-specific categories that don't apply to this athlete. Drives the
+  // "Show all categories" toggle; independent of the toggle's current state so
+  // the control stays visible after the evaluator reveals everything.
+  const filterableHidden = useMemo(() => {
+    if (!positionsKnown) return [];
+    return [...new Set((template?.metrics || []).map((m) => m.category))].filter((c) => {
+      const { specific, applies } = categoryApplicability(c, athletePositions);
+      return specific && !applies;
+    });
+  }, [template, positionsKnown, athletePositions]);
+
+  // Only metrics in visible categories count toward completion / required math.
+  const visibleMetrics = useMemo(
+    () => (template?.metrics || []).filter((m) => isCategoryVisible(m.category)),
+    [template, isCategoryVisible],
+  );
 
   // ---------- Autosave (defined before load effect so restore can flush) ----------
   const pushSave = useCallback(async (s, c, clientTs) => {
@@ -235,7 +356,7 @@ export default function EvaluationForm() {
           setEvaluation(ev);
           setScores(ev.scores || {});
           setComments(ev.comments || { strengths: "", development_needs: "", general: "", quick_tags: [] });
-          localStorage.removeItem(draftKey(evaluationId));
+          clearDraft();
           setSaveStatus("saved");
           setLastSaved(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
           toast.info("Loaded a newer save from the server.");
@@ -245,13 +366,14 @@ export default function EvaluationForm() {
         }
         return;
       }
-      // Only clear the local draft after an explicit server save ack
-      if (status === "saved" || !status) {
+      // Only clear the local draft after an explicit server save ack. A captive
+      // portal answers 200 with HTML, so a missing status is not a save.
+      if (status === "saved") {
         setSaveStatus("saved");
         setLastSaved(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
         pendingRef.current = false;
         retryAttempt.current = 0;
-        localStorage.removeItem(draftKey(evaluationId));
+        clearDraft();
       } else {
         // Unknown status — keep draft, surface error
         setSaveStatus("error");
@@ -261,7 +383,7 @@ export default function EvaluationForm() {
       if (e?.response?.status === 409) {
         setSaveStatus("error");
         toast.error("This evaluation is locked and can no longer be edited.");
-        localStorage.removeItem(draftKey(evaluationId));
+        clearDraft();
       } else if (!navigator.onLine || e.code === "ERR_NETWORK") {
         setSaveStatus("offline");
         pendingRef.current = true;
@@ -276,7 +398,7 @@ export default function EvaluationForm() {
           if (retryTimer.current) clearTimeout(retryTimer.current);
           retryTimer.current = setTimeout(() => {
             try {
-              const local = JSON.parse(localStorage.getItem(draftKey(evaluationId)) || "null");
+              const local = currentDraft();
               if (local) pushSave(local.scores, local.comments, local.client_updated_at);
             } catch { /* ignore */ }
           }, delay);
@@ -287,7 +409,7 @@ export default function EvaluationForm() {
       // If edits queued while we were saving, flush the latest local draft
       if (pendingRef.current && navigator.onLine) {
         try {
-          const local = JSON.parse(localStorage.getItem(draftKey(evaluationId)) || "null");
+          const local = currentDraft();
           if (local) {
             setSaveStatus("sync_pending");
             setTimeout(() => pushSave(local.scores, local.comments, local.client_updated_at), 50);
@@ -295,12 +417,25 @@ export default function EvaluationForm() {
         } catch { /* ignore */ }
       }
     }
-  }, [evaluationId]);
+  }, [evaluationId, clearDraft, currentDraft]);
 
   const queueSave = useCallback((s, c) => {
     const clientTs = new Date().toISOString();
-    // always keep a local copy first (offline resilience)
-    localStorage.setItem(draftKey(evaluationId), JSON.stringify({ scores: s, comments: c, client_updated_at: clientTs }));
+    const draft = { scores: s, comments: c, client_updated_at: clientTs };
+    // always keep a local copy first (offline resilience). saveDraft writes
+    // localStorage synchronously and mirrors to IndexedDB; it can never throw
+    // into this path, so a full disk no longer aborts the save.
+    lastDraftRef.current = draft;
+    const res = saveDraft(evaluationId, draft);
+    if (res.ok) {
+      setStorageWarn(null);
+    } else {
+      res.durable.then((durable) => {
+        setStorageWarn(durable
+          ? "Device storage full — draft kept in the offline database. Sync when you have signal."
+          : "Device storage full — this draft may not survive a reload. Sync now.");
+      });
+    }
     pendingRef.current = true;
     setSaveStatus((prev) => (prev === "offline" ? "offline" : "saving"));
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -310,14 +445,17 @@ export default function EvaluationForm() {
   // ---------- Load evaluation + restore offline draft ----------
   useEffect(() => {
     let cancelled = false;
-    api.get(`/evaluations/${evaluationId}`).then((r) => {
+    api.get(`/evaluations/${evaluationId}`).then(async (r) => {
       if (cancelled) return;
       const ev = r.data;
       let s = ev.scores || {};
       let c = ev.comments || { strengths: "", development_needs: "", general: "", quick_tags: [] };
-      // restore local draft if newer than server copy
+      // restore local draft if newer than server copy — from whichever of
+      // localStorage / IndexedDB holds the newer client_updated_at
       try {
-        const local = JSON.parse(localStorage.getItem(draftKey(evaluationId)) || "null");
+        const local = await loadDraftBest(evaluationId);
+        if (cancelled) return;
+        if (local) lastDraftRef.current = local;
         if (local && (!ev.client_updated_at || local.client_updated_at > ev.client_updated_at) && !(["submitted", "approved"].includes(ev.status))) {
           s = local.scores || s;
           c = local.comments || c;
@@ -332,11 +470,12 @@ export default function EvaluationForm() {
       setEvaluateAs(ev.evaluated_as_position || "");
       setResolutionReason(ev.template_resolution_reason || null);
       // Persist template + athlete snapshot so offline form still shows who you're scoring
-      try {
-        if (ev.template) localStorage.setItem(templateDraftKey(evaluationId), JSON.stringify(ev.template));
-        localStorage.setItem(metaDraftKey(evaluationId), JSON.stringify({
+      saveEvalSnapshot(evaluationId, {
+        template: ev.template,
+        meta: {
           athlete: ev.athlete,
           bib_number: ev.bib_number,
+          jersey_number: ev.jersey_number,
           station_name: ev.station_name,
           event_name: ev.event_name,
           assignment_id: ev.assignment_id,
@@ -345,8 +484,8 @@ export default function EvaluationForm() {
           station_id: ev.station_id,
           resolved_position: ev.resolved_position,
           evaluated_as_position: ev.evaluated_as_position,
-        }));
-      } catch { /* ignore */ }
+        },
+      });
       // Ensure station template pack is warm
       if (ev.event_id && ev.station_id && !loadStationTemplates(ev.event_id, ev.station_id)) {
         api.get("/evaluations/templates-for-station", {
@@ -358,10 +497,12 @@ export default function EvaluationForm() {
       if (ev.assignment_id) {
         api.get(`/my-assignments/${ev.assignment_id}/athletes`).then((rr) => !cancelled && setRoster(rr.data)).catch(() => {});
       }
-    }).catch((e) => {
+    }).catch(async (e) => {
       // Offline: try to keep working from local draft + cached template
       try {
-        const local = JSON.parse(localStorage.getItem(draftKey(evaluationId)) || "null");
+        const local = await loadDraftBest(evaluationId);
+        if (cancelled) return;
+        if (local) lastDraftRef.current = local;
         const tmpl = JSON.parse(localStorage.getItem(templateDraftKey(evaluationId)) || "null");
         const meta = JSON.parse(localStorage.getItem(metaDraftKey(evaluationId)) || "null") || {};
         if (local || tmpl) {
@@ -405,9 +546,9 @@ export default function EvaluationForm() {
     try {
       const clientTs = new Date().toISOString();
       // Keep draft first
-      localStorage.setItem(draftKey(evaluationId), JSON.stringify({
-        scores, comments, client_updated_at: clientTs, evaluated_as_position: pos || null,
-      }));
+      const draft = { scores, comments, client_updated_at: clientTs, evaluated_as_position: pos || null };
+      lastDraftRef.current = draft;
+      saveDraft(evaluationId, draft);
       if (!navigator.onLine) {
         // Resolve from offline cache
         const pack = loadStationTemplates(evaluation.event_id, evaluation.station_id);
@@ -415,6 +556,7 @@ export default function EvaluationForm() {
           const { template: t, reason } = resolveTemplateLocal(pack.templates, {
             position: pos || evaluation.athlete?.primary_position,
             stationTemplateId: pack.station_template_id || evaluation.station_template_id,
+            ageGroup: evaluation.athlete?.age_group || null,
           });
           if (!t) {
             toast.error("No template available offline for that position.");
@@ -422,7 +564,7 @@ export default function EvaluationForm() {
           }
           setEvaluation((ev) => ({ ...ev, template: t, evaluated_as_position: pos || null, resolved_position: pos || ev.athlete?.primary_position }));
           setResolutionReason(reason);
-          try { localStorage.setItem(templateDraftKey(evaluationId), JSON.stringify(t)); } catch { /* ignore */ }
+          saveEvalSnapshot(evaluationId, { template: t });
           setSaveStatus("offline");
           pendingRef.current = true;
         }
@@ -435,11 +577,10 @@ export default function EvaluationForm() {
       const fresh = await api.get(`/evaluations/${evaluationId}`);
       setEvaluation(fresh.data);
       setResolutionReason(fresh.data.template_resolution_reason || null);
-      if (fresh.data.template) {
-        try { localStorage.setItem(templateDraftKey(evaluationId), JSON.stringify(fresh.data.template)); } catch { /* ignore */ }
-      }
+      if (fresh.data.template) saveEvalSnapshot(evaluationId, { template: fresh.data.template });
       setSaveStatus("saved");
-      if (r?.data?.status === "saved") localStorage.removeItem(draftKey(evaluationId));
+      // Explicit ack only — a captive-portal 200 must never clear a draft.
+      if (r?.data?.status === "saved") clearDraft();
       toast.success(pos ? `Evaluating as ${pos}` : "Using registered position");
     } catch (e) {
       toast.error(errMsg(e));
@@ -447,16 +588,87 @@ export default function EvaluationForm() {
       setOverrideBusy(false);
     }
   };
+  // ---------- Offline media queue (spec §11) ----------
+  // Consent is enforced at queue time and re-checked here: a record without a
+  // verified consent flag is never sent. Under-13 handling stays server-side
+  // (the upload is filed as pending_consent and is not published).
+  const uploadMediaRecord = useCallback(async (rec) => {
+    const fd = new FormData();
+    fd.append("file", rec.blob, rec.file_name || "capture");
+    fd.append("athlete_id", rec.athlete_id);
+    if (rec.event_id) fd.append("event_id", rec.event_id);
+    if (rec.evaluation_id) fd.append("evaluation_id", rec.evaluation_id);
+    fd.append("description", rec.description || "");
+    fd.append("consent_verified", "true");
+    fd.append("is_profile_photo", rec.is_profile_photo ? "true" : "false");
+    // Spec §11: "mark private" is now an enforced server-side ACL, not a note.
+    fd.append("is_private", rec.is_private ? "true" : "false");
+    const r = await api.post("/media/upload", fd);
+    // Same rule as the draft ack: require an explicit server acknowledgement
+    // (a stored media id). A captive-portal HTML 200 is not an upload.
+    if (!r?.data?.id) {
+      const err = new Error("Upload was not acknowledged by the server.");
+      err.unacked = true;
+      throw err;
+    }
+    return r.data;
+  }, []);
+
+  const flushMediaQueue = useCallback(async (announce = false) => {
+    if (mediaFlushRef.current) return;
+    mediaFlushRef.current = true;
+    try {
+      const items = await listQueuedMedia();
+      if (!items.length) { setMediaQueued(0); return; }
+      setMediaQueued(items.length);
+      if (!navigator.onLine) return;
+      let sent = 0;
+      for (const it of items) {
+        if (!it.consent_verified) continue; // never upload without verified consent
+        try {
+          await uploadMediaRecord(it);
+          await deleteQueuedMedia(it.id);
+          sent += 1;
+        } catch (e) {
+          const st = e?.response?.status;
+          // A permanent server rejection (bad type / too large) would otherwise
+          // block the queue forever. Drop it and say so.
+          if (st && st >= 400 && st < 500 && ![401, 408, 429].includes(st)) {
+            await deleteQueuedMedia(it.id);
+            toast.error(`Queued media "${it.file_name}" was rejected: ${errMsg(e)}`);
+            continue;
+          }
+          break; // transient — keep this and the rest queued
+        }
+      }
+      const left = await countQueuedMedia();
+      setMediaQueued(left);
+      if (sent) toast.success(`${sent} queued media file${sent > 1 ? "s" : ""} uploaded.`);
+      else if (announce && left) toast.message(`${left} media file${left > 1 ? "s" : ""} still waiting to upload.`);
+    } catch {
+      /* leave the queue intact */
+    } finally {
+      mediaFlushRef.current = false;
+    }
+  }, [uploadMediaRecord]);
+
+  // Warm the offline app shell + surface anything left in the media queue.
+  useEffect(() => {
+    registerAppShell();
+    flushMediaQueue();
+  }, [flushMediaQueue]);
+
   // flush pending saves when connection returns
   useEffect(() => {
     const onOnline = () => {
       try {
-        const local = JSON.parse(localStorage.getItem(draftKey(evaluationId)) || "null");
+        const local = currentDraft();
         if (local || pendingRef.current) {
           setSaveStatus("sync_pending");
           if (local) pushSave(local.scores, local.comments, local.client_updated_at);
         }
       } catch { /* ignore */ }
+      flushMediaQueue(true);
     };
     const onOffline = () => setSaveStatus("offline");
     window.addEventListener("online", onOnline);
@@ -466,7 +678,7 @@ export default function EvaluationForm() {
       window.removeEventListener("offline", onOffline);
       if (retryTimer.current) clearTimeout(retryTimer.current);
     };
-  }, [evaluationId, pushSave]);
+  }, [evaluationId, pushSave, currentDraft, flushMediaQueue]);
 
   const setMetric = (metricId, entry) => {
     if (locked) return;
@@ -489,7 +701,10 @@ export default function EvaluationForm() {
   };
 
   // ---------- Completion / submit ----------
-  const scorableMetrics = useMemo(() => (template?.metrics || []).filter((m) => !["comment", "observation"].includes(m.metric_type)), [template]);
+  // Count only VISIBLE metrics — an infielder isn't "incomplete" for hidden
+  // catching metrics (spec §9). Entered scores in hidden categories are never
+  // dropped from `scores`; this is a display/counting filter only.
+  const scorableMetrics = useMemo(() => visibleMetrics.filter((m) => !["comment", "observation"].includes(m.metric_type)), [visibleMetrics]);
   const filledCount = scorableMetrics.filter((m) => {
     const e = scores[m.id];
     return e && (e.not_observed || (e.value !== null && e.value !== undefined && e.value !== ""));
@@ -507,7 +722,7 @@ export default function EvaluationForm() {
         clearTimeout(saveTimer.current);
         saveTimer.current = null;
       }
-      const local = JSON.parse(localStorage.getItem(draftKey(evaluationId)) || "null");
+      const local = currentDraft();
       if (!local && !pendingRef.current) return true;
       if (!navigator.onLine) {
         setSaveStatus("offline");
@@ -515,7 +730,9 @@ export default function EvaluationForm() {
       }
       setSaveStatus("sync_pending");
       if (local) await pushSave(local.scores, local.comments, local.client_updated_at);
-      return !(pendingRef.current || localStorage.getItem(draftKey(evaluationId)));
+      // Synced only when nothing is pending AND the local draft is gone, which
+      // clearDraft() does only on an explicit server ack.
+      return !(pendingRef.current || readDraftLocal(evaluationId));
     } catch {
       return false;
     }
@@ -523,11 +740,12 @@ export default function EvaluationForm() {
 
   const retrySync = () => {
     try {
-      const local = JSON.parse(localStorage.getItem(draftKey(evaluationId)) || "null");
+      const local = currentDraft();
       if (local) {
         setSaveStatus("sync_pending");
         pushSave(local.scores, local.comments, local.client_updated_at);
       }
+      flushMediaQueue(true);
     } catch { /* ignore */ }
   };
 
@@ -543,7 +761,8 @@ export default function EvaluationForm() {
     try {
       await api.post(`/evaluations/${evaluationId}/submit`);
       toast.success("Evaluation submitted and locked.");
-      localStorage.removeItem(draftKey(evaluationId));
+      // Server accepted the submit (a non-2xx would have thrown) — safe to clear.
+      clearDraft();
       setSubmitOpen(false);
       setEvaluation((e) => ({ ...e, status: "submitted" }));
       // Auto-advance to next incomplete on the station roster
@@ -560,25 +779,112 @@ export default function EvaluationForm() {
     }
   };
 
-  // ---------- Media upload ----------
-  const uploadMedia = async () => {
+  // ---------- Media capture / upload (spec §11) ----------
+  // Object URLs are tracked in a ref, not read out of state inside an updater —
+  // StrictMode double-invokes updaters, so side effects must not live there.
+  const revokePreview = useCallback(() => {
+    if (mediaUrlRef.current) {
+      try { URL.revokeObjectURL(mediaUrlRef.current); } catch { /* ignore */ }
+      mediaUrlRef.current = null;
+    }
+  }, []);
+
+  const resetMedia = useCallback(() => {
+    revokePreview();
+    setMediaPreview(null);
+    setMediaFile(null);
+    setMediaDesc("");
+    setMediaPrivate(false);
+    setMediaConsent(false);
+    setMediaCategory("Hitting");
+    if (captureInputRef.current) captureInputRef.current.value = "";
+    if (pickInputRef.current) pickInputRef.current.value = "";
+  }, [revokePreview]);
+
+  // Release any preview object URL when leaving the form.
+  useEffect(() => revokePreview, [revokePreview]);
+
+  // Client-side guards so a doomed file fails here, not after a multi-minute
+  // push over camp wifi (and never sits in the queue blocking everything else).
+  const pickMediaFile = (file) => {
+    if (!file) return;
+    const ext = mediaExtOf(file.name);
+    if (ext && !MEDIA_ALLOWED_EXT.includes(ext)) {
+      toast.error(`Unsupported file type ${ext}. Use JPG, PNG, WEBP, HEIC, MP4, MOV or WEBM.`);
+      return;
+    }
+    if (file.size > MEDIA_MAX_BYTES) {
+      toast.error(`That file is ${fmtBytes(file.size)} — the limit is ${fmtBytes(MEDIA_MAX_BYTES)}. Record a shorter clip.`);
+      return;
+    }
+    if (file.size > MEDIA_WARN_BYTES) {
+      toast.warning(`${fmtBytes(file.size)} is large for camp wifi — a 5-10 second clip uploads far more reliably.`);
+    }
+    revokePreview();
+    let url = null;
+    try { url = URL.createObjectURL(file); } catch { /* preview unavailable */ }
+    mediaUrlRef.current = url;
+    setMediaFile(file);
+    setMediaPreview({ url, kind: file.type?.startsWith("video") ? "video" : "image" });
+    if (file.type?.startsWith("video") && mediaCategory === "Profile photo") setMediaCategory("Hitting");
+  };
+
+  const buildMediaDescription = () => {
+    const parts = [];
+    if (mediaCategory && mediaCategory !== "Other") parts.push(`[${mediaCategory}]`);
+    if (mediaDesc.trim()) parts.push(mediaDesc.trim());
+    // Privacy is no longer smuggled into the description — it is sent as the
+    // `is_private` field and enforced server-side (staff-only, never public).
+    return parts.join(" ");
+  };
+
+  const submitMedia = async () => {
     if (!mediaFile || !mediaConsent) return;
     setMediaBusy(true);
+    const record = {
+      athlete_id: evaluation.athlete_id,
+      event_id: evaluation.event_id,
+      evaluation_id: evaluationId,
+      blob: mediaFile,
+      file_name: mediaFile.name || "capture",
+      description: buildMediaDescription(),
+      consent_verified: true,
+      is_profile_photo: mediaCategory === "Profile photo" && !mediaFile.type?.startsWith("video"),
+      category: mediaCategory,
+      is_private: mediaPrivate,
+      athlete_label: `${evaluation.athlete?.first_name || ""} ${evaluation.athlete?.last_name || ""}`.trim(),
+    };
     try {
-      const fd = new FormData();
-      fd.append("file", mediaFile);
-      fd.append("athlete_id", evaluation.athlete_id);
-      fd.append("event_id", evaluation.event_id);
-      fd.append("evaluation_id", evaluationId);
-      fd.append("description", mediaDesc);
-      fd.append("consent_verified", "true");
-      await api.post("/media/upload", fd);
-      toast.success("Media uploaded.");
+      if (!navigator.onLine) {
+        const id = await queueMedia(record);
+        if (!id) {
+          // Be honest: without IndexedDB we cannot hold the file.
+          toast.error("Offline and this device has no durable storage — keep this screen open and upload once you have signal.");
+          return;
+        }
+        setMediaQueued(await countQueuedMedia());
+        toast.success("Saved on this device. It will upload automatically when you reconnect.");
+        setMediaOpen(false);
+        resetMedia();
+        return;
+      }
+      await uploadMediaRecord(record);
+      toast.success("Media uploaded and submitted for approval.");
       setMediaOpen(false);
-      setMediaFile(null);
-      setMediaDesc("");
-      setMediaConsent(false);
+      resetMedia();
     } catch (e) {
+      // Network failure mid-upload: queue rather than lose the capture.
+      const transient = !navigator.onLine || e?.code === "ERR_NETWORK" || e?.unacked || !e?.response;
+      if (transient) {
+        const id = await queueMedia(record);
+        if (id) {
+          setMediaQueued(await countQueuedMedia());
+          toast.message("Upload failed — saved on this device and queued for retry.");
+          setMediaOpen(false);
+          resetMedia();
+          return;
+        }
+      }
       toast.error(errMsg(e));
     } finally {
       setMediaBusy(false);
@@ -633,7 +939,7 @@ export default function EvaluationForm() {
     );
 
   const athlete = evaluation.athlete || {};
-  const categories = [...new Set((template?.metrics || []).map((m) => m.category))];
+  const categories = [...new Set((template?.metrics || []).map((m) => m.category))].filter(isCategoryVisible);
 
   return (
     <div className="max-w-2xl mx-auto -mt-2">
@@ -660,7 +966,7 @@ export default function EvaluationForm() {
               <Lock className="h-3 w-3" /> Locked
             </span>
           ) : (
-            <SaveStatusPill status={saveStatus} lastSaved={lastSaved} onRetry={retrySync} />
+            <SaveStatusPill status={saveStatus} lastSaved={lastSaved} onRetry={retrySync} warning={storageWarn} />
           )}
         </div>
         <div className="mt-2 h-1 rounded-full bg-muted overflow-hidden">
@@ -728,6 +1034,12 @@ export default function EvaluationForm() {
         </div>
       )}
 
+      {storageWarn && (
+        <div className="mb-4 rounded-xl bg-warning/15 border border-warning/40 px-4 py-3 text-sm text-warning" data-testid="storage-warning-banner">
+          {storageWarn}
+        </div>
+      )}
+
       {!template && (
         <div className="mb-4 rounded-xl bg-destructive/15 border border-destructive/40 px-4 py-3 text-sm text-destructive" data-testid="missing-template-error">
           No evaluation template could be resolved for this athlete&apos;s position. Contact an admin — do not score a blank form.
@@ -742,6 +1054,26 @@ export default function EvaluationForm() {
       {evaluation.returned && evaluation.review_note && !locked && (
         <div className="mb-4 rounded-xl bg-destructive/15 border border-destructive/40 px-4 py-3 text-sm text-destructive">
           <p className="font-semibold">Returned for revision:</p> {evaluation.review_note}
+        </div>
+      )}
+
+      {/* Spec §9 — position filter notice + override. Only shown when there is
+          actually a position-specific category to hide for this athlete. */}
+      {filterableHidden.length > 0 && !locked && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-3 py-2.5" data-testid="category-filter-bar">
+          <p className="text-[11px] text-muted-foreground min-w-0">
+            {showAllCategories
+              ? "Showing all categories, including ones outside this player's positions."
+              : `Showing categories for ${athletePositions.join(", ")}. ${filterableHidden.length} position-specific ${filterableHidden.length > 1 ? "categories" : "category"} hidden (${filterableHidden.join(", ")}).`}
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowAllCategories((v) => !v)}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary text-foreground px-3 min-h-[40px] text-xs font-semibold shrink-0"
+            data-testid="toggle-all-categories"
+          >
+            {showAllCategories ? "Filter to position" : "Show all categories"}
+          </button>
         </div>
       )}
 
@@ -820,9 +1152,23 @@ export default function EvaluationForm() {
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">General comment</p>
               <Textarea disabled={locked} value={comments.general} onChange={(e) => setComment("general", e.target.value)} rows={2} className="rounded-xl" placeholder="Anything else…" data-testid="comments-general-textarea" />
             </div>
-            <Button variant="outline" className="rounded-xl h-11" onClick={() => setMediaOpen(true)} disabled={locked} data-testid="add-media-button">
-              <Camera className="h-4 w-4 mr-1.5" /> Add Photo / Video
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" className="rounded-xl h-12" onClick={() => setMediaOpen(true)} disabled={locked} data-testid="add-media-button">
+                <Camera className="h-4 w-4 mr-1.5" /> Add Photo / Video
+              </Button>
+              {mediaQueued > 0 && (
+                <button
+                  type="button"
+                  onClick={() => flushMediaQueue(true)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-warning/40 bg-warning/15 text-warning px-3 min-h-[44px] text-xs font-semibold"
+                  data-testid="media-queue-chip"
+                  title="Queued on this device — tap to retry the upload"
+                >
+                  <CloudUpload className="h-3.5 w-3.5" />
+                  {mediaQueued} waiting to upload
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -830,20 +1176,20 @@ export default function EvaluationForm() {
       {/* Sticky footer — sits above bottom nav only when nav is visible; evaluation route hides tabs */}
       <div className="sticky bottom-0 z-30 -mx-4 sm:-mx-6 mt-6 px-4 sm:px-6 py-3 bg-card border-t safe-bottom-pad">
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="rounded-xl h-12 px-3" disabled={!prevPlayer} onClick={() => goTo(-1)} data-testid="prev-player-button" title={prevPlayer ? `${prevPlayer.first_name} ${prevPlayer.last_name}` : ""}>
-            <ChevronLeft className="h-5 w-5" />
+          <Button variant="outline" className="rounded-xl h-14 px-4 min-w-[56px]" disabled={!prevPlayer} onClick={() => goTo(-1)} data-testid="prev-player-button" aria-label={prevPlayer ? `Previous player: ${prevPlayer.first_name} ${prevPlayer.last_name}` : "Previous player"} title={prevPlayer ? `${prevPlayer.first_name} ${prevPlayer.last_name}` : ""}>
+            <ChevronLeft className="h-6 w-6" />
           </Button>
           {!locked ? (
-            <Button className="flex-1 rounded-xl h-12 bg-brand hover:bg-brand-secondary text-base font-semibold active:scale-[0.98]" onClick={() => setSubmitOpen(true)} data-testid="evaluation-submit-button">
+            <Button className="flex-1 rounded-xl h-14 bg-brand hover:bg-brand-secondary text-base font-semibold active:scale-[0.98]" onClick={() => setSubmitOpen(true)} data-testid="evaluation-submit-button">
               <Send className="h-4 w-4 mr-1.5" /> Submit
             </Button>
           ) : (
-            <Button className="flex-1 rounded-xl h-12 bg-brand hover:bg-brand-secondary" onClick={() => nextPlayer ? goTo(1) : navigate(`/evaluate/${evaluation.assignment_id}`)} data-testid="post-submit-next">
+            <Button className="flex-1 rounded-xl h-14 bg-brand hover:bg-brand-secondary text-base font-semibold" onClick={() => nextPlayer ? goTo(1) : navigate(`/evaluate/${evaluation.assignment_id}`)} data-testid="post-submit-next">
               {nextPlayer ? `Next: ${nextPlayer.first_name}` : "Back to list"}
             </Button>
           )}
-          <Button variant="outline" className="rounded-xl h-12 px-3" disabled={!nextPlayer} onClick={() => goTo(1)} data-testid="next-player-button" title={nextPlayer ? `${nextPlayer.first_name} ${nextPlayer.last_name}` : ""}>
-            <ChevronRight className="h-5 w-5" />
+          <Button variant="outline" className="rounded-xl h-14 px-4 min-w-[56px]" disabled={!nextPlayer} onClick={() => goTo(1)} data-testid="next-player-button" aria-label={nextPlayer ? `Next player: ${nextPlayer.first_name} ${nextPlayer.last_name}` : "Next player"} title={nextPlayer ? `${nextPlayer.first_name} ${nextPlayer.last_name}` : ""}>
+            <ChevronRight className="h-6 w-6" />
           </Button>
         </div>
         {nextPlayer && (
@@ -888,21 +1234,116 @@ export default function EvaluationForm() {
         </DialogContent>
       </Dialog>
 
-      {/* Media dialog */}
-      <Dialog open={mediaOpen} onOpenChange={setMediaOpen}>
-        <DialogContent className="rounded-2xl max-w-sm">
+      {/* Media dialog — capture / preview / retake, then attach to this player + evaluation */}
+      <Dialog open={mediaOpen} onOpenChange={(o) => { setMediaOpen(o); if (!o) resetMedia(); }}>
+        <DialogContent className="rounded-2xl max-w-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Add Media</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <Input type="file" accept="image/*,video/*" capture="environment" onChange={(e) => setMediaFile(e.target.files?.[0] || null)} className="rounded-xl h-11 pt-2" data-testid="media-file-input" />
-            <Textarea value={mediaDesc} onChange={(e) => setMediaDesc(e.target.value)} rows={2} placeholder="Description (optional)" className="rounded-xl" />
-            <label className="flex items-start gap-2 text-xs text-muted-foreground">
-              <Checkbox checked={mediaConsent} onCheckedChange={setMediaConsent} data-testid="media-consent-checkbox" className="mt-0.5" />
-              I confirm media consent has been verified for this athlete (required for minors).
-            </label>
+            <p className="text-[11px] text-muted-foreground -mt-1">
+              Attaching to <span className="font-semibold text-foreground">{athlete.first_name} {athlete.last_name}</span>
+              {evaluation.bib_number ? ` · #${evaluation.bib_number}` : ""} · this evaluation
+            </p>
+
+            {/* Hidden inputs: one for live capture, one for the library */}
+            <input
+              ref={captureInputRef} type="file" accept="image/*,video/*" capture="environment" className="hidden"
+              onChange={(e) => pickMediaFile(e.target.files?.[0])} data-testid="media-file-input"
+            />
+            <input
+              ref={pickInputRef} type="file" accept="image/*,video/*" className="hidden"
+              onChange={(e) => pickMediaFile(e.target.files?.[0])} data-testid="media-file-picker"
+            />
+
+            {!mediaFile ? (
+              <div className="grid grid-cols-1 gap-2">
+                <Button variant="outline" className="rounded-xl h-14 justify-start text-base" onClick={() => captureInputRef.current?.click()} data-testid="media-capture-button">
+                  <Camera className="h-5 w-5 mr-2" /> Take photo / record video
+                </Button>
+                <Button variant="outline" className="rounded-xl h-14 justify-start text-base" onClick={() => pickInputRef.current?.click()} data-testid="media-choose-button">
+                  <Upload className="h-5 w-5 mr-2" /> Upload an existing file
+                </Button>
+                <p className="text-[11px] text-muted-foreground">
+                  Max {fmtBytes(MEDIA_MAX_BYTES)}. Short clips (5–10s) upload far more reliably on camp wifi.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="rounded-xl overflow-hidden border border-border bg-secondary" data-testid="media-preview">
+                  {mediaPreview?.url && mediaPreview.kind === "video" ? (
+                    <video src={mediaPreview.url} controls playsInline className="w-full max-h-56 bg-black" />
+                  ) : mediaPreview?.url && !mediaPreview.failed ? (
+                    // HEIC and some codecs will not decode in every browser —
+                    // fall back to the text notice rather than a broken image.
+                    <img
+                      src={mediaPreview.url}
+                      alt="Capture preview"
+                      className="w-full max-h-56 object-contain bg-black"
+                      onError={() => setMediaPreview((p) => (p ? { ...p, failed: true } : p))}
+                    />
+                  ) : (
+                    <p className="text-xs text-muted-foreground p-4 text-center">
+                      Preview unavailable on this device — the file is still attached and will upload.
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] text-muted-foreground truncate min-w-0">
+                    {mediaFile.name} · <span className="font-mono-num">{fmtBytes(mediaFile.size)}</span>
+                  </p>
+                  <Button variant="outline" size="sm" className="rounded-xl h-10 shrink-0" onClick={() => { resetMedia(); }} data-testid="media-retake-button">
+                    <RotateCcw className="h-4 w-4 mr-1.5" /> Retake
+                  </Button>
+                </div>
+
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">What is this?</p>
+                  <div className="flex flex-wrap gap-1.5" data-testid="media-category-picker">
+                    {MEDIA_CATEGORIES.map((c) => {
+                      const isVideo = mediaFile.type?.startsWith("video");
+                      const disabled = c === "Profile photo" && isVideo;
+                      return (
+                        <button
+                          key={c} type="button" disabled={disabled} onClick={() => setMediaCategory(c)}
+                          className={cn(
+                            "rounded-full border px-3.5 h-11 text-xs font-semibold transition active:scale-[0.96]",
+                            mediaCategory === c ? "bg-primary text-white border-transparent" : "bg-card text-muted-foreground border-border",
+                            disabled && "opacity-40",
+                          )}
+                        >
+                          {c}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <Textarea
+                  value={mediaDesc} onChange={(e) => setMediaDesc(e.target.value)} rows={2} maxLength={200}
+                  placeholder="Short caption (optional)" className="rounded-xl" data-testid="media-caption-input"
+                />
+
+                <label className="flex items-start gap-2 text-xs text-muted-foreground">
+                  <Checkbox checked={mediaPrivate} onCheckedChange={setMediaPrivate} data-testid="media-private-checkbox" className="mt-0.5" />
+                  Mark private — staff-only. Never shown on the player&apos;s public profile or to parents, even after consent.
+                </label>
+                <label className="flex items-start gap-2 text-xs text-muted-foreground">
+                  <Checkbox checked={mediaConsent} onCheckedChange={setMediaConsent} data-testid="media-consent-checkbox" className="mt-0.5" />
+                  I confirm media consent has been verified for this athlete (required for minors).
+                </label>
+                <p className="text-[11px] text-muted-foreground">
+                  Uploads are submitted for approval. Media for players under 13 is held as pending consent and is not shown until a guardian approves it.
+                </p>
+              </div>
+            )}
           </div>
           <DialogFooter>
-            <Button className="w-full rounded-xl bg-primary hover:bg-brand-secondary h-11" disabled={!mediaFile || !mediaConsent || mediaBusy} onClick={uploadMedia} data-testid="media-upload-button">
-              {mediaBusy ? "Uploading…" : "Upload"}
+            <Button
+              className="w-full rounded-xl bg-primary hover:bg-brand-secondary h-12 text-base"
+              disabled={!mediaFile || !mediaConsent || mediaBusy}
+              onClick={submitMedia}
+              data-testid="media-upload-button"
+            >
+              {mediaBusy ? "Working…" : navigator.onLine ? "Submit for approval" : "Save on device & upload later"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,4 +1,4 @@
-import { CheckCircle2, CloudOff, Loader2, RefreshCw, AlertTriangle } from "lucide-react";
+import { CheckCircle2, CloudOff, Loader2, RefreshCw, AlertTriangle, HardDrive } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const CONFIG = {
@@ -10,27 +10,41 @@ const CONFIG = {
   error: { label: "Tap to retry", icon: AlertTriangle, cls: "bg-destructive/15 text-destructive border-destructive/40" },
 };
 
-export const SaveStatusPill = ({ status = "idle", lastSaved, onRetry }) => {
+export const SaveStatusPill = ({ status = "idle", lastSaved, onRetry, warning }) => {
   const c = CONFIG[status] || CONFIG.idle;
   const Icon = c.icon;
   const canRetry = status === "error" || status === "sync_pending" || status === "offline";
   const Comp = canRetry && onRetry ? "button" : "span";
   return (
-    <Comp
-      type={Comp === "button" ? "button" : undefined}
-      onClick={canRetry && onRetry ? onRetry : undefined}
-      data-testid="evaluation-save-status"
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-xs font-semibold whitespace-nowrap min-h-[32px]",
-        c.cls,
-        Comp === "button" && "active:scale-[0.97] cursor-pointer"
+    <span className="inline-flex items-center gap-1.5 shrink-0">
+      <Comp
+        type={Comp === "button" ? "button" : undefined}
+        onClick={canRetry && onRetry ? onRetry : undefined}
+        data-testid="evaluation-save-status"
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-xs font-semibold whitespace-nowrap min-h-[32px]",
+          c.cls,
+          Comp === "button" && "active:scale-[0.97] cursor-pointer"
+        )}
+      >
+        <Icon className={cn("h-3.5 w-3.5", c.spin && "animate-spin")} />
+        {c.label}
+        {status === "saved" && lastSaved && (
+          <span className="font-normal opacity-75">· {lastSaved}</span>
+        )}
+      </Comp>
+      {/* Storage pressure is reported alongside, never instead of, save state —
+          a full device does not mean the save failed. */}
+      {warning && (
+        <span
+          title={warning}
+          aria-label={warning}
+          data-testid="evaluation-storage-warning"
+          className="inline-flex items-center justify-center rounded-full border border-warning/40 bg-warning/15 text-warning h-8 w-8"
+        >
+          <HardDrive className="h-3.5 w-3.5" />
+        </span>
       )}
-    >
-      <Icon className={cn("h-3.5 w-3.5", c.spin && "animate-spin")} />
-      {c.label}
-      {status === "saved" && lastSaved && (
-        <span className="font-normal opacity-75">· {lastSaved}</span>
-      )}
-    </Comp>
+    </span>
   );
 };

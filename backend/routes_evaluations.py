@@ -1,12 +1,16 @@
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from auth import (ADMIN_ROLES, REVIEW_ROLES, STAFF_ROLES, get_current_user,
-                  require_roles)
+from auth import (ADMIN_ROLES, REVIEW_ROLES, STAFF_ROLES,
+                  active_assignment_filter, get_current_user, require_roles)
 from db import clean, db, log_audit, new_id, now_iso
-from positions import (POSITION_TAXONOMY, normalize_position, resolve_template,
-                       validate_positions)
-from scoring import compute_evaluation_scores
+from positions import (AGE_BANDS, POSITION_TAXONOMY, normalize_position,
+                       resolve_template, validate_positions)
+from routes_metrics import METRIC_CATALOG
+from routes_players import restrict_guardian
+from scoring import aggregate_player_scores, compute_evaluation_scores
 
 router = APIRouter()
 
@@ -36,6 +40,7 @@ class MetricBody(BaseModel):
 class CategoryBody(BaseModel):
     name: str
     weight: float = 1
+    display_order: int = 0
 
 
 class TemplateBody(BaseModel):
@@ -50,12 +55,35 @@ class TemplateBody(BaseModel):
     is_default: bool = False
 
 
+def validate_age_group(age_group: str | None) -> str | None:
+    if age_group in (None, ""):
+        return None
+    for band in AGE_BANDS:
+        if str(age_group).strip().lower() == band.lower():
+            return band
+    raise HTTPException(
+        status_code=422,
+        detail=f"Unknown age band: {age_group}. Allowed: {', '.join(AGE_BANDS)}")
+
+
+def _apply_display_order(items: list[dict]) -> list[dict]:
+    """Sort by the admin-supplied display_order, then renumber sequentially so
+    reorder/add/remove always round-trips to a dense, stable ordering."""
+    ordered = sorted(enumerate(items), key=lambda p: (int(p[1].get("display_order") or 0), p[0]))
+    out = []
+    for idx, (_, item) in enumerate(ordered):
+        item["display_order"] = idx
+        out.append(item)
+    return out
+
+
 def _prepare_template_doc(body: TemplateBody) -> dict:
     doc = body.model_dump()
     try:
         doc["applies_to_positions"] = validate_positions(doc.get("applies_to_positions") or [])
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    doc["age_group"] = validate_age_group(doc.get("age_group"))
     if doc["applies_to_positions"] and not doc.get("position"):
         doc["position"] = doc["applies_to_positions"][0]
     for m in doc["metrics"]:
@@ -63,6 +91,11 @@ def _prepare_template_doc(body: TemplateBody) -> dict:
             m["id"] = new_id()
         if m["metric_type"] not in METRIC_TYPES:
             raise HTTPException(status_code=400, detail=f"Invalid metric type: {m['metric_type']}")
+    names = [c["name"] for c in doc["categories"]]
+    if len(names) != len(set(names)):
+        raise HTTPException(status_code=422, detail="Category names must be unique within a template.")
+    doc["categories"] = _apply_display_order(doc["categories"])
+    doc["metrics"] = _apply_display_order(doc["metrics"])
     return doc
 
 
@@ -120,19 +153,79 @@ async def update_template(template_id: str, body: TemplateBody, user=Depends(req
     return {"message": "Template updated.", "template_version": doc["template_version"]}
 
 
+class TemplateOrderBody(BaseModel):
+    category_names: list[str] = Field(default_factory=list)
+    metric_ids: list[str] = Field(default_factory=list)
+
+
+@router.put("/templates/{template_id}/order")
+async def reorder_template(template_id: str, body: TemplateOrderBody, user=Depends(require_roles(*ADMIN_ROLES))):
+    """Reorder categories and/or metrics without resending the whole template."""
+    t = await db.evaluation_templates.find_one(
+        {"id": template_id, "organization_id": user["organization_id"]}, {"_id": 0})
+    if not t:
+        raise HTTPException(status_code=404, detail="Template not found.")
+
+    categories = t.get("categories") or []
+    metrics = t.get("metrics") or []
+    updates = {"updated_at": now_iso()}
+
+    if body.category_names:
+        known = {c["name"] for c in categories}
+        unknown = [n for n in body.category_names if n not in known]
+        if unknown:
+            raise HTTPException(status_code=422, detail=f"Unknown categories: {', '.join(unknown)}")
+        rank = {n: i for i, n in enumerate(body.category_names)}
+        for c in categories:
+            c["display_order"] = rank.get(c["name"], len(rank))
+        updates["categories"] = _apply_display_order(categories)
+
+    if body.metric_ids:
+        known = {m["id"] for m in metrics if m.get("id")}
+        unknown = [m for m in body.metric_ids if m not in known]
+        if unknown:
+            raise HTTPException(status_code=422, detail=f"Unknown metrics: {', '.join(unknown)}")
+        rank = {m: i for i, m in enumerate(body.metric_ids)}
+        for m in metrics:
+            m["display_order"] = rank.get(m.get("id"), len(rank))
+        updates["metrics"] = _apply_display_order(metrics)
+
+    if len(updates) == 1:
+        raise HTTPException(status_code=400, detail="Provide category_names and/or metric_ids to reorder.")
+
+    # Ordering is presentational, so template_version is left alone: bumping it would
+    # make already-submitted evaluations look like they used a superseded template.
+    await db.evaluation_templates.update_one(
+        {"id": template_id, "organization_id": user["organization_id"]}, {"$set": updates})
+    await log_audit(user["organization_id"], user, "template_reordered", "template", template_id,
+                    {"categories": bool(body.category_names), "metrics": bool(body.metric_ids)})
+    return {"message": "Template order updated.",
+            "categories": updates.get("categories", categories),
+            "metrics": updates.get("metrics", metrics)}
+
+
 @router.delete("/templates/{template_id}")
 async def delete_template(template_id: str, user=Depends(require_roles(*ADMIN_ROLES))):
     in_use = await db.stations.find_one({
         "template_id": template_id, "organization_id": user["organization_id"]})
     if in_use:
         raise HTTPException(status_code=400, detail="Template is in use by a station and cannot be deleted.")
-    await db.evaluation_templates.delete_one({"id": template_id, "organization_id": user["organization_id"]})
+    res = await db.evaluation_templates.delete_one(
+        {"id": template_id, "organization_id": user["organization_id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Template not found.")
+    await log_audit(user["organization_id"], user, "template_deleted", "template", template_id)
     return {"message": "Template deleted."}
 
 
 @router.get("/positions")
 async def list_positions(user=Depends(require_roles(*STAFF_ROLES))):
     return {"positions": POSITION_TAXONOMY}
+
+
+@router.get("/age-bands")
+async def list_age_bands(user=Depends(require_roles(*STAFF_ROLES))):
+    return {"age_bands": list(AGE_BANDS)}
 
 
 # ---------------- Position-based template resolution ----------------
@@ -150,12 +243,14 @@ async def _assert_station_assignment(user, station_id: str, event_id: str):
         a = await db.evaluator_assignments.find_one({
             "organization_id": org, "event_id": event_id,
             "station_id": station_id, "evaluator_id": user["id"],
+            **active_assignment_filter(),
         }, {"_id": 0})
         if not a:
-            raise HTTPException(status_code=403, detail="You are not assigned to this station.")
+            raise HTTPException(status_code=403, detail="You are not assigned to this station, or your assignment has ended.")
         return station, a
     a = await db.evaluator_assignments.find_one({
         "organization_id": org, "event_id": event_id, "evaluator_id": user["id"],
+        **active_assignment_filter(),
     }, {"_id": 0})
     if not a and user["role"] not in ADMIN_ROLES + ("head_scout", "coach"):
         raise HTTPException(status_code=403, detail="You are not assigned to this event.")
@@ -298,14 +393,21 @@ async def _assignment_with_context(a, org_id):
 
 @router.get("/my-assignments")
 async def my_assignments(user=Depends(require_roles(*STAFF_ROLES))):
-    q = {"organization_id": user["organization_id"], "evaluator_id": user["id"]}
+    q = {"organization_id": user["organization_id"], "evaluator_id": user["id"],
+         **active_assignment_filter()}
     assignments = await db.evaluator_assignments.find(q, {"_id": 0}).to_list(50)
     return [await _assignment_with_context(a, user["organization_id"]) for a in assignments]
 
 
 async def _check_assignment_access(user, assignment_id):
-    a = await db.evaluator_assignments.find_one({"id": assignment_id, "organization_id": user["organization_id"]}, {"_id": 0})
+    org = user["organization_id"]
+    a = await db.evaluator_assignments.find_one(
+        {"id": assignment_id, "organization_id": org, **active_assignment_filter()}, {"_id": 0})
     if not a:
+        exists = await db.evaluator_assignments.find_one(
+            {"id": assignment_id, "organization_id": org}, {"_id": 0, "id": 1})
+        if exists:
+            raise HTTPException(status_code=403, detail="This assignment has been revoked or has expired.")
         raise HTTPException(status_code=404, detail="Assignment not found.")
     if user["role"] == "evaluator" and a["evaluator_id"] != user["id"]:
         raise HTTPException(status_code=403, detail="This is not your assignment.")
@@ -419,6 +521,7 @@ async def start_evaluation(body: StartBody, user=Depends(require_roles(*STAFF_RO
         "resolved_position": resolved_pos,
         "status": "draft", "scores": {},
         "comments": {"strengths": "", "development_needs": "", "general": "", "quick_tags": []},
+        "recommendation": None, "next_evaluation_date": None,
         "computed": None, "client_updated_at": None,
         "created_at": now_iso(), "updated_at": now_iso(),
         "submitted_at": None, "reviewed_by": None, "review_note": None,
@@ -439,6 +542,17 @@ class AutosaveBody(BaseModel):
     comments: dict | None = None
     client_updated_at: str | None = None
     evaluated_as_position: str | None = None
+    recommendation: str | None = Field(default=None, max_length=4000)
+    next_evaluation_date: str | None = None
+
+
+def _validate_next_evaluation_date(value: str | None) -> str | None:
+    if value in (None, ""):
+        return None
+    try:
+        return datetime.strptime(str(value)[:10], "%Y-%m-%d").date().isoformat()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="next_evaluation_date must be a YYYY-MM-DD date.")
 
 
 async def _get_own_evaluation(evaluation_id: str, user):
@@ -478,6 +592,10 @@ async def autosave(evaluation_id: str, body: AutosaveBody, user=Depends(require_
         updates["comments"] = body.comments
     if body.client_updated_at:
         updates["client_updated_at"] = body.client_updated_at
+    if body.recommendation is not None:
+        updates["recommendation"] = body.recommendation.strip() or None
+    if body.next_evaluation_date is not None:
+        updates["next_evaluation_date"] = _validate_next_evaluation_date(body.next_evaluation_date)
     if body.evaluated_as_position is not None:
         if body.evaluated_as_position == "":
             updates["evaluated_as_position"] = None
@@ -518,9 +636,9 @@ async def get_evaluation(evaluation_id: str, user=Depends(require_roles(*STAFF_R
         raise HTTPException(status_code=403, detail="You can only view your own evaluations.")
     template = await db.evaluation_templates.find_one(
         {"id": ev.get("template_id"), "organization_id": org}, {"_id": 0})
-    athlete = await db.athletes.find_one(
-        {"id": ev["athlete_id"], "organization_id": org},
-        {"_id": 0, "guardian_name": 0, "guardian_email": 0, "guardian_phone": 0, "emergency_contact": 0})
+    athlete = await db.athletes.find_one({"id": ev["athlete_id"], "organization_id": org}, {"_id": 0})
+    if athlete:
+        athlete = restrict_guardian(athlete, user["role"])
     entry = await db.event_athletes.find_one(
         {"event_id": ev["event_id"], "athlete_id": ev["athlete_id"], "organization_id": org},
         {"_id": 0, "bib_number": 1, "group_id": 1})
@@ -531,13 +649,20 @@ async def get_evaluation(evaluation_id: str, user=Depends(require_roles(*STAFF_R
     event = await db.events.find_one(
         {"id": ev["event_id"], "organization_id": org}, {"_id": 0, "name": 1})
     return {**ev, "template": template, "athlete": athlete,
+            "recommendation": ev.get("recommendation"),
+            "next_evaluation_date": ev.get("next_evaluation_date"),
             "bib_number": (entry or {}).get("bib_number"),
             "station_name": (station or {}).get("name"), "event_name": (event or {}).get("name"),
             "station_template_id": (station or {}).get("template_id")}
 
 
+class SubmitBody(BaseModel):
+    recommendation: str | None = Field(default=None, max_length=4000)
+    next_evaluation_date: str | None = None
+
+
 @router.post("/evaluations/{evaluation_id}/submit")
-async def submit_evaluation(evaluation_id: str, user=Depends(require_roles(*STAFF_ROLES))):
+async def submit_evaluation(evaluation_id: str, body: SubmitBody = SubmitBody(), user=Depends(require_roles(*STAFF_ROLES))):
     ev = await _get_own_evaluation(evaluation_id, user)
     if ev["status"] in ("submitted", "approved"):
         raise HTTPException(status_code=409, detail="This evaluation was already submitted.")
@@ -557,14 +682,232 @@ async def submit_evaluation(evaluation_id: str, user=Depends(require_roles(*STAF
         raise HTTPException(status_code=400, detail=f"Missing required metrics: {', '.join(missing)}")
     computed = await _compute(ev)
     ts = now_iso()
+    updates = {
+        "status": "submitted", "submitted_at": ts, "updated_at": ts, "computed": computed,
+        "returned": False,
+    }
+    if body.recommendation is not None:
+        updates["recommendation"] = body.recommendation.strip() or None
+    if body.next_evaluation_date is not None:
+        updates["next_evaluation_date"] = _validate_next_evaluation_date(body.next_evaluation_date)
     await db.evaluations.update_one(
-        {"id": evaluation_id, "organization_id": user["organization_id"]},
-        {"$set": {
-            "status": "submitted", "submitted_at": ts, "updated_at": ts, "computed": computed,
-            "returned": False,
-        }})
-    await log_audit(user["organization_id"], user, "evaluation_submitted", "evaluation", evaluation_id, {"athlete_id": ev["athlete_id"]})
-    return {"status": "submitted", "submitted_at": ts, "computed": computed}
+        {"id": evaluation_id, "organization_id": user["organization_id"]}, {"$set": updates})
+    await log_audit(user["organization_id"], user, "evaluation_submitted", "evaluation", evaluation_id,
+                    {"athlete_id": ev["athlete_id"],
+                     "recommendation_set": bool(updates.get("recommendation")),
+                     "next_evaluation_date": updates.get("next_evaluation_date")})
+    return {"status": "submitted", "submitted_at": ts, "computed": computed,
+            "recommendation": updates.get("recommendation", ev.get("recommendation")),
+            "next_evaluation_date": updates.get("next_evaluation_date", ev.get("next_evaluation_date"))}
+
+
+# ---------------- Evaluation results ----------------
+
+RESULTS_TOP_N = 3
+MEASUREMENT_WINDOW_DAYS = 7
+
+
+def _to_date(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+
+
+def _metric_rows(template: dict, computed: dict) -> list[dict]:
+    results = (computed or {}).get("metric_results") or {}
+    rows = []
+    for m in sorted(template.get("metrics") or [], key=lambda x: int(x.get("display_order") or 0)):
+        r = results.get(m["id"]) or {}
+        rows.append({
+            "metric_id": m["id"],
+            "key": m.get("key"),
+            "name": m.get("name"),
+            "category": m.get("category"),
+            "metric_type": m.get("metric_type"),
+            "unit": m.get("unit"),
+            "raw": r.get("raw"),
+            "normalized": r.get("normalized"),
+            "percentile": r.get("percentile"),
+            "not_observed": bool(r.get("not_observed")),
+        })
+    return rows
+
+
+def _rank_scored_items(category_scores: dict, metric_rows: list[dict]) -> list[dict]:
+    """Strengths and development needs are derived from structured scores only —
+    the free-text comment blobs are returned verbatim, never parsed."""
+    items = [
+        {"label": name, "score": data.get("score"), "weight": data.get("weight"),
+         "source": "category", "category": name}
+        for name, data in (category_scores or {}).items()
+        if data.get("score") is not None
+    ]
+    if len(items) < RESULTS_TOP_N:
+        # Thin templates (one or two categories) still owe the UI three talking points.
+        items += [
+            {"label": r["name"], "score": r["normalized"], "weight": None,
+             "source": "metric", "category": r.get("category")}
+            for r in metric_rows if r.get("normalized") is not None
+        ]
+    items.sort(key=lambda i: (-i["score"], i["label"] or ""))
+    return items
+
+
+@router.get("/evaluations/{evaluation_id}/results")
+async def evaluation_results(evaluation_id: str, user=Depends(require_roles(*STAFF_ROLES))):
+    """Visual-summary-first payload for the evaluation results page: the scores and
+    charts lead, the written write-up sits behind 'View Full Evaluation'."""
+    org = user["organization_id"]
+    ev = await db.evaluations.find_one({"id": evaluation_id, "organization_id": org}, {"_id": 0})
+    if not ev:
+        raise HTTPException(status_code=404, detail="Evaluation not found.")
+    if user["role"] == "evaluator" and ev["evaluator_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="You can only view your own evaluations.")
+    if ev.get("status") not in ("submitted", "approved"):
+        raise HTTPException(status_code=409, detail="Results are available once the evaluation has been submitted.")
+
+    template = await db.evaluation_templates.find_one(
+        {"id": ev.get("template_id"), "organization_id": org}, {"_id": 0}) or {"metrics": [], "categories": []}
+    athlete = await db.athletes.find_one({"id": ev["athlete_id"], "organization_id": org}, {"_id": 0})
+    if athlete:
+        athlete = restrict_guardian(athlete, user["role"])
+    athlete = athlete or {}
+    station = await db.stations.find_one(
+        {"id": ev.get("station_id"), "organization_id": org}, {"_id": 0, "name": 1}) or {}
+
+    # Same master-weighted aggregation the player profile uses, so the number on the
+    # results page matches the number on the profile.
+    current = aggregate_player_scores([ev])
+    overall = current["overall_score"]
+    metric_rows = _metric_rows(template, ev.get("computed") or {})
+
+    cat_order = {c["name"]: int(c.get("display_order") or 0)
+                 for c in (template.get("categories") or []) if c.get("name")}
+    category_scores = [
+        {"category": name, "score": data.get("score"), "weight": data.get("weight")}
+        for name, data in sorted(
+            current["category_scores"].items(),
+            key=lambda kv: (cat_order.get(kv[0], len(cat_order)), kv[0]))
+    ]
+
+    ranked = _rank_scored_items(current["category_scores"], metric_rows)
+    top_strengths = ranked[:RESULTS_TOP_N]
+    used = {(i["source"], i["label"]) for i in top_strengths}
+    # A category named a top strength must never also be listed as a need.
+    top_improvements = [i for i in reversed(ranked) if (i["source"], i["label"]) not in used][:RESULTS_TOP_N]
+
+    history = await db.evaluations.find({
+        "athlete_id": ev["athlete_id"], "organization_id": org,
+        "status": {"$in": ["submitted", "approved"]},
+    }, {"_id": 0}).sort("submitted_at", 1).to_list(500)
+    event_ids = sorted({h["event_id"] for h in history if h.get("event_id")})
+    events = await db.events.find(
+        {"id": {"$in": event_ids}, "organization_id": org},
+        {"_id": 0, "id": 1, "name": 1, "date": 1}).to_list(500)
+    emap = {e["id"]: e for e in events}
+
+    progress_series = []
+    for h in history:
+        agg = aggregate_player_scores([h])
+        if agg["overall_score"] is None:
+            continue
+        event = emap.get(h.get("event_id")) or {}
+        progress_series.append({
+            "evaluation_id": h["id"],
+            "date": event.get("date") or (h.get("submitted_at") or "")[:10],
+            "event_id": h.get("event_id"),
+            "event_name": event.get("name"),
+            "overall_score": agg["overall_score"],
+        })
+
+    idx = next((i for i, p in enumerate(progress_series) if p["evaluation_id"] == evaluation_id), None)
+    previous = progress_series[idx - 1] if idx else None
+    previous_overall = previous["overall_score"] if previous else None
+    score_change = round(overall - previous_overall, 2) if overall is not None and previous_overall is not None else None
+
+    anchor = _to_date((emap.get(ev.get("event_id")) or {}).get("date")) or _to_date(ev.get("submitted_at"))
+    verified = await db.verified_metrics.find(
+        {"athlete_id": ev["athlete_id"], "organization_id": org}, {"_id": 0}
+    ).sort("measured_at", -1).to_list(200)
+    in_window = []
+    if anchor:
+        lo, hi = anchor - timedelta(days=MEASUREMENT_WINDOW_DAYS), anchor + timedelta(days=MEASUREMENT_WINDOW_DAYS)
+        in_window = [m for m in verified
+                     if (d := _to_date(m.get("measured_at"))) is not None and lo <= d <= hi]
+    window_ids = {m["id"] for m in in_window}
+    selected = list(in_window)
+    if not selected:
+        # No measurement session around this evaluation: fall back to each tool's
+        # most recent verified value so the results page still shows the athlete.
+        seen = set()
+        for m in verified:
+            if m.get("metric_key") in seen:
+                continue
+            seen.add(m.get("metric_key"))
+            selected.append(m)
+    measurements = []
+    for m in selected:
+        meta = METRIC_CATALOG.get(m.get("metric_key")) or {}
+        measurements.append({
+            "metric_key": m.get("metric_key"),
+            "label": meta.get("label") or m.get("metric_key"),
+            "value": m.get("value"),
+            "unit": m.get("unit") or meta.get("unit"),
+            "lower_is_better": meta.get("lower_better"),
+            "measured_at": m.get("measured_at"),
+            "verified_by_name": m.get("verified_by_name"),
+            "source": m.get("source"),
+            "in_evaluation_window": m["id"] in window_ids,
+        })
+
+    comments = ev.get("comments") or {}
+    return {
+        "evaluation_id": ev["id"],
+        "status": ev.get("status"),
+        "submitted_at": ev.get("submitted_at"),
+        "evaluator_name": ev.get("evaluator_name"),
+        "event_id": ev.get("event_id"),
+        "event_name": (emap.get(ev.get("event_id")) or {}).get("name"),
+        "station_name": station.get("name"),
+        "evaluated_as_position": ev.get("evaluated_as_position"),
+        "athlete": {
+            "id": athlete.get("id"),
+            "first_name": athlete.get("first_name"),
+            "last_name": athlete.get("last_name"),
+            "preferred_name": athlete.get("preferred_name"),
+            "photo_url": athlete.get("photo_url"),
+            "age_group": athlete.get("age_group"),
+            "primary_position": athlete.get("primary_position"),
+        },
+        "overall_score": overall,
+        "previous_overall_score": previous_overall,
+        "score_change": score_change,
+        "previous_evaluation_id": (previous or {}).get("evaluation_id"),
+        "previous_evaluation_date": (previous or {}).get("date"),
+        "top_strengths": top_strengths,
+        "top_improvements": top_improvements,
+        "category_scores": category_scores,
+        "progress_series": progress_series,
+        "verified_measurements": measurements,
+        "recommendation": ev.get("recommendation"),
+        "next_evaluation_date": ev.get("next_evaluation_date"),
+        "full_evaluation": {
+            "strengths": comments.get("strengths") or "",
+            "development_needs": comments.get("development_needs") or "",
+            "general": comments.get("general") or "",
+            "quick_tags": comments.get("quick_tags") or [],
+            "review_note": ev.get("review_note"),
+            "reviewed_by_name": ev.get("reviewed_by_name"),
+            "reviewed_at": ev.get("reviewed_at"),
+            "template_id": template.get("id"),
+            "template_name": template.get("name"),
+            "template_version": ev.get("template_version"),
+            "metric_results": metric_rows,
+        },
+    }
 
 
 @router.get("/my-evaluations")
@@ -579,7 +922,9 @@ async def my_evaluations(user=Depends(require_roles(*STAFF_ROLES))):
             {"_id": 0, "first_name": 1, "last_name": 1, "age_group": 1, "photo_url": 1, "primary_position": 1})
         station = await db.stations.find_one(
             {"id": ev["station_id"], "organization_id": org}, {"_id": 0, "name": 1})
-        out.append({**ev, "athlete": athlete, "station_name": (station or {}).get("name")})
+        out.append({**ev, "athlete": athlete, "station_name": (station or {}).get("name"),
+                    "recommendation": ev.get("recommendation"),
+                    "next_evaluation_date": ev.get("next_evaluation_date")})
     return out
 
 
@@ -601,7 +946,10 @@ async def review_queue(event_id: str | None = None, user=Depends(require_roles(*
             {"id": ev["station_id"], "organization_id": org}, {"_id": 0, "name": 1})
         event = await db.events.find_one(
             {"id": ev["event_id"], "organization_id": org}, {"_id": 0, "name": 1})
-        out.append({**ev, "athlete": athlete, "station_name": (station or {}).get("name"), "event_name": (event or {}).get("name")})
+        out.append({**ev, "athlete": athlete, "station_name": (station or {}).get("name"),
+                    "event_name": (event or {}).get("name"),
+                    "recommendation": ev.get("recommendation"),
+                    "next_evaluation_date": ev.get("next_evaluation_date")})
     return out
 
 

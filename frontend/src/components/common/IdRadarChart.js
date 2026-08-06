@@ -1,7 +1,7 @@
 import { Radar, RadarChart as RechartsRadar, PolarGrid, PolarAngleAxis, ResponsiveContainer, Tooltip } from "recharts";
 
 /**
- * Signature evaluation visual (ported from Velo City RadarChart).
+ * Signature 60'6" ID evaluation visual.
  * Expects categories scored 0–10; optionally overlay benchmarks 0–10.
  */
 export function IdRadarChart({

@@ -6,18 +6,18 @@ from fastapi import (APIRouter, Depends, File, HTTPException, Query, Response,
                      UploadFile)
 from pydantic import BaseModel
 
-from auth import ADMIN_ROLES, COACH_ROLES, STAFF_ROLES, get_current_user, require_roles
+from auth import (ADMIN_ROLES, COACH_ROLES, REVIEW_ROLES, STAFF_ROLES,
+                  get_current_user, require_roles)
 from db import clean, db, log_audit, new_id, now_iso
-from positions import POSITION_TAXONOMY
-from scoring import aggregate_player_scores
+from positions import (AGE_BANDS, POSITION_TAXONOMY, age_band_for_age,
+                       normalize_age_band)
+from routes_development import _note_visible_to_role, _validate_date
+from routes_metrics import shape_metric
+from scoring import aggregate_player_scores, canonical_metric_key
 
 router = APIRouter()
 
 POSITIONS = list(POSITION_TAXONOMY)
-AGE_GROUPS = [
-    "7U", "8U", "9U", "10U", "11U", "12U", "13U", "14U", "15U", "16U", "17U", "18U",
-    "7U-8U", "8U-10U", "11U-13U", "14U-18U", "College", "Pro",
-]
 
 
 def format_permanent_id(athlete_id: str | None) -> str:
@@ -37,39 +37,28 @@ def compute_age(dob_str):
 
 
 def compute_age_group(dob_str):
-    age = compute_age(dob_str)
-    if age is None:
+    """Derive a canonical band from a birth date. Never returns "Professional" —
+    that band is only ever set explicitly by an admin."""
+    return age_band_for_age(compute_age(dob_str))
+
+
+def validate_age_band(age_group: str | None) -> str | None:
+    """Accept a canonical band (case-insensitive) or a legacy label that maps onto
+    one. Anything else is a 422 rather than a silently stored junk band."""
+    if age_group in (None, ""):
         return None
-    if age <= 7:
-        return "7U"
-    if age >= 19:
-        return "College"
-    return f"{age}U"
+    band = normalize_age_band(age_group)
+    if band is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown age band: {age_group}. Allowed: {', '.join(AGE_BANDS)}")
+    return band
 
 
-def age_group_matches_template(athlete_age: str | None, template_age: str | None) -> bool:
-    """True if template age_group applies to athlete age_group."""
-    if not template_age:
-        return True  # blank = all ages
-    if not athlete_age:
-        return False
-    ta = str(template_age).strip()
-    aa = str(athlete_age).strip()
-    if ta == aa:
-        return True
-    if ta in ("College", "Pro") and aa in ("College", "Pro"):
-        return ta == aa
-    # Band like 9U-10U
-    if "-" in ta and ta[0].isdigit():
-        parts = ta.replace("U", "").split("-")
-        try:
-            lo, hi = int(parts[0]), int(parts[1])
-            if aa.endswith("U") and aa[:-1].isdigit():
-                n = int(aa[:-1])
-                return lo <= n <= hi
-        except Exception:
-            return False
-    return False
+def resolve_age_group(age_group: str | None, dob_str: str | None) -> str | None:
+    """An explicit band wins over the birth date — an admin must be able to place a
+    reclassified or Professional athlete in a band the DOB would not produce."""
+    return validate_age_band(age_group) or compute_age_group(dob_str)
 
 
 class AthleteBody(BaseModel):
@@ -77,6 +66,7 @@ class AthleteBody(BaseModel):
     last_name: str
     preferred_name: str | None = None
     date_of_birth: str | None = None
+    age_group: str | None = None  # explicit band; falls back to the DOB-derived band
     graduation_year: int | None = None
     primary_position: str | None = None
     secondary_positions: list[str] = []
@@ -113,7 +103,7 @@ def athlete_doc(body: AthleteBody, org_id: str, user_id: str):
         "profile_completed_at": None,
         "self_service_enabled": False,
         "age": compute_age(body.date_of_birth),
-        "age_group": compute_age_group(body.date_of_birth),
+        "age_group": resolve_age_group(body.age_group, body.date_of_birth),
         "created_by": user_id,
         "created_at": now_iso(),
         "updated_at": now_iso(),
@@ -155,7 +145,10 @@ async def list_athletes(
     if status:
         q["status"] = status
     if age_group:
-        q["age_group"] = age_group
+        # Match the raw label too so athletes still carrying a legacy band or a
+        # single-year label are not hidden by a canonical-band filter.
+        band = normalize_age_band(age_group)
+        q["age_group"] = {"$in": list({age_group, band} - {None})}
     if position:
         q["$or"] = [{"primary_position": position}, {"secondary_positions": position}]
     if team:
@@ -194,10 +187,30 @@ async def update_athlete(athlete_id: str, body: AthleteBody, user=Depends(requir
         raise HTTPException(status_code=404, detail="Player not found.")
     updates = body.model_dump()
     updates["age"] = compute_age(body.date_of_birth)
-    updates["age_group"] = compute_age_group(body.date_of_birth)
+    updates["age_group"] = resolve_age_group(body.age_group, body.date_of_birth)
     updates["updated_at"] = now_iso()
-    await db.athletes.update_one({"id": athlete_id}, {"$set": updates})
-    await log_audit(user["organization_id"], user, "athlete_updated", "athlete", athlete_id)
+
+    # Spec §6: never erase prior physicals/team. Snapshot the OLD value of any
+    # tracked field to an append-only log before overwriting, so a player's
+    # season-to-season history survives an in-place edit.
+    tracked = ("height", "weight", "current_team", "age_group", "primary_position")
+    snapshots = [
+        {"field": f, "from": a.get(f), "to": updates.get(f), "at": updates["updated_at"],
+         "by": user["id"], "by_name": user.get("full_name")}
+        for f in tracked
+        if updates.get(f) not in (None, "") and updates.get(f) != a.get(f) and a.get(f) not in (None, "")
+    ]
+    # Spec §6: park prior height/weight/team on the current season snapshot before
+    # they are overwritten, so a season's physicals are never silently lost.
+    await _preserve_physicals_to_season(a, updates, user)
+    set_ops = {"$set": updates}
+    if snapshots:
+        set_ops["$push"] = {"physical_history": {"$each": snapshots}}
+    await db.athletes.update_one({"id": athlete_id}, set_ops)
+    audit_meta = {"age_group": updates["age_group"]} if updates["age_group"] != a.get("age_group") else None
+    if snapshots:
+        audit_meta = {**(audit_meta or {}), "changed": [s["field"] for s in snapshots]}
+    await log_audit(user["organization_id"], user, "athlete_updated", "athlete", athlete_id, audit_meta)
     return {**a, **updates, "_id": None} and clean({**a, **updates})
 
 
@@ -250,7 +263,8 @@ async def merge_athletes(body: MergeBody, user=Depends(require_roles(*ADMIN_ROLE
 # ---------------- Player summary (profile overview) ----------------
 
 @router.get("/athletes/{athlete_id}/summary")
-async def athlete_summary(athlete_id: str, user=Depends(require_roles(*STAFF_ROLES))):
+async def athlete_summary(athlete_id: str, season_id: str | None = None,
+                          user=Depends(require_roles(*STAFF_ROLES))):
     a = await db.athletes.find_one({"id": athlete_id, "organization_id": user["organization_id"]}, {"_id": 0})
     if not a:
         raise HTTPException(status_code=404, detail="Player not found.")
@@ -258,6 +272,26 @@ async def athlete_summary(athlete_id: str, user=Depends(require_roles(*STAFF_ROL
         "athlete_id": athlete_id, "organization_id": user["organization_id"],
         "status": {"$in": ["submitted", "approved"]},
     }, {"_id": 0}).sort("submitted_at", 1).to_list(500)
+
+    # Optional season scope (spec §6): keep only evaluations whose EVENT DATE
+    # falls in the requested season. The submit path is never touched — grouping
+    # is derived here at read time.
+    if season_id:
+        seasons = await _athlete_seasons(athlete_id, user["organization_id"])
+        season = next((s for s in seasons if s["id"] == season_id), None)
+        if not season:
+            raise HTTPException(status_code=404, detail="Season not found.")
+        event_ids = sorted({e.get("event_id") for e in evals if e.get("event_id")})
+        ev_dates = {}
+        if event_ids:
+            rows = await db.events.find(
+                {"id": {"$in": event_ids}, "organization_id": user["organization_id"]},
+                {"_id": 0, "id": 1, "date": 1}).to_list(500)
+            ev_dates = {r["id"]: r.get("date") for r in rows}
+        evals = [
+            ev for ev in evals
+            if (season_for_date(seasons, ev_dates.get(ev.get("event_id"))) or {}).get("id") == season_id
+        ]
 
     # group evaluations by event to compute per-event overall
     by_event = {}
@@ -281,7 +315,9 @@ async def athlete_summary(athlete_id: str, user=Depends(require_roles(*STAFF_ROL
         for ev in evs:
             template = await db.evaluation_templates.find_one({"id": ev.get("template_id")}, {"_id": 0, "metrics": 1})
             metrics_by_id = {m["id"]: m for m in (template or {}).get("metrics", [])}
-            computed = (ev.get("computed") or {}).get("metrics") or {}
+            # compute_evaluation_scores stores per-metric results under "metric_results";
+            # reading "metrics" here left every normalized point null on the growth chart.
+            computed = (ev.get("computed") or {}).get("metric_results") or {}
             scores = ev.get("scores") or {}
             for mid, entry in scores.items():
                 if not isinstance(entry, dict) or entry.get("not_observed"):
@@ -349,8 +385,13 @@ async def athlete_summary(athlete_id: str, user=Depends(require_roles(*STAFF_ROL
     previous = event_scores[-2] if len(event_scores) > 1 else None
     goals = await db.athlete_goals.find({"athlete_id": athlete_id, "status": {"$nin": ["Archived"]}}, {"_id": 0}).sort("created_at", -1).to_list(20)
     latest_scout = await db.athlete_notes.find_one(
-        {"athlete_id": athlete_id, "note_type": {"$in": ["scout_assessment", "scout"]}},
+        {"athlete_id": athlete_id, "organization_id": user["organization_id"],
+         "note_type": {"$in": ["scout_assessment", "scout"]}},
         {"_id": 0}, sort=[("created_at", -1)])
+    # Same visibility rules as GET /athletes/{id}/notes, otherwise a scout or
+    # confidential note reaches evaluators here even though /notes hides it.
+    if latest_scout and not _note_visible_to_role(latest_scout, user["role"]):
+        latest_scout = None
 
     # aggregate skill summary across all evals (latest event weighted most: use all)
     agg_all = aggregate_player_scores(evals)
@@ -373,6 +414,99 @@ async def athlete_summary(athlete_id: str, user=Depends(require_roles(*STAFF_ROL
             {"athlete_id": athlete_id, "organization_id": user["organization_id"]}
         ),
     }
+
+
+# ---------------- Player comparison (spec §18) ----------------
+
+class CompareBody(BaseModel):
+    athlete_ids: list[str]
+
+
+# A handful of verified measurements that read well side-by-side; the frontend
+# grouped bars key off these. Any player missing one renders "—", never a guess.
+COMPARE_KEY_METRICS = ["exit_velocity", "throwing_velocity", "sixty_yard_dash"]
+
+
+async def _compare_player(a: dict, role: str, org_id: str) -> dict:
+    """Assemble everything spec §18 needs for one athlete. All reads are already
+    scoped to org_id by the caller; this stays consistent with the shape and
+    scoring that /athletes/{id}/summary produces (no reimplemented scoring)."""
+    aid = a["id"]
+    evals = await db.evaluations.find({
+        "athlete_id": aid, "organization_id": org_id,
+        "status": {"$in": ["submitted", "approved"]},
+    }, {"_id": 0}).sort("submitted_at", 1).to_list(500)
+
+    # Overall score over time: one point per event (same per-event aggregation
+    # the summary endpoint uses) — a short progress series, not a full history.
+    by_event: dict = {}
+    for ev in evals:
+        by_event.setdefault(ev.get("event_id"), []).append(ev)
+    progress_series = []
+    for event_id, evs in by_event.items():
+        agg = aggregate_player_scores(evs)
+        event = await db.events.find_one({"id": event_id}, {"_id": 0, "name": 1, "date": 1})
+        progress_series.append({
+            "event_id": event_id,
+            "event_name": event.get("name") if event else "Event",
+            "event_date": event.get("date") if event else None,
+            "overall_score": agg["overall_score"],
+        })
+    progress_series.sort(key=lambda x: x.get("event_date") or "")
+
+    agg_all = aggregate_player_scores(evals)
+
+    # Latest verified measurement per canonical metric key. Canonicalising first
+    # collapses legacy spellings (exit_velo → exit_velocity) so one metric never
+    # shows twice; shape_metric attaches the trust source the badge reads.
+    metric_rows = await db.verified_metrics.find(
+        {"athlete_id": aid, "organization_id": org_id}, {"_id": 0}
+    ).to_list(500)
+    metric_rows.sort(
+        key=lambda m: (m.get("measured_at") or m.get("created_at") or "", m.get("created_at") or ""),
+        reverse=True)
+    latest_by_key: dict = {}
+    for m in metric_rows:
+        ck = canonical_metric_key(m.get("metric_key"))
+        if ck and ck not in latest_by_key:
+            latest_by_key[ck] = m
+    measurements = [shape_metric(m) for m in latest_by_key.values()]
+
+    # A simple count only — never enumerate unapproved youth media here.
+    video_count = await db.athlete_media.count_documents(
+        {"athlete_id": aid, "organization_id": org_id, "file_type": "video"})
+
+    return {
+        "athlete": restrict_guardian(a, role),
+        "permanent_id": format_permanent_id(aid),
+        "overall_score": agg_all["overall_score"],
+        "category_scores": agg_all["category_scores"],
+        "measurements": measurements,
+        "progress_series": progress_series,
+        "evaluation_count": len(evals),
+        "last_evaluation_date": evals[-1].get("submitted_at") if evals else None,
+        "video_count": video_count,
+    }
+
+
+@router.post("/athletes/compare")
+async def compare_athletes(body: CompareBody,
+                           user=Depends(require_roles(*REVIEW_ROLES, "coach"))):
+    """Side-by-side comparison for authorized coaches / scouts (spec §18).
+    Evaluators are intentionally excluded — this is not gated to STAFF_ROLES."""
+    ids = [i for i in dict.fromkeys(body.athlete_ids) if i]  # de-dupe, keep order
+    if len(ids) > 4:
+        raise HTTPException(status_code=400, detail="Compare up to four players.")
+    org_id = user["organization_id"]
+    # Skip any id outside the caller's org rather than 404-ing the whole request —
+    # a missing org filter here would be a cross-tenant leak of minors' data.
+    players = []
+    for aid in ids:
+        a = await db.athletes.find_one({"id": aid, "organization_id": org_id}, {"_id": 0})
+        if not a:
+            continue
+        players.append(await _compare_player(a, user["role"], org_id))
+    return {"players": players}
 
 
 @router.get("/athletes/{athlete_id}/timeline")
@@ -446,6 +580,8 @@ class SeasonBody(BaseModel):
     age_group: str | None = None
     height: str | None = None
     weight: str | None = None
+    start_date: str | None = None  # YYYY-MM-DD; defaults to Jan 1 of `year`
+    end_date: str | None = None    # YYYY-MM-DD; defaults to Dec 31 of `year`
 
 
 class SeasonPatch(BaseModel):
@@ -455,6 +591,101 @@ class SeasonPatch(BaseModel):
     age_group: str | None = None
     height: str | None = None
     weight: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+
+
+def season_date_range(season: dict) -> tuple[str | None, str | None]:
+    """Return (start, end) as YYYY-MM-DD for a season. An explicit start_date /
+    end_date wins; otherwise a default range is derived from `year`
+    (Jan 1–Dec 31). A season with neither dates nor a year yields (None, None)."""
+    year = season.get("year")
+    start = season.get("start_date")
+    end = season.get("end_date")
+    if not start and year is not None:
+        start = f"{int(year):04d}-01-01"
+    if not end and year is not None:
+        end = f"{int(year):04d}-12-31"
+    return start, end
+
+
+def season_for_date(seasons: list[dict], date_str: str | None) -> dict | None:
+    """The season whose date range contains `date_str` (YYYY-MM-DD). Falls back
+    to a season whose `year` matches the date's year. None if nothing matches —
+    never fabricate a season."""
+    if not date_str:
+        return None
+    d = str(date_str)[:10]
+    for s in seasons:
+        start, end = season_date_range(s)
+        if start and end and start <= d <= end:
+            return s
+    yr = d[:4]
+    for s in seasons:
+        if str(s.get("year")) == yr:
+            return s
+    return None
+
+
+def resolve_record_season_id(record: dict, seasons: list[dict],
+                             date_fields: tuple[str, ...] = ("measured_at", "created_at")) -> str | None:
+    """Season id a record belongs to: an explicit stored season_id wins, else
+    derive from the first present date field via season_for_date. None if
+    undeterminable (never guessed)."""
+    if record.get("season_id"):
+        return record["season_id"]
+    for f in date_fields:
+        if record.get(f):
+            s = season_for_date(seasons, record[f])
+            if s:
+                return s["id"]
+    return None
+
+
+async def _athlete_seasons(athlete_id: str, org_id: str) -> list[dict]:
+    return await db.athlete_seasons.find(
+        {"athlete_id": athlete_id, "organization_id": org_id}, {"_id": 0}
+    ).sort("year", -1).to_list(200)
+
+
+async def _preserve_physicals_to_season(athlete: dict, updates: dict, user: dict):
+    """Spec §6 "never erase": before the athlete doc's height/weight/current_team
+    are overwritten, park the PRIOR values on the athlete's CURRENT-season
+    snapshot so the physicals that were true that season survive an in-place
+    edit. Idempotent + additive — fills only season fields currently absent, and
+    creates the current season only if none exists."""
+    field_map = {"height": "height", "weight": "weight", "current_team": "team"}
+    prior = {}
+    for a_field, s_field in field_map.items():
+        old = athlete.get(a_field)
+        new = updates.get(a_field)
+        if old not in (None, "") and new != old:
+            prior[s_field] = old
+    if not prior:
+        return
+    org = athlete["organization_id"]
+    seasons = await _athlete_seasons(athlete["id"], org)
+    current = season_for_date(seasons, date.today().isoformat())
+    if current:
+        fill = {k: v for k, v in prior.items() if not current.get(k)}
+        if fill:
+            fill["updated_at"] = now_iso()
+            await db.athlete_seasons.update_one(
+                {"id": current["id"], "organization_id": org}, {"$set": fill})
+    else:
+        doc = {
+            "id": new_id(), "athlete_id": athlete["id"], "organization_id": org,
+            "year": date.today().year,
+            "team": prior.get("team"),
+            "organization_name": None,
+            "age_group": athlete.get("age_group"),
+            "height": prior.get("height"),
+            "weight": prior.get("weight"),
+            "start_date": None, "end_date": None,
+            "auto_created": True,
+            "created_by": user["id"], "created_at": now_iso(), "updated_at": now_iso(),
+        }
+        await db.athlete_seasons.insert_one(doc)
 
 
 async def _get_org_athlete(athlete_id: str, org_id: str):
@@ -482,9 +713,11 @@ async def create_season(athlete_id: str, body: SeasonBody, user=Depends(require_
         "year": body.year,
         "team": body.team,
         "organization_name": body.organization_name,
-        "age_group": body.age_group,
+        "age_group": validate_age_band(body.age_group),
         "height": body.height,
         "weight": body.weight,
+        "start_date": _validate_date(body.start_date, "start_date"),
+        "end_date": _validate_date(body.end_date, "end_date"),
         "created_by": user["id"],
         "created_at": now_iso(),
         "updated_at": now_iso(),
@@ -507,6 +740,12 @@ async def patch_season(athlete_id: str, season_id: str, body: SeasonPatch,
     updates = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None or k in body.model_fields_set}
     # Allow clearing optional string fields when explicitly set to null via model
     raw = body.model_dump(exclude_unset=True)
+    if "age_group" in raw:
+        raw["age_group"] = validate_age_band(raw["age_group"])
+    if "start_date" in raw:
+        raw["start_date"] = _validate_date(raw["start_date"], "start_date")
+    if "end_date" in raw:
+        raw["end_date"] = _validate_date(raw["end_date"], "end_date")
     updates = {**raw, "updated_at": now_iso()}
     await db.athlete_seasons.update_one(
         {"id": season_id, "organization_id": user["organization_id"]}, {"$set": updates})
@@ -514,6 +753,211 @@ async def patch_season(athlete_id: str, season_id: str, body: SeasonPatch,
                     {"athlete_id": athlete_id})
     doc = await db.athlete_seasons.find_one({"id": season_id}, {"_id": 0})
     return clean(doc)
+
+
+# ---------------- Season-scoped records (spec §6 grouping) ----------------
+
+async def _evaluations_with_dates(athlete_id: str, org_id: str) -> list[dict]:
+    """Submitted/approved evaluations for an athlete, each annotated with its
+    event's date/name. The event date is the season anchor — evaluations are
+    NEVER written with a season_id (append-only submit path stays untouched);
+    season membership is derived here at read time."""
+    evals = await db.evaluations.find({
+        "athlete_id": athlete_id, "organization_id": org_id,
+        "status": {"$in": ["submitted", "approved"]},
+    }, {"_id": 0}).sort("submitted_at", 1).to_list(500)
+    # Resolve event dates once (org-scoped) rather than per-evaluation.
+    event_ids = sorted({e.get("event_id") for e in evals if e.get("event_id")})
+    events = {}
+    if event_ids:
+        rows = await db.events.find(
+            {"id": {"$in": event_ids}, "organization_id": org_id},
+            {"_id": 0, "id": 1, "name": 1, "date": 1}).to_list(500)
+        events = {e["id"]: e for e in rows}
+    for ev in evals:
+        e = events.get(ev.get("event_id")) or {}
+        ev["event_name"] = e.get("name")
+        ev["event_date"] = e.get("date")
+    return evals
+
+
+def _shape_season_evaluation(ev: dict) -> dict:
+    computed = ev.get("computed") or {}
+    return {
+        "id": ev.get("id"),
+        "event_id": ev.get("event_id"),
+        "event_name": ev.get("event_name"),
+        "event_date": ev.get("event_date"),
+        "station_id": ev.get("station_id"),
+        "status": ev.get("status"),
+        "overall_score": computed.get("overall_score"),
+        "submitted_at": ev.get("submitted_at"),
+    }
+
+
+@router.get("/athletes/{athlete_id}/seasons/{season_id}/records")
+async def season_records(athlete_id: str, season_id: str,
+                         user=Depends(require_roles(*STAFF_ROLES))):
+    """Read-only: every record that falls under one season for one athlete.
+    Evaluations are grouped by their EVENT DATE (the submit path is never
+    written to); metrics/media/goals match a stored season_id or, absent one,
+    are derived from their own date. Empty lists when a season has nothing —
+    never fabricated."""
+    org = user["organization_id"]
+    await _get_org_athlete(athlete_id, org)
+    seasons = await _athlete_seasons(athlete_id, org)
+    season = next((s for s in seasons if s["id"] == season_id), None)
+    if not season:
+        raise HTTPException(status_code=404, detail="Season not found.")
+    start, end = season_date_range(season)
+
+    def _in_range(date_str):
+        if not (start and end and date_str):
+            return False
+        return start <= str(date_str)[:10] <= end
+
+    # Evaluations: derive by event date (this season wins iff the date maps here).
+    evals = await _evaluations_with_dates(athlete_id, org)
+    season_evals = [
+        _shape_season_evaluation(ev) for ev in evals
+        if (season_for_date(seasons, ev.get("event_date")) or {}).get("id") == season_id
+    ]
+
+    metric_rows = await db.verified_metrics.find(
+        {"athlete_id": athlete_id, "organization_id": org}, {"_id": 0}).to_list(1000)
+    season_metrics = [
+        shape_metric(m) for m in metric_rows
+        if resolve_record_season_id(m, seasons, ("measured_at", "created_at")) == season_id
+    ]
+
+    media_rows = await db.athlete_media.find(
+        {"athlete_id": athlete_id, "organization_id": org}, {"_id": 0}).to_list(500)
+    season_media = [
+        m for m in media_rows
+        if resolve_record_season_id(m, seasons, ("capture_date", "created_at")) == season_id
+    ]
+
+    goal_rows = await db.athlete_goals.find(
+        {"athlete_id": athlete_id, "organization_id": org}, {"_id": 0}).to_list(300)
+    season_goals = [
+        g for g in goal_rows
+        if resolve_record_season_id(g, seasons, ("start_date", "created_at")) == season_id
+    ]
+
+    return {
+        "athlete_id": athlete_id,
+        "season": clean(season),
+        "date_range": {"start": start, "end": end},
+        "evaluations": season_evals,
+        "metrics": season_metrics,
+        "media": season_media,
+        "goals": season_goals,
+        "counts": {
+            "evaluations": len(season_evals),
+            "metrics": len(season_metrics),
+            "media": len(season_media),
+            "goals": len(season_goals),
+        },
+    }
+
+
+# ---------------- Career overview (cross-season aggregation, spec §6) ----------------
+
+@router.get("/athletes/{athlete_id}/career")
+async def athlete_career(athlete_id: str, user=Depends(require_roles(*STAFF_ROLES))):
+    """Cross-season totals for one permanent 60'6\" ID: evaluation count per
+    season, best verified measurement per metric across seasons, overall-score
+    trend by year, and teams played for. Reuses aggregate_player_scores — no
+    reimplemented scoring. Empty/null where there are no records."""
+    org = user["organization_id"]
+    athlete = await _get_org_athlete(athlete_id, org)
+    seasons = await _athlete_seasons(athlete_id, org)
+
+    evals = await _evaluations_with_dates(athlete_id, org)
+
+    # Evaluation count + score per season, and a year->overall trend.
+    per_season = []
+    for s in seasons:
+        s_evals = [e for e in evals
+                   if (season_for_date(seasons, e.get("event_date")) or {}).get("id") == s["id"]]
+        agg = aggregate_player_scores(s_evals) if s_evals else {"overall_score": None, "category_scores": {}}
+        per_season.append({
+            "season_id": s["id"],
+            "year": s.get("year"),
+            "team": s.get("team"),
+            "organization_name": s.get("organization_name"),
+            "age_group": s.get("age_group"),
+            "evaluation_count": len(s_evals),
+            "overall_score": agg["overall_score"],
+        })
+
+    # Score trend by YEAR (independent of whether a season doc exists for it).
+    evals_by_year: dict = {}
+    for e in evals:
+        d = e.get("event_date")
+        if not d:
+            continue
+        evals_by_year.setdefault(str(d)[:4], []).append(e)
+    score_trend = []
+    for yr in sorted(evals_by_year):
+        agg = aggregate_player_scores(evals_by_year[yr])
+        score_trend.append({"year": yr, "overall_score": agg["overall_score"],
+                            "evaluation_count": len(evals_by_year[yr])})
+
+    # Best VERIFIED measurement per canonical metric across every season.
+    metric_rows = await db.verified_metrics.find(
+        {"athlete_id": athlete_id, "organization_id": org}, {"_id": 0}).to_list(1000)
+    best_by_metric: dict = {}
+    for m in metric_rows:
+        shaped = shape_metric(m)
+        if not shaped.get("is_verified") or shaped.get("value") is None:
+            continue
+        key = shaped["metric_key"]
+        lower = bool(shaped.get("lower_better"))
+        cur = best_by_metric.get(key)
+        if cur is None:
+            best_by_metric[key] = shaped
+        else:
+            better = shaped["value"] < cur["value"] if lower else shaped["value"] > cur["value"]
+            if better:
+                best_by_metric[key] = shaped
+    best_measurements = [
+        {
+            "metric_key": k,
+            "label": v.get("label"),
+            "value": v.get("value"),
+            "unit": v.get("unit"),
+            "lower_better": v.get("lower_better"),
+            "measured_at": v.get("measured_at"),
+            "source": v.get("source"),
+            "source_label": v.get("source_label"),
+            "season_id": resolve_record_season_id(v, seasons, ("measured_at", "created_at")),
+        }
+        for k, v in best_by_metric.items()
+    ]
+
+    # Teams played for: seasons first (year-tagged), plus the athlete's current team.
+    teams = []
+    seen = set()
+    for s in sorted(seasons, key=lambda x: x.get("year") or 0):
+        t = s.get("team")
+        if t and t not in seen:
+            seen.add(t)
+            teams.append({"team": t, "year": s.get("year")})
+    cur_team = athlete.get("current_team")
+    if cur_team and cur_team not in seen:
+        teams.append({"team": cur_team, "year": None})
+
+    return {
+        "athlete_id": athlete_id,
+        "permanent_id": format_permanent_id(athlete_id),
+        "season_count": len(seasons),
+        "total_evaluations": sum(p["evaluation_count"] for p in per_season) or len(evals),
+        "seasons": per_season,
+        "score_trend": score_trend,
+        "best_measurements": best_measurements,
+        "teams": teams,
+    }
 
 
 # ---------------- CSV import / export ----------------
@@ -633,7 +1077,9 @@ async def import_preview(file: UploadFile = File(...), user=Depends(require_role
                 if len(parts) > 1:
                     record["throws"] = parts[1]
             elif field == "age_group_hint":
-                record["age_group_hint"] = val or None
+                # Spreadsheet divisions arrive as "12U", "14U Majors", "8U-10U" — keep
+                # only what maps onto a canonical band, otherwise fall back to the DOB.
+                record["age_group_hint"] = normalize_age_band(val) if val else None
             elif field == "date_of_birth":
                 parsed, err = parse_dob(val)
                 if err:
@@ -721,7 +1167,7 @@ async def import_confirm(body: ImportConfirmBody, user=Depends(require_roles(*AD
             "status": "active",
             "photo_url": None,
             "age": compute_age(data.get("date_of_birth")),
-            "age_group": data.get("age_group_hint") or compute_age_group(data.get("date_of_birth")),
+            "age_group": normalize_age_band(data.get("age_group_hint")) or compute_age_group(data.get("date_of_birth")),
             "created_by": user["id"],
             "created_at": now_iso(),
             "updated_at": now_iso(),

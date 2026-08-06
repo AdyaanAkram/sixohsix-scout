@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, errMsg } from "@/lib/api";
+import { formatPermanentId } from "@/lib/utils";
 import { PlayerAvatar } from "@/components/common/PlayerAvatar";
-import { Card, CardContent } from "@/components/ui/card";
+import { TimelineItem } from "@/components/common/TimelineItem";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ShieldCheck } from "lucide-react";
 
 export default function Story() {
@@ -32,6 +34,8 @@ export default function Story() {
 
   const [first, ...rest] = (data.player_name || "").split(" ");
   const last = rest.join(" ");
+  const entries = data.entries || [];
+  const longBio = (data.bio || "").length > 160;
 
   return (
     <div className="min-h-screen bg-background text-foreground" data-testid="public-story-page">
@@ -42,36 +46,38 @@ export default function Story() {
       </header>
       <main className="max-w-lg mx-auto px-4 py-8 space-y-6">
         <div className="flex items-center gap-4">
-          <PlayerAvatar firstName={first} lastName={last} size="lg" photoUrl={data.photo_url} />
-          <div>
+          <PlayerAvatar firstName={first} lastName={last} size="hero" photoUrl={data.photo_url} />
+          <div className="min-w-0">
             <h1 className="font-display text-3xl">{data.player_name}</h1>
             <p className="text-sm text-muted-foreground">
               {data.age_group || "—"} · {data.primary_position || "—"}
             </p>
+            {data.athlete_id && (
+              <p className="text-sm font-mono-num text-brand mt-1" data-testid="story-permanent-id">
+                {formatPermanentId(data.athlete_id)}
+              </p>
+            )}
           </div>
         </div>
-        {data.bio && <p className="text-sm text-muted-foreground">{data.bio}</p>}
+
+        {data.bio && (longBio ? (
+          <Collapsible>
+            <CollapsibleTrigger className="text-xs text-info hover:underline">View Details</CollapsibleTrigger>
+            <CollapsibleContent className="pt-2">
+              <p className="text-sm text-muted-foreground">{data.bio}</p>
+            </CollapsibleContent>
+          </Collapsible>
+        ) : (
+          <p className="text-sm text-muted-foreground">{data.bio}</p>
+        ))}
 
         <div>
           <p className="text-xs uppercase tracking-widest text-brand font-semibold mb-3">ID Story</p>
           <div className="space-y-2">
-            {(data.entries || []).length === 0 ? (
+            {entries.length === 0 ? (
               <p className="text-sm text-muted-foreground">No public milestones yet.</p>
             ) : (
-              data.entries.map((e, i) => (
-                <Card key={i} className="rounded-2xl border-border">
-                  <CardContent className="py-3">
-                    <div className="flex justify-between gap-2">
-                      <div>
-                        <p className="text-xs text-muted-foreground capitalize">{e.kind} · {(e.date || "").slice(0, 10)}</p>
-                        <p className="text-sm font-semibold text-foreground">{e.title}</p>
-                        {e.subtitle && <p className="text-xs text-muted-foreground mt-0.5">{e.subtitle}</p>}
-                      </div>
-                      {e.verified && <span className="text-[10px] font-semibold text-success border border-success/40 rounded-full px-2 py-0.5 h-fit">Verified</span>}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
+              entries.map((e, i) => <TimelineItem key={i} entry={e} />)
             )}
           </div>
         </div>

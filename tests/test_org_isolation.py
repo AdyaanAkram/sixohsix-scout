@@ -316,7 +316,8 @@ def test_metric_pb_creates_milestone_in_own_org(tenants):
     r = requests.post(
         f"{BASE}/metrics",
         headers=a["headers"],
-        json={"athlete_id": a["athlete_id"], "metric_key": "exit_velo", "value": 99.5, "source": "iso-test"},
+        # legacy metric_key on purpose — exercises the alias path onto exit_velocity
+        json={"athlete_id": a["athlete_id"], "metric_key": "exit_velo", "value": 99.5, "source": "coach_submitted"},
         timeout=10,
     )
     assert r.status_code == 200, r.text

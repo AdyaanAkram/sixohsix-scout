@@ -8,8 +8,8 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from auth import (ADMIN_ROLES, COACH_ROLES, get_current_user, rate_limit,
-                  require_roles)
+from auth import (ADMIN_ROLES, COACH_ROLES, STAFF_ROLES, get_current_user,
+                  rate_limit, require_roles)
 from config import settings
 from db import clean, db, log_audit, new_id, now_iso
 from mailer import send_template
@@ -378,6 +378,204 @@ async def me_id_card(user=Depends(get_current_user)):
     }
 
 
+# ---------- Shared ID Story / timeline builder ----------
+#
+# One item shape backs both surfaces (spec §7): the opt-in public Story page and
+# the staff Timeline tab. Every item carries: kind, date, title, subtitle,
+# short detail, verification_source (+ verified) for the shared VerificationBadge,
+# an optional thumbnail, and an optional deep link_url to the full record.
+# Staff callers additionally see private items (notes/goals), unapproved media
+# flagged with consent_pending, and deep links into staff-only pages. The public
+# builder never emits notes/goals and never surfaces unapproved or non-public
+# media — consent stays enforced server-side exactly as before.
+
+# The evaluation results page is staff-only, so its deep link is attached for
+# staff timelines only (a public visitor would be bounced to sign-in).
+_EVAL_RESULTS_LINK = "/evaluation/{id}/results"
+
+
+def _milestone_kind(ms: dict) -> str:
+    mk = ms.get("kind")
+    if mk == "personal_best":
+        return "personal_best"
+    if mk == "badge_unlocked":
+        return "achievement"
+    return "milestone"
+
+
+async def _story_entries(a: dict, org: str, *, staff: bool, role: str | None = None) -> list[dict]:
+    aid = a["id"]
+    entries: list[dict] = []
+
+    # "joined" — derived from the athlete record's creation date.
+    if a.get("created_at"):
+        entries.append({
+            "kind": "joined",
+            "date": a.get("created_at"),
+            "title": "Joined 60'6\" Athletics",
+            "subtitle": None,
+            "verified": True,
+        })
+
+    # Evaluations
+    evals = await db.evaluations.find({
+        "athlete_id": aid, "organization_id": org, "status": {"$in": ["submitted", "approved"]},
+    }, {"_id": 0}).sort("submitted_at", -1).to_list(50)
+    for ev in evals:
+        event = await db.events.find_one(
+            {"id": ev.get("event_id"), "organization_id": org}, {"_id": 0, "name": 1, "date": 1})
+        item = {
+            "kind": "evaluation",
+            "date": ev.get("submitted_at") or (event or {}).get("date"),
+            "title": (event or {}).get("name") or "Evaluation",
+            "subtitle": f"Overall {ev.get('computed', {}).get('overall_score', '—')}",
+            "detail": ev.get("resolved_position"),
+            "verification_source": "coach_submitted",
+            "verified": True,
+        }
+        if staff:
+            item["link_url"] = _EVAL_RESULTS_LINK.format(id=ev["id"])
+            item["status"] = ev.get("status")
+            item["ref_id"] = ev["id"]
+        entries.append(item)
+
+    # Verified metrics
+    metrics = await db.verified_metrics.find(
+        {"athlete_id": aid, "organization_id": org}, {"_id": 0}).sort("measured_at", -1).to_list(50)
+    for m in metrics:
+        source = m.get("source") or ("coach_submitted" if m.get("verified_by") else "athlete_submitted")
+        entries.append({
+            "kind": "metric",
+            "date": m.get("measured_at") or m.get("created_at"),
+            "title": m["metric_key"].replace("_", " ").title(),
+            "subtitle": f"{m['value']} {m.get('unit') or ''}".strip(),
+            "verification_source": source,
+            "verified": bool(m.get("is_verified", m.get("verified_by") is not None)),
+        })
+
+    # Milestones → personal_best / achievement (approved award) / milestone.
+    milestones = await db.milestones.find(
+        {"athlete_id": aid, "organization_id": org}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    for ms in milestones:
+        entries.append({
+            "kind": _milestone_kind(ms),
+            "date": ms.get("created_at"),
+            "title": ms.get("label") or "Milestone",
+            "subtitle": ms.get("detail"),
+            # Only PB milestones carry a measurement source; award badges do not.
+            "verification_source": ms.get("source"),
+            "verified": True,
+        })
+
+    # Seasons → "season_started" (each season's start). Prefer a stored start_date
+    # date range when present, otherwise anchor on the season year.
+    seasons = await db.athlete_seasons.find(
+        {"athlete_id": aid, "organization_id": org}, {"_id": 0}).to_list(100)
+    for s in seasons:
+        year = s.get("year")
+        start = s.get("start_date") or (f"{year}-01-01" if year else None)
+        subtitle = " · ".join(
+            x for x in [s.get("team"), s.get("organization_name"), s.get("age_group")] if x)
+        entries.append({
+            "kind": "season_started",
+            "date": start,
+            "title": f"{year} Season" if year else "Season",
+            "subtitle": subtitle or None,
+            "verified": True,
+        })
+
+    # Position changes & new teams — derived from the append-only physical_history
+    # the athlete PATCH writes (spec §7). Only real transitions are recorded there,
+    # so nothing is fabricated from a single current value.
+    for h in (a.get("physical_history") or []):
+        field, frm, to = h.get("field"), h.get("from"), h.get("to")
+        if field == "primary_position":
+            entries.append({
+                "kind": "position_change",
+                "date": h.get("at"),
+                "title": "Changed position",
+                "subtitle": f"{frm} → {to}",
+                "verified": True,
+            })
+        elif field == "current_team":
+            entries.append({
+                "kind": "team_change",
+                "date": h.get("at"),
+                "title": f"Joined {to}",
+                "subtitle": f"from {frm}" if frm else None,
+                "verified": True,
+            })
+
+    # Media. Public: only approved + profile/public visibility (consent enforced
+    # server-side — a missing consent_status is legacy with no recorded approval).
+    # Staff: everything, with unapproved rows flagged rather than hidden.
+    if staff:
+        media = await db.athlete_media.find(
+            {"athlete_id": aid, "organization_id": org}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    else:
+        media = await db.athlete_media.find({
+            "athlete_id": aid, "organization_id": org,
+            "consent_status": "approved",
+            "visibility": {"$in": ["profile", "public"]},
+        }, {"_id": 0}).sort("created_at", -1).to_list(30)
+    for m in media:
+        item = {
+            "kind": "media",
+            "date": m.get("created_at"),
+            "title": m.get("description") or ("Photo" if m.get("file_type") == "photo" else "Video"),
+            "subtitle": m.get("file_type"),
+            # Media bytes are served by an authenticated route. The public payload
+            # hands out no URL (UI renders a typed placeholder); the staff payload
+            # returns the media id so the client can build a signed thumbnail URL.
+            "thumbnail_url": None,
+            "verification_source": "event_verified" if m.get("verified_by") else "coach_submitted",
+            "verified": bool(m.get("verified_by")),
+        }
+        if staff:
+            item["media_id"] = m.get("id")
+            item["consent_status"] = m.get("consent_status")
+            item["consent_pending"] = m.get("consent_status") != "approved"
+        entries.append(item)
+
+    # Staff-only: notes and goals (never on a public story).
+    if staff:
+        from routes_development import _note_visible_to_role
+        notes = await db.athlete_notes.find(
+            {"athlete_id": aid, "organization_id": org}, {"_id": 0}).to_list(200)
+        for n in notes:
+            if not _note_visible_to_role(n, role):
+                continue
+            ntype = n.get("note_type") or ""
+            is_scout = ntype in ("scout_assessment", "scout")
+            private = ntype in ("private_staff",) or bool(n.get("confidential"))
+            entries.append({
+                "kind": "scout_note" if is_scout else "note",
+                "date": n.get("assessment_date") or n.get("created_at"),
+                "title": "Head Scout Assessment" if is_scout
+                else (n.get("assessment_type") or ntype.replace("_", " ").title() or "Note"),
+                "subtitle": n.get("related_event_name"),
+                "detail": (n.get("strengths") or n.get("summary") or "")[:160] or None,
+                "author": n.get("author_name"),
+                "private": private,
+                "ref_id": n.get("id"),
+            })
+        goals = await db.athlete_goals.find(
+            {"athlete_id": aid, "organization_id": org}, {"_id": 0}).to_list(200)
+        for g in goals:
+            entries.append({
+                "kind": "goal",
+                "date": g.get("created_at"),
+                "title": f"Goal: {g.get('title')}",
+                "subtitle": f"{g.get('status')} — {g.get('progress', 0)}%",
+                "detail": g.get("description") or None,
+                "author": g.get("assigned_coach_name"),
+                "ref_id": g.get("id"),
+            })
+
+    entries.sort(key=lambda e: e.get("date") or "", reverse=True)
+    return entries
+
+
 @router.get("/public/story/{slug}")
 async def public_story(slug: str):
     """Unauthenticated chronological ID Story for opt-in public athletes."""
@@ -386,58 +584,10 @@ async def public_story(slug: str):
     if not a:
         raise HTTPException(status_code=404, detail="Story not found or not public.")
     org = a["organization_id"]
-    aid = a["id"]
-    entries = []
-    evals = await db.evaluations.find({
-        "athlete_id": aid, "organization_id": org, "status": {"$in": ["submitted", "approved"]},
-    }, {"_id": 0}).sort("submitted_at", -1).to_list(50)
-    for ev in evals:
-        event = await db.events.find_one({"id": ev.get("event_id")}, {"_id": 0, "name": 1, "date": 1})
-        entries.append({
-            "kind": "evaluation",
-            "date": ev.get("submitted_at") or (event or {}).get("date"),
-            "title": (event or {}).get("name") or "Evaluation",
-            "subtitle": f"Overall {ev.get('computed', {}).get('overall_score', '—')}",
-            "detail": ev.get("resolved_position"),
-        })
-    metrics = await db.verified_metrics.find(
-        {"athlete_id": aid, "organization_id": org}, {"_id": 0}).sort("measured_at", -1).to_list(50)
-    for m in metrics:
-        entries.append({
-            "kind": "metric",
-            "date": m.get("measured_at") or m.get("created_at"),
-            "title": m["metric_key"].replace("_", " ").title(),
-            "subtitle": f"{m['value']} {m.get('unit') or ''}".strip(),
-            "verified": True,
-        })
-    milestones = await db.milestones.find(
-        {"athlete_id": aid, "organization_id": org}, {"_id": 0}).sort("created_at", -1).to_list(50)
-    for ms in milestones:
-        entries.append({
-            "kind": "milestone",
-            "date": ms.get("created_at"),
-            "title": ms.get("label") or "Milestone",
-            "subtitle": ms.get("detail"),
-        })
-    media = await db.athlete_media.find({
-        "athlete_id": aid, "organization_id": org,
-        "consent_status": {"$in": ["approved", None]},
-        "visibility": {"$in": ["profile", "public", "staff"]},
-    }, {"_id": 0}).sort("created_at", -1).to_list(30)
-    for m in media:
-        if m.get("consent_status") == "pending_consent":
-            continue
-        entries.append({
-            "kind": "media",
-            "date": m.get("created_at"),
-            "title": m.get("description") or ("Photo" if m.get("file_type") == "photo" else "Video"),
-            "subtitle": m.get("file_type"),
-            "thumbnail_url": None,
-        })
-    entries.sort(key=lambda e: e.get("date") or "", reverse=True)
+    entries = await _story_entries(a, org, staff=False)
     org_doc = await db.organizations.find_one({"id": org}, {"_id": 0, "name": 1})
     return {
-        "athlete_id": aid,
+        "athlete_id": a["id"],
         "player_name": f"{a.get('first_name', '')} {a.get('last_name', '')}".strip(),
         "primary_position": a.get("primary_position"),
         "age_group": a.get("age_group"),
@@ -446,6 +596,18 @@ async def public_story(slug: str):
         "organization_name": (org_doc or {}).get("name"),
         "entries": entries[:100],
     }
+
+
+@router.get("/athletes/{athlete_id}/story-timeline")
+async def athlete_story_timeline(athlete_id: str, user=Depends(require_roles(*STAFF_ROLES))):
+    """Staff Timeline tab — same unified item shape as the public ID Story, but
+    with private items (notes/goals), unapproved media flagged, and deep links."""
+    a = await db.athletes.find_one(
+        {"id": athlete_id, "organization_id": user["organization_id"]}, {"_id": 0})
+    if not a:
+        raise HTTPException(status_code=404, detail="Player not found.")
+    return await _story_entries(
+        a, user["organization_id"], staff=True, role=user.get("role"))
 
 
 @router.get("/me/summary")

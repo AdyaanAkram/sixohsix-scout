@@ -15,6 +15,7 @@ import EventsList from "@/pages/EventsList";
 import EventDetail from "@/pages/EventDetail";
 import Evaluate from "@/pages/Evaluate";
 import EvaluationForm from "@/pages/EvaluationForm";
+import EvaluationResults from "@/pages/EvaluationResults";
 import MyEvaluations from "@/pages/MyEvaluations";
 import ReviewQueue from "@/pages/ReviewQueue";
 import Reports from "@/pages/Reports";
@@ -79,6 +80,7 @@ function App() {
             <Route path="/evaluate" element={<Protected><StaffOnly><Evaluate /></StaffOnly></Protected>} />
             <Route path="/evaluate/:assignmentId" element={<Protected><StaffOnly><Evaluate /></StaffOnly></Protected>} />
             <Route path="/evaluation/:evaluationId" element={<Protected><StaffOnly><EvaluationForm /></StaffOnly></Protected>} />
+            <Route path="/evaluation/:evaluationId/results" element={<Protected><StaffOnly><EvaluationResults /></StaffOnly></Protected>} />
             <Route path="/my-evaluations" element={<Protected><StaffOnly><MyEvaluations /></StaffOnly></Protected>} />
             <Route path="/review" element={<Protected><StaffOnly><ReviewQueue /></StaffOnly></Protected>} />
             <Route path="/scout" element={<Protected><StaffOnly><Scout /></StaffOnly></Protected>} />
