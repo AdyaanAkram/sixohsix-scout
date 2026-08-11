@@ -1,66 +1,217 @@
-# 60'6" ID — User Guide
+# 60'6" ID — User Guide & Test Playbook
 
-Complete guide to logins, roles, organizations, programs, events, player onboarding, evaluations, and the athlete experience.
+**Product name:** 60'6" ID
+**Tagline:** Every Player. Every Rep. Every Season Tells the Story.
+**Motto:** Train. Elevate. Succeed.
+**Live app (fully hosted):** https://606-scout.surge.sh
+**Local app:** http://localhost:3000 · **API docs (local):** http://localhost:8000/docs
 
-**Product name:** 60'6" ID  
-**Tagline:** Every Player. Every Rep. Every Season Tells the Story.  
-**Motto:** Train. Elevate. Succeed.  
-**Live app (fully hosted):** https://606-scout.surge.sh  
-**Local app:** http://localhost:3000  
-**API docs (local):** http://localhost:8000/docs  
+> **Cold start:** first load after idle can take 30–60 seconds while the free hosted API wakes up —
+> wait once, then it is responsive. **Warm the app up before evaluators arrive on camp day.**
 
-> **Cold start:** First load after idle can take 30–60 seconds while the free hosted API wakes up — wait once, then it is responsive.
+This guide is organized so that **testing comes first**. The platform has been verified by
+automated tests and a full click-through of the live site — but the one thing no automation can
+prove is how it behaves **in your hands, on your phones, on gym wifi**. Run Part 1 before the
+event. Everything after Part 1 is reference.
 
 ---
 
-## 1. Demo logins (after `seed.py`)
+# PART 1 — TEST IT BEFORE THE 16TH
 
-All staff passwords below are **`Scout2025!`** unless noted.
+## 1.1 What is already verified vs. what only you can verify
+
+| Already verified (automated + live click-through) | Only YOU can verify |
+|---|---|
+| 30/30 cross-org isolation tests; 34/35 feature tests | The evaluation flow **on the actual phones evaluators will use** |
+| Login, autosave round-trip, submit, review, reports on the live site | Behavior on the **venue's real wifi** (captive portals, dead zones) |
+| Age/position template resolution (10U P ≠ 17U P) | Camera capture on iOS/Android hardware |
+| Role dashboards, player card, scout board, grad-year filters | Touch-target comfort with real hands moving fast |
+| Access-code expiry, note visibility, metric trust tiers | Your rubric: do the seeded templates match how you actually score? |
+
+**The paper backup rule stands:** print blank scoring sheets for camp day. The software is solid,
+but the event must not be able to fail on a dead phone battery or a venue with no signal at all.
+
+## 1.2 THE CRITICAL TEST — 20 minutes, on a real phone
+
+This is the single most important test in this document. It simulates exactly how evaluations get
+lost at a ballpark. Do it on the same model of phone/tablet evaluators will use.
+
+1. On the phone, open **https://606-scout.surge.sh**, sign in as `eval1@pbgscout.com` /
+   `Scout2025!`, and tap **Continue Evaluating**. Wait for "templates cached for offline."
+2. Open any player. Score 2–3 metrics. Watch the pill go **Synced**.
+3. **Turn on Airplane Mode.** Keep scoring 3–4 more metrics. The pill should show
+   offline/pending — **it must NOT claim Synced**.
+4. Still offline: **force-quit the browser app entirely.** Reopen it, go back to the evaluation.
+   → PASS: the app loads (offline shell) and every score you entered is still there.
+5. Take a photo with the in-form camera button while still offline.
+   → PASS: it queues rather than erroring out and disappearing.
+6. **Turn Airplane Mode off.** Wait a few seconds.
+   → PASS: pill returns to **Synced**; the queued photo uploads.
+7. On a second device (or laptop), sign in as staff and open the same player.
+   → PASS: every offline score is on the server. **No duplicates, no losses.**
+8. Repeat steps 3–6 once on the **venue's actual wifi** (not your home network) if at all possible.
+   Captive-portal wifi (login-page wifi) is precisely the historical failure mode.
+
+**If ANY step fails:** note the phone model, browser, and step number — that exact report makes it
+fixable in hours. Do not discover this on the 16th.
+
+## 1.3 Event-day dress rehearsal — 45 minutes, whole crew
+
+Run a miniature camp end-to-end, ideally with the real evaluators, a few days out:
+
+1. **Owner/admin** (`owner@pbgscout.com`): create a small test event (or reuse the seeded camp),
+   set status **Evaluation Active**, check in 4–6 athletes with bib numbers and groups.
+2. **Access codes:** Evaluators tab → enter a helper's real personal email → generate a code →
+   confirm the email arrives (production email must be configured) or relay the code shown
+   on-screen. Helper signs in via `/redeem` and sees **only** their station.
+3. **Evaluators** (2+ people at once, on phones): score players simultaneously at different
+   stations. Verify prev/next by bib, missing-score warnings, and Submit.
+4. **Site manager**: open the event's **Live Progress** tab while scoring is happening. Verify the
+   counts move — checked-in, in progress, complete, missing — and click a player to see exactly
+   which metrics are missing.
+5. **Head scout** (`headscout@pbgscout.com`): Review Queue → **Return** one evaluation with a note
+   (evaluator should see it come back), **Approve** another → open its **Results summary**.
+6. **Reports**: open Reports, confirm the insight cards populate; export the CSV; generate one
+   player PDF and confirm charts + 60'6" branding.
+7. **Wrap-up:** revoke the helper's access from the Evaluators tab and confirm they are locked out
+   immediately.
+
+## 1.4 Role-by-role test checklists
+
+Work through each role. Every line is a pass/fail check — the **Expected** column is what you
+should see. Test on the live site.
+
+### A. Evaluator — the field experience (highest priority)
+Login: `eval1@pbgscout.com` / `Scout2025!`
+
+| ✓ | Check | Expected |
+|---|---|---|
+| ☐ | Dashboard after login | "Evaluation Mode": N remaining, assignment cards, big Continue CTA — nothing else |
+| ☐ | Evaluate loop | Roster shows photo, name, **bib badge**, group, done/draft/todo chips; Todo/All/Done filters; name-or-bib search ("7" finds #7, not #17) |
+| ☐ | "Next · #N Name" quick-start button | Jumps straight into the next unscored player |
+| ☐ | Open evaluation | Sticky header: photo, big red bib, name, position, completion % — stays while scrolling |
+| ☐ | Score buttons | Big targets; tap → category gets a check; pill flips to **Synced**; completion % climbs |
+| ☐ | Category relevance | A non-catcher does not see catching categories (a "Show all" toggle exists for utility players) |
+| ☐ | Notes shortcut | The footer notes button jumps to comments in one tap |
+| ☐ | Prev/next | Footer shows "#N LastName" both directions |
+| ☐ | Submit with missing required scores | Warning "N required metrics still empty" — visible without scrolling |
+| ☐ | Camera | Photo/video capture with preview + retake; consent flow appears for minors |
+| ☐ | Lockout | No Review Queue, no Players directory, no admin nav anywhere |
+
+### B. Site manager / Owner — Organization HQ & event ops
+Login: `owner@pbgscout.com` / `Scout2025!`
+
+| ✓ | Check | Expected |
+|---|---|---|
+| ☐ | Dashboard | "Organization HQ": org name prominent over "POWERED BY 60'6" ID", KPI row, grad-class chips, development pulse |
+| ☐ | Org switcher | Midwest ↔ South switch changes players/events/programs completely |
+| ☐ | Event → Live Progress | All counts: checked-in, in progress, complete, missing, flagged, active evaluators, videos awaiting approval; "Not enough data yet" where honest |
+| ☐ | Player drill-down | Click a player in progress view → per-station complete/draft/missing + the exact missing metrics |
+| ☐ | Grad chips | Clicking "2027 · N" opens Players filtered to that class |
+| ☐ | Templates admin | Create a template, add/rename/reorder categories, set age band + positions, delete with confirm |
+| ☐ | Settings | Org logo URL can be set (owner only, https required) |
+
+### C. Head scout — quality gate
+Login: `headscout@pbgscout.com` / `Scout2025!`
+
+| ✓ | Check | Expected |
+|---|---|---|
+| ☐ | Dashboard | "Review Desk": awaiting-review hero + CTA, development pulse, Top Movers with grad classes and +change chips |
+| ☐ | Review Queue | Return with note; Approve; "Results summary" link opens the visual results page |
+| ☐ | Results page | Score, change, top-3 strengths/improvements, radar, verified measurements — prose behind "View Full Evaluation" |
+| ☐ | Scout → Prospect Board | Grad chips, position filter, score-sorted cards, verified-metric chips with trust badges, Compare |
+| ☐ | Compare | Up to 4 players, side-by-side cards + charts; a 5th is refused |
+| ☐ | Reports | Six insight cards on top; all legacy tabs/CSV/PDF beneath |
+
+### D. Coach — my athletes & development
+Login: `coach@pbgscout.com` / `Scout2025!`
+
+| ✓ | Check | Expected |
+|---|---|---|
+| ☐ | Dashboard | "My Athletes": goals first, event quick actions, athletes with active goals |
+| ☐ | Player profile | Digital player card: big photo, "2029 \| SS/3B \| R/R" line, Verified pill, 6 KPIs with Development emphasized |
+| ☐ | Development change | Profile, dashboard, and athlete view all show the SAME trend for the same player |
+| ☐ | Goals | Create with recommended action, assigned coach, start/target/follow-up dates, progress % |
+| ☐ | Verified metrics | Log one; source picker enforces trust tiers; a PB triggers a milestone |
+| ☐ | Privacy | No Review Queue; no confidential scout notes anywhere coach-visible |
+
+### E. Athlete / Parent — My Development
+Login (live site): `athlete.demo@pbgscout.com` / `Scout2025!` (Miguel Reyes, two seasons)
+Login (local seed): `demo.athlete.5a6b8b@example.com` / `Athlete2026!`
+
+| ✓ | Check | Expected |
+|---|---|---|
+| ☐ | First screen | "MY DEVELOPMENT" + development headline (e.g. "↑ +14% development this season") before any score |
+| ☐ | Priorities | "My current priorities" — max 3, baseline → target, never a 10-weakness dump |
+| ☐ | Personal bests | PB chips with verification badges (e.g. Exit Velocity · EVENT VERIFIED) |
+| ☐ | Permanent ID | `606-XXXXXXXX` visible on the page and the ID card |
+| ☐ | Seasons | Both seasons listed under the one profile; Career Overview aggregates |
+| ☐ | Lockout | No staff pages reachable; no other athlete's data |
+| ☐ | Public story | Toggle Public ID Story → `/story/{slug}` works logged-out, shows only approved content |
+| ☐ | Consent (parent) | A minor's uploaded photo sits in pending consent until approved |
+
+## 1.5 Known quirks & failure playbook
+
+| Symptom | Cause | What to do |
+|---|---|---|
+| First login takes 30–60 s | Free API host waking from sleep | Wait once; warm it up before camp; consider a paid tier for event day |
+| "Too many attempts" on login | Rate limiter: 15 logins/min per network | Wait 60 s. On camp day, have evaluators sign in as they arrive, not all at once |
+| Pill stuck on pending after reconnect | Wifi is captive-portal ("login page") wifi | Open any website, complete the portal login, return to the app — it flushes |
+| Score entered but pill never says Synced | Truly offline | That is correct behavior — it will sync on reconnect; do not clear the browser |
+| Invite email never arrives | Production email (Resend) not configured | Relay the on-screen code manually; set up Resend per `.env.example` |
+| Blank page after an update | Stale cached shell | Hard-refresh once (pull-down on mobile); the app shell is version-stamped so this self-heals |
+
+**Never do on camp day:** clear the browser's site data on an evaluator's phone (that is where
+offline drafts live), reseed any database, or change event status mid-scoring without need.
+
+---
+
+# PART 2 — LOGINS
+
+All seeded staff passwords are **`Scout2025!`**.
 
 ### PBG Midwest (main demo org)
 
-| Email | Password | Role | Best for trying… |
-|---|---|---|---|
-| `owner@pbgscout.com` | `Scout2025!` | Organization Owner | Org switcher, staff, settings, full camp ops |
-| `admin@pbgscout.com` | `Scout2025!` | Administrator | Same as owner minus some owner-only settings |
-| `headscout@pbgscout.com` | `Scout2025!` | Head Scout | Review queue, approve/return evals, awards |
-| `coach@pbgscout.com` | `Scout2025!` | Coach | Check-in, programs, metrics, development plans |
-| `eval1@pbgscout.com` | `Scout2025!` | Evaluator | Station scoring, autosave, submit |
-| `eval2@pbgscout.com` | `Scout2025!` | Evaluator | Same |
-| `eval3@pbgscout.com` | `Scout2025!` | Evaluator | Same |
-| `eval4@pbgscout.com` | `Scout2025!` | Evaluator | Same |
-| `demo.athlete.5a6b8b@example.com` | `Athlete2026!` | Athlete | My ID, photo, public story, milestones |
+| Email | Role | Best for trying… |
+|---|---|---|
+| `owner@pbgscout.com` | Organization Owner | Org HQ, switcher, staff, settings, full camp ops |
+| `admin@pbgscout.com` | Administrator | Same day-to-day ops minus owner-only settings |
+| `headscout@pbgscout.com` | Head Scout | Review Desk, approve/return, results, scout board |
+| `coach@pbgscout.com` | Coach | My Athletes, check-in, metrics, goals, development |
+| `eval1@pbgscout.com` … `eval4@pbgscout.com` | Evaluator | Evaluation Mode, station scoring, autosave |
+| `athlete.demo@pbgscout.com` | Athlete (**live site**) | My Development, seasons, PBs, public story |
+| `demo.athlete.5a6b8b@example.com` / `Athlete2026!` | Athlete (**local seed**) | Same, against local data |
 
 ### PBG South (second org — multi-org demo)
 
-| Email | Password | Role | Notes |
-|---|---|---|---|
-| `owner@pbgscout.com` | `Scout2025!` | Owner | Same user; **switch org** in the sidebar |
-| `coach.south@pbgscout.com` | `Scout2025!` | Coach | Only belongs to PBG South |
+| Email | Role | Notes |
+|---|---|---|
+| `owner@pbgscout.com` | Owner | Same user; **switch org** in the sidebar |
+| `coach.south@pbgscout.com` | Coach | Belongs only to PBG South |
 
-**How to switch orgs (owner):** Sign in → sidebar **Organization** dropdown → choose **PBG Midwest** or **PBG South**. Lists of players, events, and programs change with the org.
+**Switch orgs (owner):** sidebar **Organization** block → choose the org. Players, events, and
+programs all change with it.
+
+> Demo passwords are for seeded demo data only — rotate before any real athlete data goes in.
 
 ---
 
-## 2. Mental model (how the product is structured)
+# PART 3 — WHAT THE APP IS
+
+## 3.1 Mental model
 
 ```
 Organization (tenant)
 ├── Staff (owner, admin, head scout, coach, evaluator)
-├── Athletes / Players
-├── Programs          ← long-term (seasons, training blocks)
-│   ├── Sessions
-│   ├── Enrollments
-│   └── Attendance
-└── Events            ← short-term (camps, clinics, evaluation days)
-    ├── Roster + Check-In
-    ├── Groups
-    ├── Stations + Templates
-    ├── Evaluator assignments
+├── Athletes / Players  ← one permanent 60'6" ID each, seasons stacked underneath
+├── Programs            ← long-term (seasons, training blocks)
+│   ├── Sessions / Enrollments / Attendance
+└── Events              ← short-term (camps, clinics, evaluation days)
+    ├── Roster + Check-In (bibs, groups)
+    ├── Stations + age/position Templates
+    ├── Evaluator assignments (expiring access)
     └── Evaluations → Review → Reports
 ```
-
-**Rule of thumb**
 
 | Thing | Time horizon | Use when… |
 |---|---|---|
@@ -68,63 +219,43 @@ Organization (tenant)
 | **Program** | Weeks–months | Year-round development, recurring training |
 | **Event** | Hours–days | Camp/clinic/eval day with stations and scores |
 
-Every query is filtered by `organization_id`. Org A never sees Org B’s athletes, events, or staff.
+Every query is filtered by organization. Org A never sees Org B's athletes, events, or staff.
+
+## 3.2 The feature map (what the revisions delivered)
+
+- **Permanent 60'6" ID + seasons.** One profile per athlete forever (`606-XXXXXXXX`); seasons stack
+  under it; a Career Overview aggregates across years; history is never overwritten.
+- **Five-second surfaces.** Player card hero (photo, `2029 | SS/3B | R/R`, six KPIs), role-first
+  dashboards, insight-card reports — detail always one click deeper, never deleted.
+- **Development is the story.** Development change leads the athlete view, the profile KPIs, and
+  the dashboards; ranking is available but never first.
+- **Age- & position-aware evaluations.** Eight bands (7U-8U → Professional); a 10U and a 17U
+  pitcher get different forms; only relevant categories show; admins compose templates freely.
+- **Verified metrics with trust tiers.** Athlete/Parent/Coach Submitted · Event/Device/60'6"
+  Verified — visually distinct, enforced server-side, compared against previous, PB, and age/
+  position benchmarks (never fabricated).
+- **Field-grade evaluation mode.** Sticky bib header, offline-durable autosave (IndexedDB + app
+  shell), offline media queue, bib-labeled prev/next, missing-score warnings.
+- **Event operations.** Live manager dashboard with per-player incomplete drill-down; temporary
+  coach access via emailed codes that expire with the event and revoke instantly.
+- **Scout Mode.** Prospect board by grad class/position with verified metrics and comparison
+  (up to 4, coaches/scouts only).
+- **Reports.** Player PDF with charts, progress report, category ranking, position comparison,
+  evaluator disagreement with severity — plus CSV, all 60'6"-branded.
+- **Consent & privacy.** Under-13 media requires guardian approval before any display; "private"
+  is enforced server-side; confidential notes filtered by role on every path.
+
+Deliberately deferred (do not expect these yet): AI plans/rankings, payments, drill-assignment
+loop, badges/trophy room, public rankings for young children, admin scheduling.
 
 ---
 
-## 2a. What the revision added (feature map)
-
-The product was revised into **60'6" ID** — *Every Player. Every Rep. Every Season Tells the
-Story.* These are the capabilities added or completed in the revision; the rest of this guide covers
-each in its own section.
-
-- **Permanent 60'6" ID + seasons.** Every athlete has one permanent ID (`606-XXXXXXXX`). Seasons
-  stack under that single profile with date ranges; evaluations, metrics, media and goals group by
-  season, and a **Career Overview** aggregates across years. History is never overwritten — an
-  in-place edit snapshots prior physicals and logs position/team changes.
-- **Player profile that passes the five-second test.** Large photo, hero header, six quick cards,
-  and a Level-1 visual summary with full detail behind *View Details* / *View Full Report*.
-- **Evaluation results page.** Overall score, score change, top-3 strengths and needs, skill radar,
-  progress line, verified measurements, coach recommendation and next date — the written evaluation
-  sits behind *View Full Evaluation*. Open it from Review or My Evaluations.
-- **Charts on real data.** Skill radar, overall-progress line, previous-vs-current bar, verified-
-  metric comparison (vs previous, personal best, age-group and position benchmarks), profile-
-  completion and event-completion. Benchmarks render only when actually defined — never fabricated.
-- **Verified metrics + trust badges.** Six sources — Athlete / Parent / Coach Submitted, Event /
-  Device / 60'6" Verified — visually distinct, enforced server-side (athletes/parents cannot claim a
-  verified tier).
-- **Age- and position-aware evaluation templates.** Eight bands (7U-8U → Professional). A 10U and a
-  17U pitcher automatically get different, age-appropriate forms. Category display is filtered to the
-  player's positions (an infielder isn't shown catching metrics), with a *Show all* override.
-- **Template admin.** Create, edit, delete, and reorder categories/metrics; set age band and
-  applicable positions.
-- **Event manager dashboard.** Live KPIs (checked-in, in-progress, complete, missing, flagged,
-  active evaluators, videos awaiting approval, average eval time, device-sync problems), a
-  completion funnel, and a per-player drill-down showing exactly which metrics are missing.
-- **Mobile evaluation, offline-hardened.** Autosave to IndexedDB + localStorage, a service worker so
-  a cold reload works offline, an offline media queue, and camera capture with preview/retake.
-- **Player comparison.** Compare up to four players with side-by-side cards and charts (coaches/
-  scouts only).
-- **Development goals & notes.** Full goal fields (recommended action, assigned coach, start/target/
-  follow-up dates, progress). Six note types with visibility; notes carry related event + follow-up.
-- **Expiring coach access with emailed access codes.** A site manager grants a coach temporary
-  station access; a secure code is emailed; access ends with the event and can be revoked instantly.
-- **Media privacy + consent.** Under-13 media stays pending consent; "mark private" is enforced
-  (staff-only), independent of consent.
-- **Reports.** Player PDF with charts, a progress report, category ranking, position comparison, and
-  a severity-scored evaluator-disagreement view. CSV unchanged.
-- **60'6" branding only.** No Velo City / PBG Scout product chrome anywhere in the UI or the PDF.
-
----
-
-## 3. Roles & powers
-
-### Summary matrix
+# PART 4 — ROLES & POWERS
 
 | Capability | Owner | Admin | Head Scout | Coach | Evaluator | Athlete | Parent |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
 | Switch / view own orgs | ✓ | ✓* | ✓* | ✓* | ✓* | ✓* | ✓* |
-| Edit org settings | ✓ | | | | | | |
+| Edit org settings (incl. logo) | ✓ | | | | | | |
 | Invite / manage staff | ✓ | ✓ | view | | | | |
 | Templates & drills admin | ✓ | ✓ | | | | | |
 | Audit log | ✓ | ✓ | | | | | |
@@ -134,333 +265,125 @@ each in its own section.
 | Assign evaluators / invite codes | ✓ | ✓ | | | | | |
 | Score at assigned station | ✓ | ✓ | ✓ | ✓ | ✓ | | |
 | Review queue (approve/return) | ✓ | ✓ | ✓ | | | | |
-| Verified metrics / generate plan | ✓ | ✓ | ✓ | ✓ | | | |
+| Player comparison / Scout board | ✓ | ✓ | ✓ | ✓ | | | |
+| Verified metrics / development | ✓ | ✓ | ✓ | ✓ | | | |
 | Approve awards | ✓ | ✓ | ✓ | | | | |
-| Media consent (staff) | ✓ | ✓ | ✓ | ✓ | | | |
-| My ID / public story | | | | | | ✓ | ✓ |
-| Approve child’s media | | | | | | | ✓ |
+| Media consent (staff side) | ✓ | ✓ | ✓ | ✓ | | | |
+| My ID / My Development / story | | | | | | ✓ | ✓ |
+| Approve child's media | | | | | | | ✓ |
 
-\*Users only see orgs they have an active membership in. Most demo staff are Midwest-only; the owner is in Midwest + South.
+\* Users only see orgs where they hold an active membership.
 
-### Organization Owner
-- Full control of the **active** organization.
-- Staff invites, templates, drills, audit log, settings.
-- Sees Programs + Events + Review + everything coaches see.
-- Can belong to multiple orgs and **switch** between them.
-- Typical camp lead / academy director.
+**What each role lands on:** Owner/Admin → Organization HQ · Head Scout → Review Desk · Coach →
+My Athletes · Evaluator → Evaluation Mode · Athlete/Parent → My Development. Same data platform,
+different first screen.
 
-### Administrator
-- Same day-to-day powers as owner for ops (staff, events, players, review).
-- Cannot change owner-only org fields the same way (owner is the primary settings owner).
-- Good for ops managers who run camp day.
-
-### Head Scout
-- Quality control of evaluations.
-- **Review Queue:** approve or return submitted evals with notes.
-- Can unlock/edit in authorized review flows (audited).
-- Sees players, programs, events, reports, development.
-- Approves awards and can work verified-metric workflows with coaches.
-
-### Coach
-- Roster, check-in, programs/sessions/attendance.
-- Player profiles: assessments, goals, verified metrics, development plans, media upload.
-- Cannot access Review Queue or staff admin.
-- Strong day-of operator without scoring every station unless also assigned.
-
-### Evaluator
-- Narrow lane: **Dashboard → Evaluate** for their station/group assignments.
-- Autosave scores, submit & lock, see returned evals to fix.
-- Cannot see guardian PII the way admins can; cannot run Review Queue.
-- Optional join via **event redeem code** (`/redeem`).
-
-### Athlete
-- Lands on **My ID** only (staff areas blocked).
-- Edit bio; upload profile photo (under-18 needs consent).
-- See evaluations, milestones, verified metrics, awards (allowed statuses).
-- Opt-in **Public ID Story** + QR.
-- In-app notifications (bell).
-
-### Parent / Guardian
-- Same portal shell as athlete (**My ID**) for their linked child.
-- Approve/reject pending media consent for under-age athletes.
-- Receives consent / milestone style notifications when linked.
+**Evaluators are deliberately boxed in:** assignment-scoped rosters, no guardian/medical/financial
+fields, no review queue, no comparison, and access that expires when the event ends.
 
 ---
 
-## 4. Organizations
+# PART 5 — FEATURE REFERENCE
 
-### What an organization is
-A tenant: name, tagline, contact, feature flags, and all child data (athletes, staff memberships, programs, events, media, metrics).
+## 5.1 Navigation
 
-### How login picks an org
-1. JWT includes the active `organization_id`.
-2. Preference stored as `active_organization_id` on the user.
-3. **Switch organization** issues a new token and reloads the app into that org’s data.
+Primary: **Dashboard · Players · Evaluations · Events · Progress · Scout · Reports** (evaluators
+see Evaluate / My Evaluations instead). Administration group: Programs, Staff, Templates, Drills,
+Audit Log, Settings.
 
-### Walkthrough — owner multi-org
-1. Sign in as `owner@pbgscout.com`.
-2. Sidebar shows **Organization: PBG Midwest**.
-3. Open **Players** — ~30 Midwest athletes.
-4. Switch to **PBG South**.
-5. **Players** now shows ~6 South athletes; **Events** shows the South clinic; **Programs** shows the South long-term block.
-6. Switch back to Midwest for full camp demo.
+| Nav | Who | Purpose |
+|---|---|---|
+| Dashboard | Staff | Role-specific home (HQ / Review Desk / My Athletes / Evaluation Mode) |
+| Players | Owner–Coach (+HS) | Directory, grad-class chips, profiles |
+| Evaluations (Review) | Owner, Admin, HS | Approve / return; open results summaries |
+| Events | Staff (evaluators: assigned) | Camps; live manager dashboard; access codes |
+| Progress | Owner–Coach | Goals / assessments hub |
+| Scout | Review roles + coach | Prospect Board & comparison |
+| Reports | Staff (varies) | Insight cards → leaderboards, PDFs, CSV |
+| My ID | Athlete, Parent | My Development portal |
 
-### Creating orgs in real use
-- Demo data: `python seed.py` (wipes local DB — never on production).
-- Production: `python bootstrap_admin.py --org "…" --email …` creates the first org + owner (see `DEPLOY.md`).
+## 5.2 Events (camp day)
 
----
+Lifecycle: Draft → Registration Open → Registration Closed → Check-In Open → **Evaluation
+Active** → Evaluation Complete → Reports Under Review → Closed. Camp day = **Evaluation Active**.
 
-## 5. Programs (long-term)
+Tabs: Overview · Roster · Check-In (bib #, group) · Groups · Stations (+templates) · Evaluators
+(assignments + **invite codes**) · Live Progress (manager dashboard + player drill-down) ·
+Results.
 
-**Nav:** Programs  
+**Temporary access flow:** enter the coach's personal email on the Evaluators tab → select
+station/group → a secure 6-character code is emailed (and shown on screen as a fallback) → they
+sign in via `/redeem` → they see only their assignment → access expires with the event; revoke is
+immediate.
 
-Programs are the year-round chassis: training blocks, multi-week camps as ongoing products, coaching clinics as series.
+## 5.3 Evaluations
 
-### Concepts
-- **Program** — named block with type, dates, capacity, status.
-- **Session** — a date on the calendar under a program (optional link to an event).
-- **Enrollment** — athlete joined to the program.
-- **Attendance** — present/absent (etc.) per session.
+- **Template** (age band + positions) → **Station** → **Assignment** → **Evaluation**
+  (draft → submitted → approved/returned). Approved evaluations are immutable.
+- Templates resolve automatically: age+position → position → age → station default. Admins can
+  create, edit, reorder, and delete templates and categories (Templates admin).
+- The results page leads with score, change, top-3 strengths/improvements, radar, and verified
+  measurements; the full write-up sits behind "View Full Evaluation."
+- Offline: drafts persist through airplane mode and force-quits (see the Critical Test). Final
+  submit needs connectivity.
 
-### Walkthrough — coach
-1. Sign in as `coach@pbgscout.com`.
-2. **Programs** → open or create a program.
-3. Add **sessions** (dates / focus).
-4. **Enroll** athletes from the org directory.
-5. Mark **attendance** on session days.
+## 5.4 Players & seasons
 
-Programs do **not** replace event check-in or the evaluation Review Queue.
+- Staff create players directly or import CSV; guardians/athletes join later via invitation email
+  (under-13 invitations go to the guardian, always).
+- One athlete = one permanent 60'6" ID. Seasons (team, org, age group, physicals) stack underneath;
+  editing height/weight/team snapshots the old value — history survives.
+- The **Player Story** timeline shows joins, evaluations, PBs, media, seasons, position changes,
+  and team changes, each with verification status.
+- Public ID Story is opt-in, logged-out shareable, and shows approved content only.
 
----
+## 5.5 Verified metrics, goals, awards
 
-## 6. Events (short-term camps / clinics / eval days)
+- Metrics carry a source tier; only staff can record verified tiers; a new PB fires a milestone and
+  a notification. Comparison chart shows previous / PB / age benchmark / position benchmark —
+  only when real benchmarks exist.
+- Goals: title, what needs improvement, recommended action, assigned coach, start/target/follow-up
+  dates, progress %, status. Athletes see their top 3 priorities on My Development.
+- Awards: staff submit → owner/head scout approve → milestone + notification.
+- Drills: org catalog under Administration (assignment loop is roadmap, not built).
 
-**Nav:** Events  
+## 5.6 Media & consent
 
-An event is a single evaluation day (or short camp) with roster, stations, and scoring.
+Upload from the evaluation form (camera with preview/retake) or the profile Media tab. Every file
+stores athlete, event, evaluation, uploader, date, and consent status. Under-age media waits in
+**pending consent** (parent approves on My ID; staff on the Media tab). "Mark private" is
+enforced server-side: staff-only, regardless of consent. Nothing unapproved ever reaches the
+public story.
 
-### Typical event lifecycle (statuses)
-Draft → Registration Open → Registration Closed → Check-In Open → **Evaluation Active** → Evaluation Complete → Reports Under Review → Closed  
+## 5.7 Notifications
 
-Camp day should be **Evaluation Active**.
-
-### Event tabs (staff)
-| Tab | Purpose |
-|---|---|
-| Overview | Status, counts, basics |
-| Roster | Add players from directory; optional groups |
-| Check-In | Mark checked in; bib #; group assignment |
-| Groups | Optional lanes (e.g. 12U A) |
-| Stations | Scoring lanes + evaluation templates |
-| Evaluators | Assign staff to station/group; **invite codes** |
-| Live Progress | Completion by station / evaluator |
-| Results | Leaderboard / CSV export |
-
-### Walkthrough — morning setup (owner/admin/coach)
-1. Open the Midwest evaluation event.
-2. Set status to **Evaluation Active** (if not already).
-3. **Check-In:** search athlete → check in → bib / group.
-4. Confirm **Stations** and **Evaluators** assignments.
-5. Optional: **Evaluators** tab → **Generate code** → share `/redeem` with a guest evaluator.
-
-### Walkthrough — redeem invite code
-1. Owner generates a 6-character code on the event.
-2. Guest opens `/redeem` (no login yet).
-3. Enters code, email, name, password → becomes coach/evaluator in that org and can be assigned to a station.
+In-app bell for PBs, consent requests/decisions, awards, event invite codes. Email (Resend) sends
+invitations, access codes, and password resets once configured — see `.env.example`.
 
 ---
 
-## 7. Player onboarding
+# PART 6 — OPERATORS
 
-### Path A — Staff creates the player (directory)
-1. **Players →** add player (or **Import** CSV).
-2. Fill name, DOB/age group, position, guardian email if known.
-3. Player exists in the org directory even before they have a login.
+## 6.1 Security & tenancy
 
-### Path B — Invite to athlete / parent portal
-1. Open **Players → [athlete]**.
-2. Click **Invite to platform**.
-3. System emails an accept link (`/accept-invitation`).
-   - Under ~13: invite tends toward **guardian (parent)** role.
-   - 13+: athlete email when present.
-4. Recipient sets a password → lands on **My ID**.
+- JWT carries the active org; cross-org reads 403/404 — covered by `tests/test_org_isolation.py`
+  (30 tests) and `tests/test_revision_features.py` (34 tests).
+- Evaluator redaction hides guardian, medical, insurance, financial, and SSN fields.
+- Assignment expiry and revoke are enforced on every request; membership revoke bites immediately
+  despite the 7-day JWT.
+- Metric trust tiers and confidential-note visibility are server-side on every path (lists,
+  summaries, PDFs).
+- Seed script **wipes** the target DB — never point it at production casually.
 
-### Path C — Athlete completes My ID
-1. Sign in as athlete.
-2. **My ID → Edit:** bio + photo.
-3. Under-18 photos go to **pending consent** until coach/parent approves.
-4. After approval, photo appears on the ID card (avatar).
-
-### Path D — Public ID Story (opt-in)
-1. Athlete toggles **Public ID Story** on My ID.
-2. System ensures a `public_slug`.
-3. QR / link opens `/story/{slug}` **without login**.
-4. Story shows approved evals, verified metrics, milestones, approved media only.
-
----
-
-## 8. Evaluations (camp scoring loop)
-
-### Pieces
-- **Template** — metrics/categories for a station (Templates admin).
-- **Station** — physical/logical lane on an event, linked to a template.
-- **Assignment** — which evaluator covers which station (+ optional groups).
-- **Evaluation** — one athlete × station score sheet (draft → submitted → approved/returned).
-
-### Walkthrough — evaluator
-1. Sign in as `eval1@pbgscout.com`.
-2. **Dashboard → Start / Continue Evaluating** (or **Evaluate**).
-3. Wait for templates to cache (offline-friendly).
-4. Pick a checked-in athlete in your lane.
-5. Score metrics — watch autosave (**Saved**).
-6. **Submit & Lock** when finished.
-7. If Head Scout **returns** it, it appears as **Returned** — fix and resubmit.
-
-### Walkthrough — head scout review
-1. Sign in as `headscout@pbgscout.com`.
-2. **Evaluations / Review Queue**.
-3. Open a submitted eval → **Approve** or **Return** with a note.
-4. Approved scores feed player summaries, reports, and development plans.
-
-### Offline note
-Opened drafts can keep working on device; starting a brand-new player or final submit needs connectivity.
-
----
-
-## 9. Verified metrics, milestones, plans, awards
-
-### Verified metrics (credibility loop)
-1. Coach/owner opens **Players → [athlete] → Verified**.
-2. Log e.g. Exit Velo / 60-yard / Pop Time.
-3. If it beats prior best → **personal best milestone** + in-app notification to athlete/guardian.
-
-### Development plan (rule-based, no live LLM)
-1. Same player → **Development → Generate plan**.
-2. Engine uses evaluation category strengths/weaknesses + drill library + position.
-3. Stores weekly/monthly goals and recommended drills.
-
-### Drills library
-- Owner/admin: **Drills** nav — org catalog, seeded with a position-keyed drill taxonomy.
-
-### Awards
-1. Staff submits on **Players → Awards**.
-2. Owner / head scout **Approve** or **Reject**.
-3. Approval can create a milestone + notify the athlete.
-
----
-
-## 10. Media & consent
-
-1. Staff upload on player **Media** tab (must confirm consent checkbox).
-2. Athlete self-upload via My ID Edit.
-3. Under-18 (athlete portal) / under-13 (staff upload rules) → `pending_consent` (not live as profile photo until approved).
-4. **Approve** as coach on Media tab, or as parent on My ID banner.
-5. Profile photo only applies when marked/recognized as profile photo and approved.
-
----
-
-## 11. Notifications
-
-- In-app bell (sidebar / mobile header).
-- Fired for: personal bests, media consent needed / decided, awards pending/approved, event invite codes (when emailed user exists), etc.
-- Email via Resend is for invites/resets in production config — not required for the in-app bell.
-
----
-
-## 12. Role-by-role walkthroughs (quick scripts)
-
-### A. Organization owner — “run the org”
-1. Login `owner@pbgscout.com` / `Scout2025!`.
-2. Confirm org name in sidebar; try switching Midwest ↔ South.
-3. **Staff** — see roles; invite flow exists for new emails.
-4. **Events** — open Midwest camp → Check-In / Evaluators / Progress.
-5. **Programs** — long-term list for active org.
-6. **Templates / Drills / Audit / Settings** — admin surfaces.
-
-### B. Coach — “camp morning + development”
-1. Login `coach@pbgscout.com`.
-2. Event → Check-In a player.
-3. Players → open athlete → Verified → log a metric.
-4. Development → Generate plan.
-5. Programs → attendance if running year-round work the same week.
-
-### C. Evaluator — “score the station”
-1. Login `eval1@pbgscout.com`.
-2. Evaluate → score → submit.
-3. Do not expect Review Queue or Staff admin.
-
-### D. Head scout — “quality gate”
-1. Login `headscout@pbgscout.com`.
-2. Review Queue → return one, approve one.
-3. Players → Awards → approve a pending award if present.
-
-### E. Athlete — “My ID story”
-1. Login `demo.athlete.5a6b8b@example.com` / `Athlete2026!`.
-2. My ID → Edit photo/bio.
-3. If pending consent, have coach approve on Media tab.
-4. Toggle Public ID Story → open `/story/…`.
-5. Check bell for milestones after coach logs a PB.
-
----
-
-## 13. What each nav item is for
-
-Primary nav follows the §20 list: **Dashboard · Players · Evaluations · Events · Progress · Scout ·
-Reports**. Admin-only items (Programs, Staff, Templates, Drills, Audit Log, Settings) live under the
-**Administration** group, not the primary bar.
-
-| Nav | Group | Who sees it | Purpose |
-|---|---|---|---|
-| Dashboard | Primary | Staff | Day hub, start evaluating, counts |
-| Players | Primary | Owner–Coach (+ head scout) | Directory & profiles |
-| Evaluations (Review) | Primary | Owner, Admin, Head Scout | Approve / return; open a **results summary** |
-| Events | Primary | Staff (evaluators: assigned) | Camps / eval days; **live manager dashboard** |
-| Progress (Development) | Primary | Owner–Coach | Goals / assessments hub |
-| Scout | Primary | Review roles + coach | Player search & **comparison** (up to 4) |
-| Reports | Primary | Staff (varies) | Leaderboards, PDFs w/ charts, progress report, CSV |
-| Evaluate | Primary (evaluator) | Evaluator (+ staff who score) | Station scoring (offline-capable) |
-| My Evaluations | Primary (evaluator) | Evaluator | Own sheets |
-| Programs | Administration | Owner–Coach | Long-term training (deferred scope) |
-| Staff | Administration | Owner, Admin | Memberships & invites (email) |
-| Templates | Administration | Owner, Admin | Age/position metric sheets — create/edit/reorder |
-| Drills | Administration | Owner, Admin | Drill catalog |
-| Audit Log | Administration | Owner, Admin | Who did what |
-| Settings | Administration | Most roles | Org/account context |
-| My ID | Primary | Athlete, Parent | Athlete-facing portal (permanent 60'6" ID) |
-
----
-
-## 14. Security & tenancy notes (for operators)
-
-- JWT identifies the user; **active org** is in the token (`org` claim) after login/switch.
-- Cross-org reads return 403/404 — covered by `tests/test_org_isolation.py` and
-  `tests/test_revision_features.py`.
-- Evaluators are scoped to assignments; guardian **and** medical/insurance/financial/SSN fields are
-  hidden from evaluator views (unified redaction).
-- **Temporary event access expires.** A revoked or expired evaluator assignment denies access on
-  every request, and a permanent member who redeems an event invite gets access that ends with the
-  event. Membership-level revoke also takes effect immediately despite the 7-day JWT.
-- **Metric trust is enforced server-side.** Athletes/parents can only self-report unverified
-  sources; coach/event/device/60'6"-verified tiers require staff roles. Nothing trusts a
-  client-supplied source.
-- Confidential scout notes are filtered by role on every path (summary, PDF, notes list).
-- Seed script **wipes** the local DB — never run against production.
-- Demo passwords in this guide are for the seeded demo only — rotate before any real athlete data.
-- Production checklist: `DEPLOY.md` (Atlas, R2/S3, Resend, strong `JWT_SECRET`).
-
----
-
-## 15. Local run (reminder)
+## 6.2 Local run
 
 ```bash
 # Mongo
 docker start mongo-606 2>/dev/null || docker run -d --name mongo-606 -p 27017:27017 mongo:7
 
 # API
-cd backend
-source .venv/bin/activate
-python seed.py          # optional reset of demo data
+cd backend && source .venv/bin/activate
+python seed.py          # optional demo-data reset (WIPES local DB)
 uvicorn server:app --reload --host 127.0.0.1 --port 8000
 
 # Web
@@ -469,26 +392,24 @@ echo 'REACT_APP_BACKEND_URL=http://127.0.0.1:8000' > .env
 npm start
 ```
 
-Camp smoke: `python camp_readiness_check.py`  
-Isolation: `pytest ../tests/test_org_isolation.py -q`
+Tests (need the API running): `pytest tests/test_org_isolation.py -q` and
+`pytest tests/test_revision_features.py -q`. Run them separately — the login rate limiter
+(15/min) makes back-to-back runs skip; wait ~60 s between suites.
+
+## 6.3 Hosted stack
+
+- **Frontend:** Surge → https://606-scout.surge.sh (`DEPLOY_HOSTED.md`)
+- **API:** Render (free tier sleeps — hence cold starts) · **DB:** MongoDB Atlas
+- **Email:** Resend — free tier, setup steps in `.env.example` (account + domain verification
+  required before invites/codes/resets actually send)
+- **Domain:** target `id.606athletics.com` — cutover steps in `DOMAIN.md`
+
+## 6.4 Out of scope for the August camp cut
+
+Real Google OAuth (password + invites instead) · live LLM development plans (rule-based generator
+ships) · mobile push · advanced ID-card compositor.
 
 ---
 
-## 16. Live demo (hosted)
-
-- App: https://606-scout.surge.sh (Surge frontend + hosted API — laptop can be off)
-- Cold starts: free API hosts may take 30–60s on first request after idle
-- Deploy detail: `DEPLOY_HOSTED.md` · production domain path: `DOMAIN.md` (`id.606athletics.com` / `app.606athletics.com`)
-
----
-
-## 17. Out of scope for the August camp cut
-
-- Real Google OAuth (password + invites instead)
-- Live LLM development plans (rule-based generator ships instead)
-- Mobile push / APNs
-- Fancy Cloudinary ID-card compositor (DOM/QR is enough)
-
----
-
-*Document matches the 60'6" ID codebase. For deploy infrastructure, see `DEPLOY_HOSTED.md` and `DOMAIN.md`. Camp-day checklist: `README.md` → Camp day runbook.*
+*Document matches the deployed 60'6" ID codebase. Deploy detail: `DEPLOY_HOSTED.md` · domain:
+`DOMAIN.md` · revision history and per-phase status: `REVISION_PLAN.md`.*
