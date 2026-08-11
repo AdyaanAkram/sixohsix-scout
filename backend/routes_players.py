@@ -411,6 +411,30 @@ async def athlete_summary(athlete_id: str, season_id: str | None = None,
     # Sort: measurable first, then by absolute change desc
     metric_history.sort(key=lambda m: (0 if m["metric_type"] in ("velocity", "time", "numeric") else 1, -(abs(m["change"]) if m["change"] is not None else -1)))
 
+    # Progress needs >=2 checkpoints. Grouping by event alone hides development
+    # when all evaluations share one event (a single camp), while the dashboard's
+    # insights group by day — so the two surfaces disagreed. Fall back to
+    # day-grouped checkpoints (submitted_at date) when events give <2 points.
+    if len(event_scores) < 2:
+        by_day = {}
+        for ev in evals:
+            day = (ev.get("submitted_at") or ev.get("created_at") or "")[:10]
+            if day:
+                by_day.setdefault(day, []).append(ev)
+        if len(by_day) >= 2:
+            day_scores = []
+            for day, evs in sorted(by_day.items()):
+                agg = aggregate_player_scores(evs)
+                if agg["overall_score"] is not None:
+                    day_scores.append({
+                        "event_id": None,
+                        "event_name": day,
+                        "event_date": day,
+                        "overall_score": agg["overall_score"],
+                    })
+            if len(day_scores) >= 2:
+                event_scores = day_scores
+
     latest = event_scores[-1] if event_scores else None
     previous = event_scores[-2] if len(event_scores) > 1 else None
     goals = await db.athlete_goals.find({"athlete_id": athlete_id, "status": {"$nin": ["Archived"]}}, {"_id": 0}).sort("created_at", -1).to_list(20)
