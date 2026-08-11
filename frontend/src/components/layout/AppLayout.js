@@ -129,6 +129,31 @@ const STAFF_ONLY_PREFIXES = [
   "/staff", "/templates", "/drills", "/audit-log", "/development", "/my-evaluations", "/programs",
 ];
 
+/** Org identity mark: logo when the payload carries one, styled initial block otherwise. */
+const OrgMark = ({ name, logoUrl, className }) => {
+  const [imgFailed, setImgFailed] = useState(false);
+  useEffect(() => { setImgFailed(false); }, [logoUrl]);
+  if (logoUrl && !imgFailed) {
+    return (
+      <img
+        src={logoUrl}
+        alt=""
+        onError={() => setImgFailed(true)}
+        className={cn("h-8 w-8 rounded-lg object-cover ring-1 ring-border shrink-0", className)}
+      />
+    );
+  }
+  return (
+    <div className={cn("h-8 w-8 rounded-lg bg-brand-tertiary ring-1 ring-brand/40 flex items-center justify-center shrink-0", className)}>
+      {name ? (
+        <span className="font-display text-xs font-extrabold text-brand leading-none">{name.charAt(0).toUpperCase()}</span>
+      ) : (
+        <Building2 className="h-4 w-4 text-brand" />
+      )}
+    </div>
+  );
+};
+
 const OrgSwitcher = ({ compact }) => {
   const { user, switchOrganization } = useAuth();
   const [orgs, setOrgs] = useState(user?.memberships || []);
@@ -143,15 +168,23 @@ const OrgSwitcher = ({ compact }) => {
   const multi = (orgs || []).length > 1;
   if (!user) return null;
 
+  // logo_url may arrive on the user payload or the current membership — render defensively.
+  const current = (orgs || []).find((o) => o.organization_id === user.organization_id);
+  const logoUrl = user.organization_logo_url || user.organization?.logo_url
+    || current?.logo_url || current?.organization_logo_url || null;
+
   if (!multi) {
     return (
-      <div className={cn("px-3 py-2 rounded-xl bg-secondary/60 border border-border", compact && "py-1.5")}>
-        <p className="text-[10px] uppercase tracking-wide text-muted-foreground flex items-center gap-1">
-          <Building2 className="h-3 w-3" /> Organization
-        </p>
-        <p className="text-sm font-semibold text-foreground truncate" data-testid="current-org-name">
-          {user.organization_name || "—"}
-        </p>
+      <div className={cn("flex items-center gap-2.5 px-3 py-2 rounded-xl bg-secondary/60 border border-border", compact && "py-1.5")}>
+        <OrgMark name={user.organization_name} logoUrl={logoUrl} />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground truncate" data-testid="current-org-name">
+            {user.organization_name || "—"}
+          </p>
+          <p className="text-[9px] uppercase tracking-widest text-muted-foreground truncate">
+            Powered by 60&apos;6&quot; ID
+          </p>
+        </div>
       </div>
     );
   }
@@ -178,10 +211,10 @@ const OrgSwitcher = ({ compact }) => {
             compact && "w-auto max-w-[180px]"
           )}
         >
-          <Building2 className="h-4 w-4 text-brand shrink-0" />
+          <OrgMark name={user.organization_name} logoUrl={logoUrl} />
           <div className="min-w-0 flex-1">
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Organization</p>
             <p className="text-sm font-semibold text-foreground truncate">{user.organization_name}</p>
+            <p className="text-[9px] uppercase tracking-widest text-muted-foreground truncate">Powered by 60&apos;6&quot; ID</p>
           </div>
           <ChevronsUpDown className="h-4 w-4 text-muted-foreground shrink-0" />
         </button>

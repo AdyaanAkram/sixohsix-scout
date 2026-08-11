@@ -138,12 +138,15 @@ async def list_athletes(
     position: str | None = None,
     status: str | None = None,
     team: str | None = None,
+    graduation_year: int | None = None,
     limit: int = 200,
     user=Depends(require_roles(*STAFF_ROLES)),
 ):
     q = {"organization_id": user["organization_id"]}
     if status:
         q["status"] = status
+    if graduation_year is not None:
+        q["graduation_year"] = graduation_year
     if age_group:
         # Match the raw label too so athletes still carrying a legacy band or a
         # single-year label are not hidden by a canonical-band filter.
@@ -162,6 +165,33 @@ async def list_athletes(
         ]}]
     athletes = await db.athletes.find(q, {"_id": 0}).sort([("last_name", 1), ("first_name", 1)]).to_list(min(limit, 500))
     return [restrict_guardian(a, user["role"]) for a in athletes]
+
+
+async def _grad_year_counts(org_id: str) -> list[dict]:
+    """Distinct graduation years with athlete counts for one org, ascending.
+
+    Athletes without a graduation_year are excluded, never bucketed into an
+    invented year. Shared with the org summary report.
+    """
+    rows = await db.athletes.aggregate([
+        {"$match": {"organization_id": org_id, "graduation_year": {"$ne": None}}},
+        {"$group": {"_id": "$graduation_year", "count": {"$sum": 1}}},
+    ]).to_list(200)
+    out = []
+    for r in rows:
+        try:
+            out.append({"year": int(r["_id"]), "count": r["count"]})
+        except (TypeError, ValueError):
+            continue  # junk value in a legacy row — skip, don't fabricate a year
+    out.sort(key=lambda x: x["year"])
+    return out
+
+
+# NOTE: registered before /athletes/{athlete_id} so the literal path matches first.
+@router.get("/athletes/grad-years")
+async def grad_years(user=Depends(require_roles(*STAFF_ROLES))):
+    """[{year, count}] for the caller's org — powers the "Class of ____" chips."""
+    return await _grad_year_counts(user["organization_id"])
 
 
 @router.post("/athletes")

@@ -11,7 +11,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Trophy, FileDown, AlertTriangle, ClipboardList, GitCompare, Layers, Users, TrendingUp, FileText, Target } from "lucide-react";
+import {
+  Trophy, FileDown, AlertTriangle, ClipboardList, GitCompare, Layers, Users, TrendingUp, FileText, Target,
+  Flag, ArrowUpRight, ArrowDownRight, Minus, ClipboardCheck,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
@@ -50,6 +53,29 @@ const chartTooltip = {
   contentStyle: { background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 },
 };
 
+const NotEnoughData = () => <p className="text-xs text-muted-foreground">Not enough data yet.</p>;
+
+// One insight card on the landing strip. Renders as a link (route cards) or a
+// button (cards that focus one of the existing tabs below).
+const InsightCard = ({ icon: Icon, title, to, onClick, testId, children }) => {
+  const body = (
+    <Card className="rounded-2xl border-border h-full hover:border-brand/50 transition-colors">
+      <CardContent className="pt-4 pb-4">
+        <div className="flex items-center gap-2 mb-2">
+          <Icon className="h-4 w-4 text-brand shrink-0" />
+          <p className="text-[11px] uppercase tracking-[0.14em] font-semibold text-muted-foreground">{title}</p>
+        </div>
+        {children}
+      </CardContent>
+    </Card>
+  );
+  return to ? (
+    <Link to={to} data-testid={testId} className="block h-full">{body}</Link>
+  ) : (
+    <button type="button" onClick={onClick} data-testid={testId} className="block h-full w-full text-left cursor-pointer">{body}</button>
+  );
+};
+
 export default function Reports() {
   const { user } = useAuth();
   const canExportPlayerReports = REPORT_ROLES.includes(user?.role);
@@ -71,6 +97,13 @@ export default function Reports() {
   const [athletes, setAthletes] = useState([]);
   const [progressId, setProgressId] = useState("");
   const [progress, setProgress] = useState(null);
+
+  // Landing insights — org-wide, independent of the event/tab filters below.
+  // null = loading, false = endpoint unavailable (strip hides entirely).
+  const [insights, setInsights] = useState(null);
+  useEffect(() => {
+    api.get("/reports/insights").then((r) => setInsights(r.data || false)).catch(() => setInsights(false));
+  }, []);
 
   useEffect(() => {
     api.get("/events").then((r) => {
@@ -229,6 +262,99 @@ export default function Reports() {
           )}
         </div>
       </div>
+
+      {/* ---------------- Insight cards landing strip ---------------- */}
+      {insights === null ? (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}</div>
+      ) : insights === false ? null : (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" data-testid="reports-insights">
+          <InsightCard
+            icon={TrendingUp} title="Top Movers" testId="insight-top-movers"
+            onClick={() => {
+              setTab("progress");
+              const first = insights.top_movers?.[0]?.athlete?.id;
+              if (!progressId && first) setProgressId(first);
+            }}
+          >
+            {insights.top_movers?.length ? (
+              <div className="space-y-1.5">
+                {insights.top_movers.slice(0, 3).map((m) => (
+                  <div key={m.athlete?.id} className="flex items-center justify-between gap-2 text-sm">
+                    <span className="font-semibold truncate">{m.athlete?.first_name} {m.athlete?.last_name}</span>
+                    <span className="flex items-center gap-2 shrink-0">
+                      <span className="inline-flex items-center text-success font-mono-num font-bold text-xs">
+                        <ArrowUpRight className="h-3.5 w-3.5" />{m.change > 0 ? "+" : ""}{m.change}
+                      </span>
+                      <span className="font-mono-num text-xs text-muted-foreground">{num(m.current_score)}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : <NotEnoughData />}
+          </InsightCard>
+
+          <InsightCard icon={ClipboardList} title="Evaluations Complete" testId="insight-evaluations" onClick={() => setTab("completion")}>
+            {insights.evaluations?.completed === null || insights.evaluations?.completed === undefined ? <NotEnoughData /> : (
+              <p className="font-mono-num text-3xl font-bold text-foreground">
+                {insights.evaluations.completed}
+                {insights.evaluations.expected !== null && insights.evaluations.expected !== undefined && (
+                  <span className="text-base font-normal text-muted-foreground"> / {insights.evaluations.expected} expected</span>
+                )}
+              </p>
+            )}
+          </InsightCard>
+
+          <InsightCard icon={ClipboardCheck} title="Needs Review" to="/review" testId="insight-needs-review">
+            {insights.needs_review === null || insights.needs_review === undefined ? <NotEnoughData /> : (
+              <p className="font-mono-num text-3xl font-bold text-foreground">
+                {insights.needs_review}
+                <span className="text-base font-normal text-muted-foreground"> awaiting review</span>
+              </p>
+            )}
+          </InsightCard>
+
+          <InsightCard icon={Flag} title="Flagged" to="/players" testId="insight-flagged">
+            {insights.flagged === null || insights.flagged === undefined ? <NotEnoughData /> : (
+              <p className="font-mono-num text-3xl font-bold text-foreground">
+                {insights.flagged}
+                <span className="text-base font-normal text-muted-foreground"> flagged for follow-up</span>
+              </p>
+            )}
+          </InsightCard>
+
+          <InsightCard icon={Users} title="Position Snapshot" testId="insight-positions" onClick={() => setTab("positions")}>
+            {insights.position_snapshot?.length ? (
+              <div className="space-y-1.5">
+                {[...insights.position_snapshot].sort((a, b) => (b.count || 0) - (a.count || 0)).slice(0, 3).map((p) => (
+                  <div key={p.position} className="flex items-center justify-between gap-2 text-sm">
+                    <span className="font-semibold">{p.position}</span>
+                    <span className="font-mono-num text-xs text-muted-foreground">
+                      {p.count} player{p.count === 1 ? "" : "s"}
+                      {p.avg_score !== null && p.avg_score !== undefined ? <> · avg <span className="font-bold text-foreground">{p.avg_score}</span></> : null}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : <NotEnoughData />}
+          </InsightCard>
+
+          <InsightCard icon={TrendingUp} title="Development Trend" testId="insight-trend" onClick={() => setTab("progress")}>
+            {insights.development_trend ? (
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-sm">
+                <span className="inline-flex items-center gap-1 text-success font-semibold">
+                  <ArrowUpRight className="h-4 w-4" /><span className="font-mono-num font-bold">{num(insights.development_trend.improving)}</span> improving
+                </span>
+                <span className="inline-flex items-center gap-1 text-destructive font-semibold">
+                  <ArrowDownRight className="h-4 w-4" /><span className="font-mono-num font-bold">{num(insights.development_trend.declining)}</span> declining
+                </span>
+                <span className="inline-flex items-center gap-1 text-muted-foreground font-semibold">
+                  <Minus className="h-4 w-4" /><span className="font-mono-num font-bold">{num(insights.development_trend.flat)}</span> flat
+                </span>
+              </div>
+            ) : <NotEnoughData />}
+          </InsightCard>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2">
         <Select value={eventId} onValueChange={setEventId}>

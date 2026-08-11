@@ -3,7 +3,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from auth import COACH_ROLES, REVIEW_ROLES, STAFF_ROLES, require_roles
+from auth import COACH_ROLES, REVIEW_ROLES, STAFF_ROLES, get_current_user, require_roles
 from db import clean, db, log_audit, new_id, now_iso
 
 router = APIRouter()
@@ -277,6 +277,24 @@ async def list_goals(athlete_id: str, season_id: str | None = None,
         goals = [g for g in goals
                  if resolve_record_season_id(g, seasons, ("start_date", "created_at")) == season_id]
     return goals
+
+
+@router.get("/me/goals")
+async def my_goals(user=Depends(get_current_user)):
+    """Athlete/parent view of their own development goals (spec: 'Show the athlete
+    their TOP 3 CURRENT PRIORITIES'). Goals are athlete-facing by design — unlike
+    notes they carry no confidential visibility tiers."""
+    role = user.get("role")
+    if role not in ("athlete", "parent"):
+        raise HTTPException(status_code=403, detail="Athlete or guardian role required.")
+    org = user["organization_id"]
+    link = {"user_id": user["id"]} if role == "athlete" else {"guardian_user_id": user["id"]}
+    a = await db.athletes.find_one({**link, "organization_id": org}, {"_id": 0, "id": 1})
+    if not a:
+        raise HTTPException(status_code=404, detail="No athlete profile linked to this account.")
+    return await db.athlete_goals.find(
+        {"athlete_id": a["id"], "organization_id": org}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
 
 
 @router.post("/goals")

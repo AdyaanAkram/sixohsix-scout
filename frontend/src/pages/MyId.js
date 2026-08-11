@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 import { toast } from "sonner";
-import { Pencil, TrendingUp, TrendingDown, Minus, Share2, Trophy, Sparkles, Target } from "lucide-react";
+import { Pencil, TrendingUp, TrendingDown, Minus, Share2, Trophy, Sparkles, Target, CalendarClock } from "lucide-react";
 
 /** Same five checks the staff PlayerProfile uses — athlete and staff must not disagree. */
 function computeProfileCompletion(athlete, summary, mediaList) {
@@ -39,6 +39,20 @@ function computeProfileCompletion(athlete, summary, mediaList) {
    with verified_by but no explicit source is coach-submitted, not unverified. */
 const metricSource = (m) => m?.source || (m?.verified_by ? "coach_submitted" : undefined);
 
+/* Personal-best chip order: the numbers scouts (and athletes) care about first. */
+const PB_KEY_ORDER = [
+  "exit_velocity", "sixty_yard_dash", "throwing_velocity", "pitching_velocity",
+  "bat_speed", "pop_time", "home_to_first", "vertical_jump", "broad_jump", "ten_yd",
+];
+
+/* Goal statuses that still need work, worst-first — drives the top-3 pick. */
+const PRIORITY_STATUS_RANK = { "Needs Attention": 0, "Active": 1, "Improving": 2, "Not Started": 3 };
+
+const goalStatusTone = (status) =>
+  status === "Needs Attention" ? "text-warning border-warning/40"
+    : status === "Improving" ? "text-success border-success/40"
+    : "text-muted-foreground border-border";
+
 export default function MyId() {
   const [athlete, setAthlete] = useState(null);
   const [summary, setSummary] = useState(null);
@@ -48,6 +62,7 @@ export default function MyId() {
   const [awards, setAwards] = useState([]);
   const [pendingMedia, setPendingMedia] = useState([]);
   const [media, setMedia] = useState([]);
+  const [goals, setGoals] = useState([]);
 
   const reload = () => {
     Promise.all([
@@ -69,6 +84,15 @@ export default function MyId() {
       setAwards(aw.data || []);
       setPendingMedia(pm.data || []);
       setMedia(Array.isArray(md.data) ? md.data : md.data?.media || []);
+      // Athlete/parent sessions read their own goals via /me/goals; staff-linked
+      // accounts fall back to the staff route. Priorities degrade to lowest
+      // category scores when neither is readable. Never fabricate goal data.
+      api.get("/me/goals")
+        .then((g) => setGoals(Array.isArray(g.data) ? g.data : []))
+        .catch(() =>
+          api.get(`/athletes/${a.data.id}/goals`)
+            .then((g) => setGoals(Array.isArray(g.data) ? g.data : []))
+            .catch(() => setGoals([])));
     }).catch((err) => toast.error(errMsg(err)));
   };
 
@@ -106,16 +130,64 @@ export default function MyId() {
   const completion = computeProfileCompletion(athlete, summary, media);
   const scored = evals.filter((ev) => ev.computed?.overall_score != null);
   const currentScore = summary?.latest_overall ?? card?.headline_overall ?? scored[0]?.computed?.overall_score ?? null;
-  const previousScore = scored[1]?.computed?.overall_score ?? null;
-  const change = currentScore != null && previousScore != null
-    ? Math.round((Number(currentScore) - Number(previousScore)) * 10) / 10
-    : null;
   const lastEvaluated = (scored[0]?.event_date || scored[0]?.submitted_at || evals[0]?.event_date || evals[0]?.submitted_at || "").slice(0, 10);
   const metrics = metricsPack.metrics || [];
   const sourceByKey = metrics.reduce((acc, m) => {
     if (!(m.metric_key in acc)) acc[m.metric_key] = metricSource(m);
     return acc;
   }, {});
+
+  // Development KPI — first vs latest scored evaluation. /me/evaluations has no
+  // season_id, so "this season" is only claimed when both endpoints of the
+  // window fall in the latest evaluation's calendar year; otherwise the copy
+  // says "since your first evaluation". With <2 scored evals there is no trend.
+  const evalDay = (ev) => (ev.event_date || ev.submitted_at || "").slice(0, 10);
+  const scoredAsc = [...scored].reverse(); // API returns newest-first
+  const latestScoredYear = scoredAsc.length ? evalDay(scoredAsc[scoredAsc.length - 1]).slice(0, 4) : null;
+  const seasonScored = scoredAsc.filter((ev) => evalDay(ev).slice(0, 4) === latestScoredYear);
+  const devWindow = seasonScored.length >= 2 ? seasonScored : scoredAsc;
+  const devIsSeason = seasonScored.length >= 2;
+  const devBase = devWindow.length >= 2 ? Number(devWindow[0].computed.overall_score) : null;
+  const devLatest = devWindow.length >= 2 ? Number(devWindow[devWindow.length - 1].computed.overall_score) : null;
+  const change = devBase != null ? Math.round((devLatest - devBase) * 10) / 10 : null;
+  const devPct = change != null && devBase > 0 ? Math.round((change / devBase) * 100) : null;
+  const devWindowLabel = devIsSeason ? "this season" : "since your first evaluation";
+  const devHeadline = change == null
+    ? (scored.length === 1
+        ? "Baseline set — your development trend starts with your next evaluation."
+        : "First evaluation coming up — that's where your development story starts.")
+    : `${devPct != null ? `${devPct > 0 ? "+" : ""}${devPct}%` : `${change > 0 ? "+" : ""}${change}`} development ${devWindowLabel}`;
+
+  // Top 3 priorities — active coach goals, worst status first, nearest target
+  // date breaking ties. Everything past three stays behind "View all goals".
+  const activeGoals = goals
+    .filter((g) => g.status !== "Completed" && g.status !== "Archived")
+    .sort((x, y) =>
+      (PRIORITY_STATUS_RANK[x.status] ?? 9) - (PRIORITY_STATUS_RANK[y.status] ?? 9) ||
+      (x.target_date || "9999").localeCompare(y.target_date || "9999"));
+  const topPriorities = activeGoals.slice(0, 3);
+  const moreGoals = activeGoals.slice(3);
+  // No goals visible (athlete sessions can't read the staff goals list): fall
+  // back to the three lowest evaluation categories — focus areas, no invented targets.
+  const focusFallback = topPriorities.length === 0
+    ? ranked.slice(-3).reverse().filter(([name]) => !strengths.some(([s]) => s === name))
+    : [];
+
+  // Personal bests — best verified value per metric key; lower_better decides direction.
+  const pbByKey = {};
+  for (const m of metrics) {
+    const v = Number(m.value);
+    if (m.value == null || Number.isNaN(v)) continue;
+    const cur = pbByKey[m.metric_key];
+    if (!cur || (m.lower_better ? v < Number(cur.value) : v > Number(cur.value))) pbByKey[m.metric_key] = m;
+  }
+  const personalBests = PB_KEY_ORDER.filter((k) => pbByKey[k]).map((k) => pbByKey[k]).slice(0, 4);
+
+  // What's next — only real dates from the payload; the card is omitted when
+  // neither an upcoming evaluation date nor a goal check-in exists.
+  const today = new Date().toISOString().slice(0, 10);
+  const nextEvalDate = evals.map((ev) => ev.next_evaluation_date).filter((d) => d && d >= today).sort()[0] || null;
+  const nextGoalDate = activeGoals.map((g) => g.follow_up_date || g.target_date).filter((d) => d && d >= today).sort()[0] || null;
 
   const qrUrl = card?.qr_payload
     ? `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(card.qr_payload)}`
@@ -135,7 +207,7 @@ export default function MyId() {
             <div className="flex-1 min-w-0 space-y-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p className="text-xs uppercase tracking-widest text-brand font-semibold">My ID</p>
+                  <p className="text-xs uppercase tracking-widest text-brand font-semibold">My Development</p>
                   <h1 className="font-display text-4xl sm:text-5xl text-foreground mt-1">
                     {athlete.first_name} {athlete.last_name}
                   </h1>
@@ -157,17 +229,24 @@ export default function MyId() {
             </div>
           </div>
         </div>
+        {/* Development leads — the headline the athlete reads before any score. */}
+        <div className="px-5 py-3 border-t border-divider flex items-center gap-2.5" data-testid="my-dev-headline">
+          <TrendIcon className={`h-6 w-6 shrink-0 ${trendTone}`} />
+          <p className={`font-display text-lg sm:text-xl uppercase tracking-wide ${change != null ? trendTone : "text-muted-foreground"}`}>
+            {devHeadline}
+          </p>
+        </div>
         <CardContent className="py-4 border-t border-divider grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
-          <div>
-            <p className="text-3xl font-bold font-mono-num text-brand" data-testid="my-id-overall">{currentScore ?? "—"}</p>
-            <p className="text-[10px] uppercase text-muted-foreground mt-1">Overall score</p>
-          </div>
-          <div>
+          <div data-testid="my-dev-kpi">
             <p className={`text-3xl font-bold font-mono-num flex items-center justify-center gap-1 ${trendTone}`}>
               <TrendIcon className="h-5 w-5" />
               {change != null ? `${change > 0 ? "+" : ""}${change}` : "—"}
             </p>
             <p className="text-[10px] uppercase text-muted-foreground mt-1">{trendLabel}</p>
+          </div>
+          <div>
+            <p className="text-3xl font-bold font-mono-num text-brand" data-testid="my-id-overall">{currentScore ?? "—"}</p>
+            <p className="text-[10px] uppercase text-muted-foreground mt-1">Overall score</p>
           </div>
           <div>
             <p className="text-3xl font-bold font-mono-num">{summary?.evaluation_count ?? evals.length}</p>
@@ -179,6 +258,106 @@ export default function MyId() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Top 3 current priorities — never the full weakness list (client direction) */}
+      {(topPriorities.length > 0 || focusFallback.length > 0) && (
+        <Card className="rounded-2xl border-border" data-testid="my-dev-priorities">
+          <CardContent className="py-4 space-y-3">
+            <div>
+              <p className="font-semibold text-sm flex items-center gap-2">
+                <Target className="h-4 w-4 text-brand" /> {(topPriorities.length || focusFallback.length) >= 3 ? "My top 3 current priorities" : "My current priorities"}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">What you're working on right now — not everything at once.</p>
+            </div>
+            {topPriorities.map((g, i) => (
+              <div key={g.id} className="rounded-xl border border-border bg-card px-4 py-3 flex gap-3" data-testid={`my-dev-priority-${i + 1}`}>
+                <span className="font-display text-2xl text-brand leading-none pt-0.5">{i + 1}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-bold text-sm uppercase tracking-wide">{g.title}</p>
+                    {g.status && (
+                      <span className={`text-[10px] uppercase tracking-wide border rounded-full px-2 py-0.5 ${goalStatusTone(g.status)}`}>{g.status}</span>
+                    )}
+                  </div>
+                  {g.starting_point && g.target ? (
+                    <p className="font-mono-num text-lg font-bold mt-1">
+                      {g.starting_point} <span className="text-muted-foreground font-normal">→</span> <span className="text-brand">Target {g.target}</span>
+                    </p>
+                  ) : (
+                    <div className="mt-2 space-y-1">
+                      <Progress value={g.progress || 0} className="h-2" />
+                      <p className="text-xs text-muted-foreground font-mono-num">{g.progress || 0}% to goal</p>
+                    </div>
+                  )}
+                  {g.target_date && <p className="text-xs text-muted-foreground mt-1 font-mono-num">Target date: {g.target_date}</p>}
+                </div>
+              </div>
+            ))}
+            {/* Athlete sessions can't read coach goals yet — focus areas from the latest evaluation, no invented targets. */}
+            {topPriorities.length === 0 && focusFallback.map(([name, d], i) => (
+              <div key={name} className="rounded-xl border border-border bg-card px-4 py-3 flex gap-3" data-testid={`my-dev-priority-${i + 1}`}>
+                <span className="font-display text-2xl text-brand leading-none pt-0.5">{i + 1}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-bold text-sm uppercase tracking-wide">{name}</p>
+                    <span className="font-mono-num font-semibold text-warning">{d.score}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">Focus area from your latest evaluation — your coach hasn't set a target yet.</p>
+                </div>
+              </div>
+            ))}
+            {moreGoals.length > 0 && (
+              <Accordion type="single" collapsible>
+                <AccordionItem value="all-goals" className="border-b-0">
+                  <AccordionTrigger className="text-sm py-2" data-testid="my-dev-all-goals-toggle">View all goals ({activeGoals.length})</AccordionTrigger>
+                  <AccordionContent className="space-y-2">
+                    {moreGoals.map((g) => (
+                      <div key={g.id} className="flex flex-wrap items-center justify-between gap-2 text-sm border-b border-divider pb-2 last:border-0">
+                        <span className="font-semibold">{g.title}</span>
+                        <span className="text-xs text-muted-foreground">{g.status}{g.progress != null ? ` · ${g.progress}%` : ""}</span>
+                      </div>
+                    ))}
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Personal bests — verified numbers only, never invented */}
+      {personalBests.length > 0 && (
+        <Card className="rounded-2xl border-border" data-testid="my-dev-personal-bests">
+          <CardContent className="py-4 space-y-3">
+            <p className="font-semibold text-sm flex items-center gap-2">
+              <Trophy className="h-4 w-4 text-brand" /> Personal bests
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {personalBests.map((m) => (
+                <span key={m.metric_key} className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-sm">
+                  <span className="text-xs text-muted-foreground">{m.label || m.metric_key.replace(/_/g, " ")}</span>
+                  <span className="font-mono-num font-bold">{m.value}{m.unit ? ` ${m.unit}` : ""}</span>
+                  <VerificationBadge source={metricSource(m)} compact />
+                </span>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* What's next — only rendered when a real upcoming date exists in the payload */}
+      {(nextEvalDate || nextGoalDate) && (
+        <Card className="rounded-2xl border-border" data-testid="my-dev-whats-next">
+          <CardContent className="py-4 flex items-center gap-3">
+            <CalendarClock className="h-5 w-5 text-brand shrink-0" />
+            <div>
+              <p className="font-semibold text-sm">What's next</p>
+              {nextEvalDate && <p className="text-sm text-muted-foreground">Next evaluation: <span className="font-mono-num font-semibold text-foreground">{nextEvalDate}</span></p>}
+              {!nextEvalDate && nextGoalDate && <p className="text-sm text-muted-foreground">Next goal check-in: <span className="font-mono-num font-semibold text-foreground">{nextGoalDate}</span></p>}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Profile completion — same definition staff sees */}
       <Card className="rounded-2xl border-border" data-testid="my-id-completion">

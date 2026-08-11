@@ -316,7 +316,8 @@ async def me_evaluations(user=Depends(get_current_user)):
             {"id": ev.get("event_id"), "organization_id": user["organization_id"]},
             {"_id": 0, "name": 1, "date": 1})
         out.append({
-            **{k: ev.get(k) for k in ("id", "status", "submitted_at", "computed", "resolved_position", "template_id")},
+            **{k: ev.get(k) for k in ("id", "status", "submitted_at", "computed", "resolved_position",
+                                      "template_id", "next_evaluation_date", "recommendation")},
             "station_name": (station or {}).get("name"),
             "event_name": (event or {}).get("name"),
             "event_date": (event or {}).get("date"),

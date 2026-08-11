@@ -9,6 +9,7 @@ from auth import (ADMIN_ROLES, REVIEW_ROLES, STAFF_ROLES, active_assignment_filt
                   get_current_user, require_roles)
 from db import db, log_audit, now_iso
 from routes_development import _note_visible_to_role
+from routes_players import _grad_year_counts
 from scoring import (MASTER_CATEGORY_WEIGHTS, aggregate_player_scores,
                      canonical_metric_key, metric_meta)
 
@@ -1051,3 +1052,168 @@ async def player_progress_pdf(athlete_id: str, user=Depends(require_roles(*REVIE
     await log_audit(org_id, user, "player_progress_report_generated", "athlete", athlete_id)
     return Response(content=buf.read(), media_type="application/pdf",
                     headers={"Content-Disposition": f"attachment; filename={name.replace(' ', '_')}_progress.pdf"})
+
+
+# ---------------- Org-wide insights ----------------
+#
+# One evaluations query feeds every per-athlete change below; the timeline math
+# is the same `_score_timeline` the progress report uses, so "change" here is
+# always latest-checkpoint overall minus previous-checkpoint overall.
+
+# |change| below this reads as noise, not development. Same 0-10 scale as the
+# overall score.
+TREND_FLAT_THRESHOLD = 0.1
+
+
+async def _org_score_changes(org_id: str) -> list[dict]:
+    """Per-athlete latest-vs-previous overall change, org-wide, from one query.
+
+    Only athletes with >= 2 scored checkpoints appear; a single-checkpoint
+    athlete has no change to report and is excluded, never zero-filled.
+    """
+    evals = await db.evaluations.find(
+        {"organization_id": org_id, "status": {"$in": ["submitted", "approved"]}},
+        {"_id": 0}).to_list(5000)
+    by_athlete = defaultdict(list)
+    for ev in evals:
+        by_athlete[ev["athlete_id"]].append(ev)
+    changes = []
+    for aid, evs in by_athlete.items():
+        timeline = _score_timeline(evs)
+        if len(timeline) < 2:
+            continue
+        changes.append({
+            "athlete_id": aid,
+            "change": round(timeline[-1]["overall_score"] - timeline[-2]["overall_score"], 2),
+            "current_score": timeline[-1]["overall_score"],
+        })
+    return changes
+
+
+def _development_trend(changes: list[dict]) -> dict:
+    return {
+        "improving": sum(1 for c in changes if c["change"] >= TREND_FLAT_THRESHOLD),
+        "declining": sum(1 for c in changes if c["change"] <= -TREND_FLAT_THRESHOLD),
+        "flat": sum(1 for c in changes if abs(c["change"]) < TREND_FLAT_THRESHOLD),
+    }
+
+
+async def _expected_evaluation_count(org_id: str) -> int | None:
+    """Expected evaluation count from the live / most recent open event.
+
+    Sums, per station, the checked-in athletes that station applies to — the
+    same applicability rule the evaluator dashboard uses. Null when there is no
+    open event, it has no stations, or nobody has checked in: no expectation is
+    ever invented.
+    """
+    event = await db.events.find_one(
+        {"organization_id": org_id, "status": {"$nin": ["Closed"]}},
+        {"_id": 0, "id": 1}, sort=[("date", -1)])
+    if not event:
+        return None
+    stations = await db.stations.find(
+        {"event_id": event["id"], "organization_id": org_id},
+        {"_id": 0, "group_ids": 1}).to_list(50)
+    if not stations:
+        return None
+    total = 0
+    for s in stations:
+        q = {"event_id": event["id"], "status": "checked_in"}
+        gids = s.get("group_ids") or []
+        if gids:
+            q["group_id"] = {"$in": gids}
+        total += await db.event_athletes.count_documents(q)
+    return total or None
+
+
+@router.get("/reports/insights")
+async def insights(user=Depends(require_roles(*REVIEW_ROLES, "coach"))):
+    org_id = user["organization_id"]
+
+    changes = await _org_score_changes(org_id)
+    changes.sort(key=lambda c: c["change"], reverse=True)
+    top_movers = []
+    for c in changes:
+        if len(top_movers) >= 5:
+            break
+        athlete = await db.athletes.find_one(
+            {"id": c["athlete_id"], "organization_id": org_id},
+            {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "photo_url": 1,
+             "primary_position": 1, "graduation_year": 1})
+        if not athlete:
+            continue
+        top_movers.append({"athlete": athlete, "change": c["change"],
+                           "current_score": c["current_score"]})
+
+    completed = await db.evaluations.count_documents(
+        {"organization_id": org_id, "status": {"$in": ["submitted", "approved"]}})
+    needs_review = await db.evaluations.count_documents(
+        {"organization_id": org_id, "status": "submitted"})
+    flagged = await db.athletes.count_documents(
+        {"organization_id": org_id, "flagged_follow_up": True, "status": "active"})
+
+    # Same grouping the position comparison uses, one leaderboard pass.
+    base = await _leaderboard_data(org_id, limit=2000)
+    by_pos = defaultdict(list)
+    for r in base:
+        pos = (r["athlete"].get("primary_position") or "").strip()
+        if pos:
+            by_pos[pos].append(r["overall_score"])
+    position_snapshot = []
+    for pos, scores in by_pos.items():
+        vals = [s for s in scores if s is not None]
+        position_snapshot.append({
+            "position": pos, "count": len(scores),
+            "avg_score": round(statistics.fmean(vals), 2) if vals else None,
+        })
+    position_snapshot.sort(key=lambda p: (-p["count"], p["position"]))
+
+    return {
+        "top_movers": top_movers,
+        "evaluations": {"completed": completed,
+                        "expected": await _expected_evaluation_count(org_id)},
+        "needs_review": needs_review,
+        "flagged": flagged,
+        "position_snapshot": position_snapshot,
+        "development_trend": _development_trend(changes),
+    }
+
+
+# ---------------- Organization summary ----------------
+
+@router.get("/organizations/summary")
+async def organization_summary(user=Depends(require_roles(*ADMIN_ROLES))):
+    org_id = user["organization_id"]
+    org = await db.organizations.find_one({"id": org_id}, {"_id": 0}) or {}
+
+    athletes = await db.athletes.count_documents({"organization_id": org_id, "status": "active"})
+    team_names = await db.athletes.distinct(
+        "current_team", {"organization_id": org_id, "status": "active"})
+    teams = len({str(t).strip() for t in team_names if t and str(t).strip()})
+
+    coaches = await db.memberships.count_documents(
+        {"organization_id": org_id, "role": "coach", "active": True})
+    evaluators = await db.memberships.count_documents(
+        {"organization_id": org_id, "role": "evaluator", "active": True})
+
+    total_evals = await db.evaluations.count_documents({"organization_id": org_id})
+    awaiting = await db.evaluations.count_documents(
+        {"organization_id": org_id, "status": "submitted"})
+
+    today = now_iso()[:10]
+    upcoming = await db.events.count_documents(
+        {"organization_id": org_id, "date": {"$gte": today}, "status": {"$nin": ["Closed"]}})
+    total_events = await db.events.count_documents({"organization_id": org_id})
+
+    return {
+        "organization": {"id": org.get("id"), "name": org.get("name"),
+                         "logo_url": org.get("logo_url")},
+        "athletes": athletes,
+        "teams": teams,
+        "grad_classes": await _grad_year_counts(org_id),
+        "coaches": coaches,
+        "evaluators": evaluators,
+        "evaluations": {"total": total_evals, "awaiting_review": awaiting},
+        "events": {"upcoming": upcoming, "total": total_events},
+        "development_trend": _development_trend(await _org_score_changes(org_id)),
+    }

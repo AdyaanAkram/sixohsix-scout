@@ -241,7 +241,7 @@ export default function Evaluate() {
               data-testid="next-incomplete-button"
             >
               <Zap className="h-4 w-4 mr-1.5" />
-              Next: {nextTodo.first_name} {nextTodo.last_name?.[0]}.
+              Next{nextTodo.bib_number ? ` · #${nextTodo.bib_number}` : ":"} {nextTodo.first_name} {nextTodo.last_name?.[0]}.
             </Button>
           )}
         </div>
@@ -337,7 +337,7 @@ export default function Evaluate() {
                     className="w-full text-left rounded-xl border border-border bg-card px-3 py-3 flex items-center gap-3 hover:bg-secondary min-h-[56px]"
                     data-testid={`handoff-player-${p.athlete_id}`}
                   >
-                    <PlayerAvatar firstName={p.first_name} lastName={p.last_name} bib={p.bib_number || p.jersey_number} />
+                    <PlayerAvatar firstName={p.first_name} lastName={p.last_name} photoUrl={p.photo_url} bib={p.bib_number || p.jersey_number} />
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-sm text-foreground truncate">{p.first_name} {p.last_name}</p>
                       <p className="text-xs text-muted-foreground">
@@ -376,7 +376,7 @@ export default function Evaluate() {
                 isDone(p.evaluation_status) && "opacity-70"
               )}>
                 <CardContent className="py-3.5 flex items-center gap-3 min-h-[64px]">
-                  <PlayerAvatar firstName={p.first_name} lastName={p.last_name} bib={p.bib_number || p.jersey_number} />
+                  <PlayerAvatar firstName={p.first_name} lastName={p.last_name} photoUrl={p.photo_url} bib={p.bib_number || p.jersey_number} />
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-foreground truncate">{p.first_name} {p.last_name}</p>
                     <p className="text-xs text-muted-foreground">

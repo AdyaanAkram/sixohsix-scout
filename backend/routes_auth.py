@@ -386,11 +386,20 @@ class OrgUpdateBody(BaseModel):
     name: str | None = None
     tagline: str | None = None
     contact_email: str | None = None
+    # logo_url is tri-state: absent = leave alone, string = set, null = clear.
+    logo_url: str | None = None
 
 
 @router.patch("/organization")
 async def update_org(body: OrgUpdateBody, user=Depends(require_roles("owner"))):
-    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    updates = {k: v for k, v in body.model_dump(exclude={"logo_url"}).items() if v is not None}
+    if "logo_url" in body.model_fields_set:
+        logo = body.logo_url.strip() if isinstance(body.logo_url, str) else None
+        if body.logo_url is not None and (
+                not logo or not logo.lower().startswith("https://") or len(logo) > 2048):
+            raise HTTPException(status_code=422,
+                                detail="logo_url must be an https:// URL, or null to remove the logo.")
+        updates["logo_url"] = logo
     if updates:
         updates["updated_at"] = now_iso()
         await db.organizations.update_one({"id": user["organization_id"]}, {"$set": updates})

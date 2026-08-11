@@ -11,22 +11,27 @@ import { EmptyState } from "@/components/common/EmptyState";
 import {
   CalendarPlus, Upload, UserCog, ClipboardCheck, ArrowRight, Users,
   CheckCircle2, ClipboardList, Flag, Activity, CalendarDays, Trophy, FileDown,
+  TrendingUp, TrendingDown, Minus, GraduationCap, Target, UsersRound, Shield,
 } from "lucide-react";
 import { signedUrl } from "@/lib/api";
 
-const StatCard = ({ label, value, icon: Icon, accent = "hsl(var(--foreground))", testId }) => (
-  <Card className="rounded-2xl border-border" data-testid={testId}>
-    <CardContent className="pt-5 pb-5 flex items-center gap-3.5">
-      <div className="h-11 w-11 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${accent}14` }}>
-        <Icon className="h-5.5 w-5 h-5" style={{ color: accent }} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-2xl font-bold text-foreground leading-none font-mono-num">{value ?? "—"}</p>
-        <p className="text-xs text-muted-foreground mt-1.5">{label}</p>
-      </div>
-    </CardContent>
-  </Card>
-);
+const StatCard = ({ label, value, icon: Icon, accent = "hsl(var(--foreground))", testId, to, sub }) => {
+  const card = (
+    <Card className={`rounded-2xl border-border h-full ${to ? "hover:bg-secondary/50 transition-colors" : ""}`} data-testid={testId}>
+      <CardContent className="pt-5 pb-5 flex items-center gap-3.5">
+        <div className="h-11 w-11 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${accent}14` }}>
+          <Icon className="h-5.5 w-5 h-5" style={{ color: accent }} />
+        </div>
+        <div className="min-w-0">
+          <p className="text-2xl font-bold text-foreground leading-none font-mono-num">{value ?? "—"}</p>
+          <p className="text-xs text-muted-foreground mt-1.5">{label}{sub ? <span className="text-muted-foreground/70"> · {sub}</span> : null}</p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+  if (to) return <Link to={to} className="block h-full">{card}</Link>;
+  return card;
+};
 
 const QuickAction = ({ to, onClick, icon: Icon, label, testId }) => {
   const inner = (
@@ -40,15 +45,63 @@ const QuickAction = ({ to, onClick, icon: Icon, label, testId }) => {
   return <button onClick={onClick} data-testid={testId} className="w-full text-left">{inner}</button>;
 };
 
+/** Development-first pulse strip: improving / declining / holding, with arrows. */
+const DevTrendStrip = ({ trend, testId }) => {
+  if (!trend) return null;
+  return (
+    <Card className="rounded-2xl border-border" data-testid={testId}>
+      <CardContent className="pt-4 pb-4 flex flex-wrap items-center gap-x-5 gap-y-2">
+        <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Development</p>
+        <span className="flex items-center gap-1.5 text-sm font-semibold text-success font-mono-num">
+          <TrendingUp className="h-4 w-4" /> {trend.improving ?? 0} improving
+        </span>
+        <span className="flex items-center gap-1.5 text-sm font-semibold text-destructive font-mono-num">
+          <TrendingDown className="h-4 w-4" /> {trend.declining ?? 0} declining
+        </span>
+        <span className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground font-mono-num">
+          <Minus className="h-4 w-4" /> {trend.flat ?? 0} holding
+        </span>
+        <Link to="/development" className="ml-auto text-xs text-info hover:underline">Open Progress</Link>
+      </CardContent>
+    </Card>
+  );
+};
+
+const fmtChange = (v) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  const abs = Math.abs(n);
+  const s = abs >= 10 ? Math.round(abs) : abs.toFixed(1).replace(/\.0$/, "");
+  return `${n >= 0 ? "+" : "-"}${s}`;
+};
+
 export default function Dashboard() {
   const { user } = useAuth();
   const [data, setData] = useState(null);
+  const [insights, setInsights] = useState(null);
+  const [orgSummary, setOrgSummary] = useState(null);
+  const [devOverview, setDevOverview] = useState(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
   useEffect(() => {
-    api.get("/dashboard").then((r) => setData(r.data)).finally(() => setLoading(false));
-  }, []);
+    let alive = true;
+    const r = user?.role;
+    const soft = (path) => api.get(path).then((res) => res.data).catch(() => null);
+    Promise.all([
+      soft("/dashboard"),
+      ["head_scout", "coach"].includes(r) ? soft("/reports/insights") : Promise.resolve(null),
+      ["owner", "admin"].includes(r) ? soft("/organizations/summary") : Promise.resolve(null),
+      r === "coach" ? soft("/development/overview") : Promise.resolve(null),
+    ]).then(([d, ins, org, dev]) => {
+      if (!alive) return;
+      setData(d);
+      setInsights(ins);
+      setOrgSummary(org);
+      setDevOverview(dev);
+    }).finally(() => alive && setLoading(false));
+    return () => { alive = false; };
+  }, [user?.role]);
 
   if (loading)
     return (
@@ -63,94 +116,161 @@ export default function Dashboard() {
 
   const role = data?.role || user?.role;
 
-  // -------- EVALUATOR DASHBOARD --------
+  // -------- EVALUATOR — Evaluation Mode: assignments only, zero distraction --------
   if (role === "evaluator") {
     const assignments = data?.assignments || [];
+    const remaining = assignments.reduce((sum, a) => sum + (a.remaining ?? Math.max(0, (a.expected || 0) - (a.completed || 0))), 0);
     return (
       <div className="space-y-5" data-testid="evaluator-dashboard">
         <div>
           <h1 className="font-display text-4xl text-foreground">My Evaluations</h1>
-          <p className="text-sm text-muted-foreground">Welcome back, {user?.full_name?.split(" ")[0]}. Here are your station assignments.</p>
+          <p className="text-sm text-muted-foreground">
+            Welcome back, {user?.full_name?.split(" ")[0]}.{" "}
+            {assignments.length > 0 && (
+              <span className="font-semibold text-foreground font-mono-num">
+                {remaining} evaluation{remaining === 1 ? "" : "s"} remaining
+              </span>
+            )}
+          </p>
         </div>
         {assignments.length === 0 ? (
           <EmptyState icon={ClipboardCheck} title="No assignments yet" hint="Your administrator will assign you to an event station. Check back soon." />
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
-            {assignments.map((a) => (
-              <Card key={a.assignment_id} className="rounded-2xl border-border overflow-hidden">
-                <div className="bg-primary px-5 py-3 flex items-center justify-between">
-                  <p className="text-white font-semibold text-sm truncate">{a.event?.name}</p>
-                  <StatusBadge status={a.event?.status} />
-                </div>
-                <CardContent className="pt-4 pb-5 space-y-3">
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide">My Station</p>
-                      <p className="font-semibold text-foreground">{a.station_name}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide">My Groups</p>
-                      <p className="font-semibold text-foreground truncate">{(a.group_names || []).join(", ") || "All groups"}</p>
-                    </div>
+            {assignments.map((a) => {
+              const left = a.remaining ?? Math.max(0, (a.expected || 0) - (a.completed || 0));
+              return (
+                <Card key={a.assignment_id} className="rounded-2xl border-border overflow-hidden">
+                  <div className="bg-primary px-5 py-3 flex items-center justify-between">
+                    <p className="text-white font-semibold text-sm truncate">{a.event?.name}</p>
+                    <StatusBadge status={a.event?.status} />
                   </div>
-                  <div className="flex items-center gap-4">
-                    <div className="flex-1 h-2.5 rounded-full bg-muted overflow-hidden">
-                      <div className="h-full rounded-full bg-success transition-all" style={{ width: `${a.expected ? Math.round((a.completed / a.expected) * 100) : 0}%` }} />
+                  <CardContent className="pt-4 pb-5 space-y-3">
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs text-muted-foreground uppercase tracking-wide">My Station</p>
+                        <p className="font-semibold text-foreground">{a.station_name}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground uppercase tracking-wide">My Groups</p>
+                        <p className="font-semibold text-foreground truncate">{(a.group_names || []).join(", ") || "All groups"}</p>
+                      </div>
                     </div>
-                    <p className="text-xs font-mono-num text-muted-foreground whitespace-nowrap">{a.completed}/{a.expected} done</p>
-                  </div>
-                  {a.last_saved && <p className="text-xs text-muted-foreground">Last saved: {new Date(a.last_saved).toLocaleString()}</p>}
-                  <Button
-                    className="w-full h-12 rounded-xl bg-primary hover:bg-brand-secondary text-base font-semibold active:scale-[0.98]"
-                    onClick={() => navigate(`/evaluate/${a.assignment_id}`)}
-                    data-testid={`continue-evaluating-${a.assignment_id}`}
-                  >
-                    {a.completed > 0 ? "Continue Evaluating" : "Start Evaluating"}
-                    <ArrowRight className="h-4 w-4 ml-1" />
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
+                    <div className="flex items-center gap-4">
+                      <div className="flex-1 h-2.5 rounded-full bg-muted overflow-hidden">
+                        <div className="h-full rounded-full bg-success transition-all" style={{ width: `${a.expected ? Math.round((a.completed / a.expected) * 100) : 0}%` }} />
+                      </div>
+                      <p className="text-xs font-mono-num text-muted-foreground whitespace-nowrap">
+                        {a.completed}/{a.expected} done · <span className="font-bold text-foreground">{left} left</span>
+                      </p>
+                    </div>
+                    {a.last_saved && <p className="text-xs text-muted-foreground">Last saved: {new Date(a.last_saved).toLocaleString()}</p>}
+                    <Button
+                      className="w-full h-12 rounded-xl bg-primary hover:bg-brand-secondary text-base font-semibold active:scale-[0.98]"
+                      onClick={() => navigate(`/evaluate/${a.assignment_id}`)}
+                      data-testid={`continue-evaluating-${a.assignment_id}`}
+                    >
+                      {a.completed > 0 ? "Continue Evaluating" : "Start Evaluating"}
+                      <ArrowRight className="h-4 w-4 ml-1" />
+                    </Button>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         )}
       </div>
     );
   }
 
-  // -------- HEAD SCOUT DASHBOARD --------
+  // -------- HEAD SCOUT — review-first --------
   if (role === "head_scout") {
+    const awaiting = insights?.needs_review ?? data?.awaiting_review;
+    const flagged = insights?.flagged ?? data?.flagged_players;
+    const movers = (insights?.top_movers || []).slice(0, 5);
     return (
       <div className="space-y-5" data-testid="head-scout-dashboard">
         <div>
-          <h1 className="font-display text-4xl text-foreground">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Review evaluations and track top performers.</p>
+          <h1 className="font-display text-4xl text-foreground">Review Desk</h1>
+          <p className="text-sm text-muted-foreground">Approve evaluations and track who&apos;s developing.</p>
         </div>
+
+        {/* Hero: the review queue is the job */}
+        <Card className="rounded-2xl border-border overflow-hidden" data-testid="stat-awaiting-review">
+          <CardContent className="hero-sweep pt-5 pb-5 flex flex-wrap items-center gap-4">
+            <div className="h-14 w-14 rounded-2xl flex items-center justify-center shrink-0" style={{ backgroundColor: "hsl(var(--warning) / 0.12)" }}>
+              <ClipboardList className="h-7 w-7 text-warning" />
+            </div>
+            <div className="flex-1 min-w-[140px]">
+              <p className="text-4xl font-bold text-foreground leading-none font-mono-num">{awaiting ?? "—"}</p>
+              <p className="text-sm text-muted-foreground mt-1.5">Evaluations awaiting your review</p>
+            </div>
+            <Button onClick={() => navigate("/review")} className="h-12 rounded-xl bg-primary hover:bg-brand-secondary px-6" data-testid="open-review-queue-button">
+              Open Review Queue <ArrowRight className="h-4 w-4 ml-1" />
+            </Button>
+          </CardContent>
+        </Card>
+
+        <DevTrendStrip trend={insights?.development_trend} testId="dev-trend-strip" />
+
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-          <StatCard label="Awaiting Review" value={data.awaiting_review} icon={ClipboardList} accent="hsl(var(--warning))" testId="stat-awaiting-review" />
-          <StatCard label="Approved" value={data.approved} icon={CheckCircle2} accent="hsl(var(--success))" testId="stat-approved" />
-          <StatCard label="Flagged for Follow-Up" value={data.flagged_players} icon={Flag} accent="hsl(var(--destructive))" testId="stat-flagged" />
+          <StatCard label="Approved" value={data?.approved} icon={CheckCircle2} accent="hsl(var(--success))" testId="stat-approved" />
+          <StatCard label="Flagged for Follow-Up" value={flagged} icon={Flag} accent="hsl(var(--destructive))" testId="stat-flagged" to="/players?flagged=true" />
+          {insights?.evaluations && (
+            <StatCard label="Evaluations Completed" value={`${insights.evaluations.completed ?? 0}/${insights.evaluations.expected ?? 0}`} icon={ClipboardCheck} accent="hsl(var(--info))" testId="stat-evals-progress" />
+          )}
         </div>
+
         <div className="grid gap-4 lg:grid-cols-2">
           <Card className="rounded-2xl border-border">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center justify-between text-base">
-                <span className="flex items-center gap-2"><Trophy className="h-4 w-4 text-warning" /> Top Players</span>
+                <span className="flex items-center gap-2">
+                  {movers.length > 0 ? <TrendingUp className="h-4 w-4 text-success" /> : <Trophy className="h-4 w-4 text-warning" />}
+                  {movers.length > 0 ? "Top Movers" : "Top Players"}
+                </span>
                 <Link to="/reports" className="text-xs text-info hover:underline font-normal">View leaderboard</Link>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              {(data.top_players || []).length === 0 && <p className="text-sm text-muted-foreground py-4 text-center">No scored evaluations yet.</p>}
-              {(data.top_players || []).map((p, i) => (
-                <Link key={p.athlete.id} to={`/players/${p.athlete.id}`} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-secondary transition-colors" data-testid={`top-player-${i}`}>
-                  <span className="font-display text-xl text-warning w-6 text-center">{i + 1}</span>
-                  <PlayerAvatar firstName={p.athlete.first_name} lastName={p.athlete.last_name} size="sm" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-foreground truncate">{p.athlete.first_name} {p.athlete.last_name}</p>
-                    <p className="text-xs text-muted-foreground">{p.athlete.age_group} · {p.athlete.primary_position}</p>
-                  </div>
-                  <span className="font-mono-num font-bold text-foreground">{p.overall_score}</span>
-                </Link>
-              ))}
+              {movers.length > 0 ? (
+                movers.map((m, i) => {
+                  const up = Number(m.change) >= 0;
+                  return (
+                    <Link key={m.athlete?.id || i} to={`/players/${m.athlete?.id}`} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-secondary transition-colors" data-testid={`top-mover-${i}`}>
+                      <PlayerAvatar firstName={m.athlete?.first_name} lastName={m.athlete?.last_name} photoUrl={m.athlete?.photo_url} size="sm" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-foreground truncate">{m.athlete?.first_name} {m.athlete?.last_name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {m.athlete?.primary_position}{m.athlete?.graduation_year ? ` · Class of ${m.athlete.graduation_year}` : ""}
+                        </p>
+                      </div>
+                      {fmtChange(m.change) && (
+                        <span className={`flex items-center gap-0.5 text-xs font-bold font-mono-num ${up ? "text-success" : "text-destructive"}`}>
+                          {up ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+                          {fmtChange(m.change)}
+                        </span>
+                      )}
+                      <span className="font-mono-num font-bold text-foreground">{m.current_score}</span>
+                    </Link>
+                  );
+                })
+              ) : (
+                <>
+                  {(data?.top_players || []).length === 0 && <p className="text-sm text-muted-foreground py-4 text-center">No scored evaluations yet.</p>}
+                  {(data?.top_players || []).map((p, i) => (
+                    <Link key={p.athlete.id} to={`/players/${p.athlete.id}`} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-secondary transition-colors" data-testid={`top-player-${i}`}>
+                      <span className="font-display text-xl text-warning w-6 text-center">{i + 1}</span>
+                      <PlayerAvatar firstName={p.athlete.first_name} lastName={p.athlete.last_name} size="sm" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-foreground truncate">{p.athlete.first_name} {p.athlete.last_name}</p>
+                        <p className="text-xs text-muted-foreground">{p.athlete.age_group} · {p.athlete.primary_position}</p>
+                      </div>
+                      <span className="font-mono-num font-bold text-foreground">{p.overall_score}</span>
+                    </Link>
+                  ))}
+                </>
+              )}
             </CardContent>
           </Card>
           <Card className="rounded-2xl border-border">
@@ -161,8 +281,8 @@ export default function Dashboard() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {(data.recent_notes || []).length === 0 && <p className="text-sm text-muted-foreground py-4 text-center">No notes yet.</p>}
-              {(data.recent_notes || []).map((n) => (
+              {(data?.recent_notes || []).length === 0 && <p className="text-sm text-muted-foreground py-4 text-center">No notes yet.</p>}
+              {(data?.recent_notes || []).map((n) => (
                 <div key={n.id} className="rounded-xl border px-3.5 py-2.5">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-foreground">{n.athlete_name}</p>
@@ -175,23 +295,182 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         </div>
-        <Button onClick={() => navigate("/review")} className="h-12 rounded-xl bg-primary hover:bg-brand-secondary px-6" data-testid="open-review-queue-button">
-          Open Review Queue <ArrowRight className="h-4 w-4 ml-1" />
-        </Button>
       </div>
     );
   }
 
-  // -------- ADMIN / OWNER / COACH DASHBOARD --------
+  // -------- COACH — "My Athletes": today's work first --------
+  if (role === "coach") {
+    const ev = data?.upcoming_event;
+    const stats = data?.event_stats || {};
+    const goals = devOverview?.goals || [];
+    const activeGoals = goals.filter((g) => (g.status || "").toLowerCase() !== "completed");
+    const athleteGoals = [];
+    const seen = new Set();
+    for (const g of activeGoals) {
+      if (!g.athlete || seen.has(g.athlete_id)) continue;
+      seen.add(g.athlete_id);
+      athleteGoals.push(g);
+      if (athleteGoals.length >= 6) break;
+    }
+    const assessments = (devOverview?.recent_assessments || []).slice(0, 4);
+    return (
+      <div className="space-y-5" data-testid="coach-dashboard">
+        <div>
+          <h1 className="font-display text-4xl text-foreground">My Athletes</h1>
+          <p className="text-sm text-muted-foreground">Welcome back, {user?.full_name?.split(" ")[0]}. Here&apos;s today&apos;s work.</p>
+        </div>
+
+        <DevTrendStrip trend={insights?.development_trend} testId="dev-trend-strip" />
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <StatCard label="Active Goals" value={devOverview ? activeGoals.length : undefined} icon={Target} accent="hsl(var(--success))" testId="stat-active-goals" to="/development" />
+          <StatCard label="My Athletes" value={data?.total_players} icon={Users} testId="stat-total-athletes" to="/players" />
+          <StatCard
+            label="Evaluations"
+            value={insights?.evaluations ? `${insights.evaluations.completed ?? 0}/${insights.evaluations.expected ?? 0}` : stats.evaluations_completed}
+            icon={ClipboardCheck} accent="hsl(var(--info))" testId="stat-evals-completed"
+          />
+          <StatCard label="Checked In" value={stats.checked_in} icon={CheckCircle2} accent="hsl(var(--success))" testId="stat-checked-in" />
+        </div>
+
+        {ev ? (
+          <Card className="rounded-2xl border-border overflow-hidden">
+            <div className="hero-sweep px-5 py-4 border-b flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-xs uppercase tracking-widest text-muted-foreground">Upcoming / Active Event</p>
+                <Link to={`/events/${ev.id}`} className="font-display text-2xl text-foreground hover:underline" data-testid="dashboard-event-link">{ev.name}</Link>
+                <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5"><CalendarDays className="h-3.5 w-3.5" /> {ev.date} · {ev.location}</p>
+              </div>
+              <StatusBadge status={ev.status} testId="event-status-badge" />
+            </div>
+            <CardContent className="pt-4 pb-4">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <QuickAction to={`/events/${ev.id}`} icon={CalendarDays} label="Open Event" testId="quick-action-open-event" />
+                <QuickAction to="/development" icon={TrendingUp} label="Log Development Note" testId="quick-action-log-development" />
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <EmptyState icon={CalendarDays} title="No events yet" hint="Your next event will appear here once it's scheduled." />
+        )}
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card className="rounded-2xl border-border">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center justify-between text-base">
+                <span className="flex items-center gap-2"><Target className="h-4 w-4 text-success" /> Athletes with Active Goals</span>
+                <Link to="/development" className="text-xs text-info hover:underline font-normal">Open Progress</Link>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1.5">
+              {athleteGoals.length === 0 && (
+                <p className="text-sm text-muted-foreground py-4 text-center">
+                  {devOverview ? "No active development goals yet." : "Development goals will appear here."}
+                </p>
+              )}
+              {athleteGoals.map((g, i) => (
+                <Link key={g.athlete_id} to={`/players/${g.athlete_id}`} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-secondary transition-colors" data-testid={`goal-athlete-${i}`}>
+                  <PlayerAvatar firstName={g.athlete?.first_name} lastName={g.athlete?.last_name} photoUrl={g.athlete?.photo_url} size="sm" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-foreground truncate">{g.athlete?.first_name} {g.athlete?.last_name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{g.title || g.goal || g.description || "Development goal"}</p>
+                  </div>
+                  {g.status && <StatusBadge status={g.status} />}
+                </Link>
+              ))}
+            </CardContent>
+          </Card>
+          <Card className="rounded-2xl border-border">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center justify-between text-base">
+                <span>{assessments.length > 0 ? "Recent Assessments" : "Recently Added Players"}</span>
+                <Link to="/players" className="text-xs text-info hover:underline font-normal">View all ({data?.total_players})</Link>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1.5">
+              {assessments.length > 0 ? (
+                assessments.map((n) => (
+                  <Link key={n.id} to={`/players/${n.athlete_id}`} className="block rounded-xl border px-3.5 py-2.5 hover:bg-secondary transition-colors">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-foreground">{n.athlete ? `${n.athlete.first_name} ${n.athlete.last_name}` : "Athlete"}</p>
+                      <span className="text-[11px] text-muted-foreground">{(n.created_at || "").slice(0, 10)}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.summary || n.strengths || n.content || n.note_type}</p>
+                  </Link>
+                ))
+              ) : (
+                (data?.recent_players || []).map((p) => (
+                  <Link key={p.id} to={`/players/${p.id}`} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-secondary transition-colors">
+                    <PlayerAvatar firstName={p.first_name} lastName={p.last_name} size="sm" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-foreground truncate">{p.first_name} {p.last_name}</p>
+                      <p className="text-xs text-muted-foreground">{p.age_group} · {p.primary_position}</p>
+                    </div>
+                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                  </Link>
+                ))
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  // -------- OWNER / ADMIN — Organization HQ --------
   const ev = data?.upcoming_event;
   const stats = data?.event_stats || {};
   const isAdmin = role === "owner" || role === "admin";
+  const org = orgSummary?.organization;
+  const orgName = org?.name || user?.organization_name;
+  const gradClasses = (orgSummary?.grad_classes || []).filter((g) => g?.year);
   return (
     <div className="space-y-5" data-testid="admin-dashboard">
-      <div>
-        <h1 className="font-display text-4xl text-foreground">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">Welcome back, {user?.full_name?.split(" ")[0]}.</p>
+      <div className="flex items-center gap-3.5">
+        {org?.logo_url ? (
+          <img src={org.logo_url} alt={orgName} className="h-12 w-12 rounded-xl object-cover ring-1 ring-border shrink-0" data-testid="org-hq-logo" />
+        ) : (
+          <div className="h-12 w-12 rounded-xl bg-brand-tertiary ring-1 ring-brand/40 flex items-center justify-center shrink-0" data-testid="org-hq-logo">
+            <span className="font-display text-lg font-extrabold text-brand leading-none">{(orgName || "HQ").charAt(0)}</span>
+          </div>
+        )}
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Organization HQ</p>
+          <h1 className="font-display text-3xl sm:text-4xl text-foreground truncate" data-testid="org-hq-name">{orgName || "Dashboard"}</h1>
+          <p className="text-sm text-muted-foreground">Welcome back, {user?.full_name?.split(" ")[0]}.</p>
+        </div>
       </div>
+
+      {orgSummary && <DevTrendStrip trend={orgSummary.development_trend} testId="dev-trend-strip" />}
+
+      {orgSummary && (
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          <StatCard label="Athletes" value={orgSummary.athletes} icon={Users} testId="stat-org-athletes" to="/players" />
+          <StatCard label="Teams" value={orgSummary.teams} icon={Shield} testId="stat-org-teams" />
+          <StatCard label="Coaches" value={orgSummary.coaches} sub={`${orgSummary.evaluators ?? 0} evaluators`} icon={UsersRound} testId="stat-org-coaches" to="/staff" />
+          <StatCard label="Awaiting Review" value={orgSummary.evaluations?.awaiting_review} icon={ClipboardList} accent="hsl(var(--warning))" testId="stat-org-awaiting-review" to="/review" />
+          <StatCard label="Upcoming Events" value={orgSummary.events?.upcoming} sub={`${orgSummary.events?.total ?? 0} total`} icon={CalendarDays} accent="hsl(var(--info))" testId="stat-org-upcoming-events" to="/events" />
+        </div>
+      )}
+
+      {gradClasses.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2" data-testid="grad-class-strip">
+          <span className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1.5 mr-1">
+            <GraduationCap className="h-3.5 w-3.5" /> Grad Classes
+          </span>
+          {gradClasses.map((g) => (
+            <Link
+              key={g.year}
+              to={`/players?graduation_year=${g.year}`}
+              className="rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-secondary transition-colors font-mono-num"
+              data-testid={`grad-class-${g.year}`}
+            >
+              {g.year} · {g.count}
+            </Link>
+          ))}
+        </div>
+      )}
 
       {ev ? (
         <Card className="rounded-2xl border-border overflow-hidden">

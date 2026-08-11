@@ -29,10 +29,46 @@ todos:
   - id: phase-8
     content: "Phase 8: Email (Resend) wired for invites/access-codes/resets; user must create the Resend account + verify domain"
     status: completed
+  - id: rev2
+    content: "Revision 2 (11 Aug): field eval mode, role-first dashboards, player card hero, grad-year nav, insight-card reports, Org HQ, athlete My Development"
+    status: in_progress
 isProject: false
 ---
 
 # 60'6" ID — Phased Revision Plan
+
+## Revision 2 — Next priorities (received 11 Aug 2026, event in 5 days)
+
+Coach G's follow-up direction. Core rule: **keep everything working; change presentation, focus,
+and role-first framing.** Build order as given: (1) evaluation workflow reliability + field UX,
+(2) results UX, (3) profile visual hierarchy, (4) progressive disclosure, (5) role dashboards,
+(6) grad-year navigation, (7) Organization HQ, (8) development/video refinement. Roadmap items
+(T.E.S. method, AI development plans, drill assignment loop, badges, admin scheduling) are
+explicitly deferred — do not build before the event.
+
+In flight (file-partitioned, six workstreams):
+- **Field mode** — EvaluationForm/Evaluate: sticky athlete photo/name/bib header, minimal chrome,
+  bigger touch targets, bib-labeled prev/next; save/offline logic untouched by hard constraint.
+- **Role dashboards + Org HQ** — Dashboard/AppLayout: evaluator "Evaluation Mode", coach
+  "My Athletes", head-scout review-first, owner "Organization HQ" (org identity + `logo_url`
+  prominent, "60'6\" ID powering {org}"), development-first stats.
+- **Athlete "My Development"** — MyId: development delta headline, TOP 3 priorities
+  (current → target), PB chips, what's-next; never more than 3 weaknesses at once.
+- **Digital player card** — PlayerProfile hero: "2029 | SS/3B | R/R" identity line, 4–6 KPIs
+  (Current Evaluation, Development ↑, verified Exit Velo / 60-yd, Current Goal, Profile %),
+  progress-before-ranking ordering.
+- **Backend** — `graduation_year` list filter + `/athletes/grad-years`, `/reports/insights`
+  (top movers, needs review, flagged, position snapshot, development trend), `/organizations/summary`
+  + `logo_url` on org.
+- **Grad-year nav + Scout board + Reports landing** — PlayersList "Class of" chips with
+  deep-linking, Scout prospect board (grad/pos/verified metrics/trend/compare), Reports leading
+  with six insight cards above the existing tables.
+
+Verified no-op: §9 media structure already supports the future film/feedback/drill split
+(athlete/event/evaluation/season linkage + consent + privacy are all on the row; drills are a
+separate collection). Nothing to change now.
+
+---
 
 **Status note (August 2026):** every phase below was previously marked `completed`. A full
 verification pass — eight independent code audits plus runtime testing — found that only Phase 0

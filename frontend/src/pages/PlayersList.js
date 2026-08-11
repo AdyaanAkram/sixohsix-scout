@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, errMsg, signedUrl } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -116,16 +117,68 @@ const AddPlayerDialog = ({ onCreated }) => {
   );
 };
 
+// Grad-year chip row (client direction: "quickly open CLASS OF 2029 and see
+// that entire athlete group"). Counts come from GET /athletes/grad-years; when
+// that endpoint is absent the row hides itself — unless a deep link already
+// carries a year, in which case a minimal row still renders so the filter can
+// be cleared.
+export const GradYearChips = ({ years, selected, onSelect, testIdPrefix }) => {
+  const list = years?.length ? years : selected !== "all" ? [{ year: selected, count: null }] : [];
+  if (list.length === 0) return null;
+  const chip = (active) =>
+    cn(
+      "shrink-0 whitespace-nowrap rounded-full border h-9 px-3.5 inline-flex items-center text-sm font-semibold transition-colors",
+      active
+        ? "bg-primary text-white border-primary"
+        : "bg-card text-muted-foreground border-border hover:border-brand/50 hover:text-foreground"
+    );
+  return (
+    <div className="flex gap-2 overflow-x-auto pb-1" data-testid={`${testIdPrefix}-gradyear-chips`}>
+      <button type="button" onClick={() => onSelect("all")} className={chip(selected === "all")} data-testid={`${testIdPrefix}-gradyear-chip-all`}>
+        All classes
+      </button>
+      {list.map(({ year, count }) => (
+        <button
+          key={year}
+          type="button"
+          onClick={() => onSelect(String(year))}
+          className={chip(String(year) === String(selected))}
+          data-testid={`${testIdPrefix}-gradyear-chip-${year}`}
+        >
+          Class of {year}{count !== null && count !== undefined ? ` (${count})` : ""}
+        </button>
+      ))}
+    </div>
+  );
+};
+
 export default function PlayersList() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [ageGroup, setAgeGroup] = useState("all");
   const [position, setPosition] = useState("all");
   const [status, setStatus] = useState("active");
+  const [gradYears, setGradYears] = useState(null); // null → endpoint unavailable, row hidden
   const isAdmin = ["owner", "admin"].includes(user?.role);
+
+  // Deep-linkable: /players?graduation_year=2029 opens straight onto that class.
+  const gradYear = searchParams.get("graduation_year") || "all";
+  const setGradYear = (year) => {
+    const next = new URLSearchParams(searchParams);
+    if (year === "all") next.delete("graduation_year");
+    else next.set("graduation_year", String(year));
+    setSearchParams(next, { replace: true });
+  };
+
+  useEffect(() => {
+    api.get("/athletes/grad-years")
+      .then((r) => setGradYears(Array.isArray(r.data) ? r.data : null))
+      .catch(() => setGradYears(null));
+  }, []);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -134,8 +187,18 @@ export default function PlayersList() {
     if (ageGroup !== "all") params.age_group = ageGroup;
     if (position !== "all") params.position = position;
     if (status !== "all") params.status = status;
-    api.get("/athletes", { params }).then((r) => setPlayers(r.data)).finally(() => setLoading(false));
-  }, [search, ageGroup, position, status]);
+    if (gradYear !== "all") params.graduation_year = gradYear;
+    api.get("/athletes", { params }).then((r) => {
+      let rows = Array.isArray(r.data) ? r.data : r.data?.athletes || [];
+      // Belt-and-braces: if the backend doesn't support the graduation_year
+      // param yet, the same filter is applied client-side so a deep link never
+      // shows the wrong class.
+      if (gradYear !== "all") rows = rows.filter((p) => String(p.graduation_year || "") === String(gradYear));
+      // Dashboard "Flagged" cards deep-link here; the list payload carries the flag.
+      if (searchParams.get("flagged") === "true") rows = rows.filter((p) => p.flagged_follow_up);
+      setPlayers(rows);
+    }).finally(() => setLoading(false));
+  }, [search, ageGroup, position, status, gradYear, searchParams]);
 
   useEffect(() => {
     const t = setTimeout(load, search ? 350 : 0);
@@ -161,6 +224,8 @@ export default function PlayersList() {
           </div>
         )}
       </div>
+
+      <GradYearChips years={gradYears} selected={gradYear} onSelect={setGradYear} testIdPrefix="players" />
 
       <div className="flex flex-wrap gap-2">
         <div className="relative flex-1 min-w-[200px]">
@@ -200,7 +265,7 @@ export default function PlayersList() {
                     <PlayerAvatar firstName={p.first_name} lastName={p.last_name} />
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-foreground truncate">{p.first_name} {p.last_name}</p>
-                      <p className="text-xs text-muted-foreground">{p.age_group || "—"} · {p.primary_position || "—"} · {p.current_team || "No team"}</p>
+                      <p className="text-xs text-muted-foreground">{p.graduation_year ? `${p.graduation_year} · ` : ""}{p.age_group || "—"} · {p.primary_position || "—"} · {p.current_team || "No team"}</p>
                     </div>
                     <StatusBadge status={p.status} />
                     <ChevronRight className="h-4 w-4 text-muted-foreground" />
@@ -215,6 +280,7 @@ export default function PlayersList() {
               <TableHeader>
                 <TableRow className="bg-secondary">
                   <TableHead>Player</TableHead>
+                  <TableHead>Class</TableHead>
                   <TableHead>Age Group</TableHead>
                   <TableHead>Position</TableHead>
                   <TableHead>B/T</TableHead>
@@ -232,6 +298,7 @@ export default function PlayersList() {
                         <span className="font-semibold text-foreground">{p.first_name} {p.last_name}</span>
                       </div>
                     </TableCell>
+                    <TableCell className="font-mono-num">{p.graduation_year || "—"}</TableCell>
                     <TableCell>{p.age_group || "—"}</TableCell>
                     <TableCell>{p.primary_position || "—"}</TableCell>
                     <TableCell className="font-mono-num text-xs">{p.bats || "—"}/{p.throws || "—"}</TableCell>

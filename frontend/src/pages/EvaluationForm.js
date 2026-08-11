@@ -12,7 +12,7 @@ import { SaveStatusPill } from "@/components/common/SaveStatusPill";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { ArrowLeft, ChevronLeft, ChevronRight, EyeOff, Camera, CheckCircle2, Lock, Send, CloudUpload, RotateCcw, Upload } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, EyeOff, Camera, CheckCircle2, Lock, MessageSquarePlus, Send, CloudUpload, RotateCcw, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   POSITIONS, loadStationTemplates, resolveTemplateLocal, saveStationTemplates,
@@ -251,6 +251,8 @@ export default function EvaluationForm() {
   const captureInputRef = useRef(null);
   const pickInputRef = useRef(null);
   const mediaUrlRef = useRef(null);
+  // Presentational only — lets the sticky footer's note shortcut scroll to comments.
+  const commentsRef = useRef(null);
 
   // Reads the freshest draft available synchronously.
   const currentDraft = useCallback(
@@ -943,31 +945,49 @@ export default function EvaluationForm() {
 
   return (
     <div className="max-w-2xl mx-auto -mt-2">
-      {/* Sticky chrome — athlete identity always visible while scrolling metrics */}
+      {/* Sticky identity card — photo, name and BIG bib stay visible while scrolling scores */}
       <div className="sticky top-0 z-30 -mx-4 sm:-mx-6 px-4 sm:px-6 py-2.5 bg-background/95 border-b border-divider" data-testid="evaluation-sticky-header">
-        <div className="flex items-center justify-between gap-2">
-          <button onClick={() => navigate(`/evaluate/${evaluation.assignment_id}`)} className="inline-flex items-center gap-1 text-sm font-medium text-info min-h-[40px] shrink-0" data-testid="evaluation-back-button">
-            <ArrowLeft className="h-4 w-4" /> <span className="hidden sm:inline">List</span>
+        <div className="flex items-center gap-2.5">
+          <button onClick={() => navigate(`/evaluate/${evaluation.assignment_id}`)} className="inline-flex items-center justify-center text-info min-h-[44px] min-w-[36px] shrink-0" aria-label="Back to player list" data-testid="evaluation-back-button">
+            <ArrowLeft className="h-5 w-5" />
           </button>
-          <div className="min-w-0 flex-1 text-center px-1">
-            <p className="font-semibold text-sm text-foreground truncate" data-testid="evaluation-player-name">
-              {evaluation.bib_number ? `#${evaluation.bib_number} · ` : ""}
-              {athlete.last_name || "—"}{athlete.first_name ? `, ${athlete.first_name}` : ""}
-            </p>
-            <p className="text-[10px] text-muted-foreground truncate">
-              {evaluateAs || evaluation.resolved_position || athlete.primary_position || "POS?"}
-              {" · "}{athlete.age_group || "—"}
-              {" · "}{evaluation.station_name}
-              {missingRequired.length > 0 ? ` · ${missingRequired.length} required left` : ""}
+          <PlayerAvatar firstName={athlete.first_name} lastName={athlete.last_name} photoUrl={athlete.photo_url} size="lg" bib={evaluation.bib_number} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-1.5 min-w-0">
+              {evaluation.bib_number != null && evaluation.bib_number !== "" && (
+                <span className="font-mono-num font-extrabold text-2xl text-brand leading-none shrink-0">#{evaluation.bib_number}</span>
+              )}
+              <p className="font-semibold text-base text-foreground truncate" data-testid="evaluation-player-name">
+                {(athlete.first_name || athlete.last_name) ? `${athlete.first_name || ""} ${athlete.last_name || ""}`.trim() : "—"}
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5 mt-1 min-w-0">
+              <span
+                className="inline-flex items-center rounded-full bg-brand text-primary-foreground px-2 py-0.5 text-[10px] font-bold tracking-wide shrink-0"
+                data-testid="resolved-position-badge"
+              >
+                {evaluateAs || evaluation.resolved_position || athlete.primary_position || "POS?"}
+              </span>
+              <span className="text-[11px] text-muted-foreground truncate">
+                {athlete.age_group || "—"}{evaluation.station_name ? ` · ${evaluation.station_name}` : ""}
+              </span>
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            {locked ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-success/15 border border-success/40 text-success px-2.5 py-1 text-xs font-semibold">
+                <Lock className="h-3 w-3" /> Locked
+              </span>
+            ) : (
+              <SaveStatusPill status={saveStatus} lastSaved={lastSaved} onRetry={retrySync} warning={storageWarn} />
+            )}
+            <p className="font-mono-num text-xs font-bold text-foreground leading-none">
+              {completionPct}%
+              <span className={cn("ml-1 font-sans font-semibold", missingRequired.length ? "text-warning" : "text-success")}>
+                {missingRequired.length ? `· ${missingRequired.length} req` : "· done"}
+              </span>
             </p>
           </div>
-          {locked ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-success/15 border border-success/40 text-success px-2.5 py-1 text-xs font-semibold shrink-0">
-              <Lock className="h-3 w-3" /> Locked
-            </span>
-          ) : (
-            <SaveStatusPill status={saveStatus} lastSaved={lastSaved} onRetry={retrySync} warning={storageWarn} />
-          )}
         </div>
         <div className="mt-2 h-1 rounded-full bg-muted overflow-hidden">
           <div
@@ -977,62 +997,51 @@ export default function EvaluationForm() {
         </div>
       </div>
 
-      <div className="flex items-center gap-3.5 py-3">
-        <PlayerAvatar firstName={athlete.first_name} lastName={athlete.last_name} size="lg" bib={evaluation.bib_number} />
-        <div className="flex-1 min-w-0">
-          <p className="font-display text-2xl sm:text-3xl text-foreground leading-none truncate">
-            {athlete.first_name} {athlete.last_name}
-          </p>
-          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-            <span
-              className="inline-flex items-center rounded-full bg-brand text-primary-foreground px-2.5 py-0.5 text-[11px] font-bold tracking-wide"
-              data-testid="resolved-position-badge"
-            >
-              {evaluateAs || evaluation.resolved_position || athlete.primary_position || "POS?"}
-            </span>
+      {/* Secondary detail lives behind a collapsible so the scoring flow stays clean */}
+      <details className="group mt-3 mb-4 rounded-xl border border-border bg-card" data-testid="evaluation-details-collapsible">
+        <summary className="flex items-center justify-between gap-2 px-3 min-h-[44px] cursor-pointer list-none [&::-webkit-details-marker]:hidden text-xs font-semibold text-muted-foreground uppercase tracking-wide select-none">
+          Details &amp; position override
+          <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
+        </summary>
+        <div className="px-3 pb-3 pt-1 space-y-3 border-t border-divider">
+          <p className="text-xs text-muted-foreground">
+            {evaluation.event_name || "—"}{evaluation.station_name ? ` · ${evaluation.station_name}` : ""}
             {resolutionReason && (
-              <span className="text-[10px] text-muted-foreground uppercase tracking-wide" data-testid="resolution-reason">
-                via {resolutionReason.replace(/_/g, " ")}
+              <span className="uppercase tracking-wide" data-testid="resolution-reason">
+                {" "}· template via {resolutionReason.replace(/_/g, " ")}
               </span>
             )}
-          </div>
-        </div>
-        <div className="text-right shrink-0">
-          <p className="font-mono-num font-bold text-2xl text-foreground">{completionPct}%</p>
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-            {missingRequired.length ? `${missingRequired.length} req` : "Complete"}
           </p>
+          {!locked && (
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide" htmlFor="evaluate-as">Evaluate as</label>
+              <select
+                id="evaluate-as"
+                disabled={overrideBusy}
+                value={evaluateAs}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (filledCount > 0 && v !== (evaluateAs || "")) {
+                    if (!window.confirm("Changing position may swap the metric set. Continue?")) {
+                      e.target.value = evaluateAs;
+                      return;
+                    }
+                  }
+                  applyPositionOverride(v);
+                }}
+                className="h-12 rounded-xl border border-input bg-background px-3 text-sm font-semibold min-w-[8rem]"
+                data-testid="evaluate-as-select"
+              >
+                <option value="">Registered ({athlete.primary_position || "—"})</option>
+                {POSITIONS.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+              <span className="text-[11px] text-muted-foreground">This evaluation only — not their registered position.</span>
+            </div>
+          )}
         </div>
-      </div>
-
-      {!locked && (
-        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2.5">
-          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide" htmlFor="evaluate-as">Evaluate as</label>
-          <select
-            id="evaluate-as"
-            disabled={overrideBusy}
-            value={evaluateAs}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (filledCount > 0 && v !== (evaluateAs || "")) {
-                if (!window.confirm("Changing position may swap the metric set. Continue?")) {
-                  e.target.value = evaluateAs;
-                  return;
-                }
-              }
-              applyPositionOverride(v);
-            }}
-            className="h-12 rounded-xl border border-input bg-background px-3 text-sm font-semibold min-w-[8rem]"
-            data-testid="evaluate-as-select"
-          >
-            <option value="">Registered ({athlete.primary_position || "—"})</option>
-            {POSITIONS.map((p) => (
-              <option key={p} value={p}>{p}</option>
-            ))}
-          </select>
-          <span className="text-[11px] text-muted-foreground">This evaluation only — not their registered position.</span>
-        </div>
-      )}
+      </details>
 
       {storageWarn && (
         <div className="mb-4 rounded-xl bg-warning/15 border border-warning/40 px-4 py-3 text-sm text-warning" data-testid="storage-warning-banner">
@@ -1122,7 +1131,7 @@ export default function EvaluationForm() {
         ))}
 
         {/* Comments */}
-        <div>
+        <div ref={commentsRef} className="scroll-mt-32">
           <h2 className="font-display text-xl text-foreground mb-2.5 flex items-center gap-2">
             <span className="h-4 w-1 rounded bg-destructive inline-block" /> Comments
           </h2>
@@ -1133,7 +1142,7 @@ export default function EvaluationForm() {
                 {QUICK_TAGS.map((tag) => (
                   <button key={tag} type="button" disabled={locked} onClick={() => toggleTag(tag)}
                     data-testid={`quick-tag-${tag.toLowerCase().replace(/\s+/g, "-")}`}
-                    className={cn("rounded-full border px-3.5 py-2 text-xs font-semibold transition active:scale-[0.96]",
+                    className={cn("rounded-full border px-3.5 min-h-[44px] text-xs font-semibold transition active:scale-[0.96]",
                       (comments.quick_tags || []).includes(tag) ? "bg-primary text-white border-transparent" : "bg-card text-muted-foreground hover:bg-secondary")}>
                     {tag}
                   </button>
@@ -1176,25 +1185,40 @@ export default function EvaluationForm() {
       {/* Sticky footer — sits above bottom nav only when nav is visible; evaluation route hides tabs */}
       <div className="sticky bottom-0 z-30 -mx-4 sm:-mx-6 mt-6 px-4 sm:px-6 py-3 bg-card border-t safe-bottom-pad">
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="rounded-xl h-14 px-4 min-w-[56px]" disabled={!prevPlayer} onClick={() => goTo(-1)} data-testid="prev-player-button" aria-label={prevPlayer ? `Previous player: ${prevPlayer.first_name} ${prevPlayer.last_name}` : "Previous player"} title={prevPlayer ? `${prevPlayer.first_name} ${prevPlayer.last_name}` : ""}>
-            <ChevronLeft className="h-6 w-6" />
+          <Button variant="outline" className="rounded-xl h-14 px-2 min-w-[56px] flex-col gap-0.5" disabled={!prevPlayer} onClick={() => goTo(-1)} data-testid="prev-player-button" aria-label={prevPlayer ? `Previous player: ${prevPlayer.first_name} ${prevPlayer.last_name}` : "Previous player"} title={prevPlayer ? `${prevPlayer.first_name} ${prevPlayer.last_name}` : ""}>
+            <ChevronLeft className="h-5 w-5" />
+            {prevPlayer && (
+              <span className="text-[10px] font-semibold leading-none truncate max-w-[72px]">
+                {prevPlayer.bib_number ? `#${prevPlayer.bib_number} ` : ""}{prevPlayer.last_name || prevPlayer.first_name}
+              </span>
+            )}
           </Button>
+          {!locked && (
+            <Button variant="outline" className="rounded-xl h-14 w-12 px-0 shrink-0" onClick={() => commentsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} aria-label="Jump to notes" title="Jump to notes" data-testid="jump-to-notes-button">
+              <MessageSquarePlus className="h-5 w-5" />
+            </Button>
+          )}
           {!locked ? (
             <Button className="flex-1 rounded-xl h-14 bg-brand hover:bg-brand-secondary text-base font-semibold active:scale-[0.98]" onClick={() => setSubmitOpen(true)} data-testid="evaluation-submit-button">
               <Send className="h-4 w-4 mr-1.5" /> Submit
             </Button>
           ) : (
             <Button className="flex-1 rounded-xl h-14 bg-brand hover:bg-brand-secondary text-base font-semibold" onClick={() => nextPlayer ? goTo(1) : navigate(`/evaluate/${evaluation.assignment_id}`)} data-testid="post-submit-next">
-              {nextPlayer ? `Next: ${nextPlayer.first_name}` : "Back to list"}
+              {nextPlayer ? `Next · ${nextPlayer.bib_number ? `#${nextPlayer.bib_number} ` : ""}${nextPlayer.last_name || nextPlayer.first_name}` : "Back to list"}
             </Button>
           )}
-          <Button variant="outline" className="rounded-xl h-14 px-4 min-w-[56px]" disabled={!nextPlayer} onClick={() => goTo(1)} data-testid="next-player-button" aria-label={nextPlayer ? `Next player: ${nextPlayer.first_name} ${nextPlayer.last_name}` : "Next player"} title={nextPlayer ? `${nextPlayer.first_name} ${nextPlayer.last_name}` : ""}>
-            <ChevronRight className="h-6 w-6" />
+          <Button variant="outline" className="rounded-xl h-14 px-2 min-w-[56px] flex-col gap-0.5" disabled={!nextPlayer} onClick={() => goTo(1)} data-testid="next-player-button" aria-label={nextPlayer ? `Next player: ${nextPlayer.first_name} ${nextPlayer.last_name}` : "Next player"} title={nextPlayer ? `${nextPlayer.first_name} ${nextPlayer.last_name}` : ""}>
+            <ChevronRight className="h-5 w-5" />
+            {nextPlayer && (
+              <span className="text-[10px] font-semibold leading-none truncate max-w-[72px]">
+                {nextPlayer.bib_number ? `#${nextPlayer.bib_number} ` : ""}{nextPlayer.last_name || nextPlayer.first_name}
+              </span>
+            )}
           </Button>
         </div>
-        {nextPlayer && (
-          <p className="text-[11px] text-center text-muted-foreground mt-1.5 truncate">
-            Next up · #{nextPlayer.bib_number || "—"} {nextPlayer.first_name} {nextPlayer.last_name}
+        {missingRequired.length > 0 && !locked && (
+          <p className="text-[11px] text-center text-warning font-semibold mt-1.5 truncate" data-testid="footer-missing-required">
+            {missingRequired.length} required metric{missingRequired.length > 1 ? "s" : ""} still empty
           </p>
         )}
       </div>

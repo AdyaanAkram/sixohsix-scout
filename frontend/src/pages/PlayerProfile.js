@@ -118,6 +118,30 @@ function comparisonSeries(item) {
   ].filter((s) => typeof s.value === "number" && Number.isFinite(s.value));
 }
 
+// Exit velocity and the 60-yard dash headline the hero KPI row. Keys are
+// canonical (spec §4D) but legacy spellings are tolerated for older rows.
+const EXIT_VELO_KEYS = ["exit_velocity", "exit_velo"];
+const SIXTY_YARD_KEYS = ["sixty_yard_dash", "sixty_yd", "sixty_yard", "60_yd", "60yd", "60_yard_dash"];
+
+// Headline value for a KPI card: personal best when on file, otherwise the
+// latest measurement — never a fabricated number. Returns null when the
+// athlete has no such metric, so the card is omitted entirely.
+function headlineMetric(comparison, keys) {
+  const item = (comparison || []).find((c) => keys.includes(c.metric_key));
+  if (!item) return null;
+  const bestVal = pointValue(item.personal_best);
+  const curVal = pointValue(item.current);
+  const usingBest = typeof bestVal === "number";
+  const value = usingBest ? bestVal : curVal;
+  if (typeof value !== "number") return null;
+  const point = usingBest ? item.personal_best : item.current;
+  const source =
+    (point && typeof point === "object" && point.source) ||
+    (item.current && typeof item.current === "object" && item.current.source) ||
+    null;
+  return { value, unit: item.unit || "", source, isBest: usingBest };
+}
+
 function deltaLabel(current, other, lowerBetter, unit) {
   if (typeof current !== "number" || typeof other !== "number") return null;
   const diff = Math.round((current - other) * 100) / 100;
@@ -456,6 +480,16 @@ export default function PlayerProfile() {
   }, [athleteId]);
   useEffect(() => { loadMedia(); }, [loadMedia]);
 
+  // Headline verified metrics (exit velocity, 60-yard) surface in the hero KPI
+  // row, so the comparison endpoint must load on mount — not only when the
+  // Verified Metrics tab opens.
+  const loadComparison = useCallback(() => {
+    api.get(`/metrics/athlete/${athleteId}/comparison`)
+      .then((r) => setComparison(Array.isArray(r.data) ? r.data : (r.data?.metrics || [])))
+      .catch(() => setComparison([]));
+  }, [athleteId]);
+  useEffect(() => { loadComparison(); }, [loadComparison]);
+
   useEffect(() => {
     if (!canCoach) return;
     api.get(`/athletes/${athleteId}/invite-status`)
@@ -536,8 +570,9 @@ export default function PlayerProfile() {
   const refreshAll = () => {
     loadSummary();
     loadMedia();
+    loadComparison();
     setNotes(null); setGoals(null); setTimeline(null);
-    setMetrics(null); setMilestones(null); setComparison(null); setAwards(null); setPlan(null);
+    setMetrics(null); setMilestones(null); setAwards(null); setPlan(null);
   };
 
   const logMetric = async () => {
@@ -554,7 +589,7 @@ export default function PlayerProfile() {
       });
       toast.success(r.data.is_personal_best ? "Logged — new personal best!" : "Metric logged.");
       setMetricForm((f) => ({ ...f, value: "" }));
-      setMetrics(null); setMilestones(null); setComparison(null);
+      setMetrics(null); setMilestones(null); loadComparison();
     } catch (e) {
       // The API rejects verified-tier sources for unauthorized roles — show the
       // reason inline instead of leaving the form looking successful.
@@ -644,6 +679,18 @@ export default function PlayerProfile() {
     { name: "Current", score: summary.latest_overall ?? 0 },
   ];
   const metricCount = summary.verified_metric_count ?? (metrics || []).length;
+  const orgName = user?.organization_name || a.organization_name || "";
+  const isVerifiedId = summary.verified_metric_count > 0 || (metrics || []).length > 0;
+  // Sketch format: 2029 | SS/3B | R/R — grad year, primary/secondary positions,
+  // bats/throws. Segments with no data are omitted, never invented.
+  const positionLine = [a.primary_position, ...(a.secondary_positions || [])].filter(Boolean).join("/");
+  const identityLine = [
+    a.graduation_year,
+    positionLine,
+    a.bats || a.throws ? `${a.bats || "—"}/${a.throws || "—"}` : null,
+  ].filter(Boolean).join(" | ");
+  const exitVeloKpi = headlineMetric(comparison, EXIT_VELO_KEYS);
+  const sixtyKpi = headlineMetric(comparison, SIXTY_YARD_KEYS);
   const TAB_LABELS = {
     overview: "Overview", evaluations: "Evaluations", progress: "Progress", verified: "Verified Metrics",
     story: "Player Story", media: "Videos & Photos", notes: "Coach Notes", development: "Development Goals",
@@ -657,25 +704,36 @@ export default function PlayerProfile() {
         <ArrowLeft className="h-3.5 w-3.5" /> Players
       </button>
 
-      {/* Hero header */}
+      {/* Hero — digital player card */}
       <Card className="rounded-2xl border-border overflow-hidden" data-testid="profile-hero">
-        <div className="hero-sweep px-5 py-6">
-          <div className="flex flex-col sm:flex-row gap-5">
-            <PlayerAvatar firstName={a.first_name} lastName={a.last_name} size="hero" photoUrl={a.photo_url} />
-            <div className="flex-1 min-w-0 space-y-3">
+        <div className="hero-sweep px-5 py-6 space-y-4">
+          <div className="flex flex-col sm:flex-row gap-6">
+            <PlayerAvatar firstName={a.first_name} lastName={a.last_name} size="hero" photoUrl={a.photo_url} className="mx-auto sm:mx-0" />
+            <div className="flex-1 min-w-0">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h1 className="font-display text-4xl sm:text-5xl text-foreground" data-testid="profile-player-name">{a.first_name} {a.last_name}</h1>
+                <div className="min-w-0 space-y-1.5 text-center sm:text-left mx-auto sm:mx-0">
+                  <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2.5">
+                    <h1 className="font-display text-5xl sm:text-6xl leading-[0.95] text-foreground" data-testid="profile-player-name">{a.first_name} {a.last_name}</h1>
                     <StatusBadge status={a.status} />
-                    {(summary.verified_metric_count > 0 || (metrics || []).length > 0) && (
-                      <span className="rounded-full bg-brand/20 border border-brand/40 text-brand px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">60&apos;6&quot; Verified</span>
-                    )}
                     {a.flagged_follow_up && <span className="inline-flex items-center gap-1 rounded-full bg-destructive/15 border border-destructive/40 text-destructive px-2.5 py-0.5 text-xs font-semibold"><Flag className="h-3 w-3" /> Follow-up</span>}
                   </div>
-                  <p className="text-sm font-mono-num text-brand mt-1" data-testid="profile-permanent-id">{formatPermanentId(a.id)}</p>
+                  {identityLine && (
+                    <p className="text-lg sm:text-xl font-semibold tracking-wide text-foreground" data-testid="profile-identity-line">{identityLine}</p>
+                  )}
+                  <div className="flex flex-wrap items-center justify-center sm:justify-start gap-x-2 gap-y-1 text-sm text-muted-foreground">
+                    {a.current_team && <span className="font-medium text-foreground">{a.current_team}</span>}
+                    {a.current_team && orgName && <span aria-hidden="true">•</span>}
+                    {orgName && <span>{orgName}</span>}
+                    {isVerifiedId && (
+                      <>
+                        {(a.current_team || orgName) && <span aria-hidden="true">•</span>}
+                        <span className="rounded-full bg-brand/20 border border-brand/40 text-brand px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">Verified 60&apos;6&quot; ID</span>
+                      </>
+                    )}
+                  </div>
+                  <p className="text-sm font-mono-num text-brand" data-testid="profile-permanent-id">{formatPermanentId(a.id)}</p>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap justify-center sm:justify-end gap-2 mx-auto sm:mx-0">
                   {canCoach && (
                     <Button variant="outline" className="rounded-xl h-10" disabled={inviteBusy || inviteStatus?.status === "accepted"} onClick={sendInvite} data-testid="invite-to-platform-button">
                       <Mail className="h-4 w-4 mr-1" />
@@ -686,7 +744,15 @@ export default function PlayerProfile() {
                   {isAdmin && a.status === "active" && <Button variant="outline" className="rounded-xl h-10 text-muted-foreground" onClick={archive} data-testid="profile-archive-button"><Archive className="h-4 w-4 mr-1" /> Archive</Button>}
                 </div>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-2 text-sm">
+            </div>
+          </div>
+          {/* Full bio detail stays available — presentation changes, depth doesn't. */}
+          <Collapsible>
+            <CollapsibleTrigger className="inline-flex items-center gap-1 text-xs font-semibold text-info hover:underline [&[data-state=open]>svg]:rotate-180" data-testid="hero-details-expander">
+              View Details <ChevronDown className="h-3.5 w-3.5" />
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="pt-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-2 text-sm">
                 <div><p className="text-[10px] uppercase text-muted-foreground">Age group</p><p className="font-semibold">{a.age_group || "—"}</p></div>
                 <div><p className="text-[10px] uppercase text-muted-foreground">Grad year</p><p className="font-semibold">{a.graduation_year || "—"}</p></div>
                 <div><p className="text-[10px] uppercase text-muted-foreground">Primary</p><p className="font-semibold">{a.primary_position || "—"}</p></div>
@@ -694,7 +760,7 @@ export default function PlayerProfile() {
                 <div><p className="text-[10px] uppercase text-muted-foreground">Bats / Throws</p><p className="font-semibold">{a.bats || "—"} / {a.throws || "—"}</p></div>
                 <div><p className="text-[10px] uppercase text-muted-foreground">Height / Weight</p><p className="font-semibold">{a.height || "—"} / {a.weight || "—"}</p></div>
                 <div><p className="text-[10px] uppercase text-muted-foreground">Team</p><p className="font-semibold truncate">{a.current_team || "—"}</p></div>
-                <div><p className="text-[10px] uppercase text-muted-foreground">Organization</p><p className="font-semibold truncate">{user?.organization_name || a.organization_name || "—"}</p></div>
+                <div><p className="text-[10px] uppercase text-muted-foreground">Organization</p><p className="font-semibold truncate">{orgName || "—"}</p></div>
                 <div><p className="text-[10px] uppercase text-muted-foreground">Last evaluation</p><p className="font-semibold">{lastEvalDate ? String(lastEvalDate).slice(0, 10) : "—"}</p></div>
                 <div>
                   <p className="text-[10px] uppercase text-muted-foreground">Profile</p>
@@ -702,41 +768,59 @@ export default function PlayerProfile() {
                 </div>
               </div>
               {completion.missing.length > 0 && (
-                <p className="text-xs text-muted-foreground">Missing: {completion.missing.join(" · ")}</p>
+                <p className="text-xs text-muted-foreground mt-2">Missing: {completion.missing.join(" · ")}</p>
               )}
-            </div>
-          </div>
+            </CollapsibleContent>
+          </Collapsible>
         </div>
       </Card>
 
-      {/* Six quick cards */}
+      {/* KPI row — the sketch order: evaluation, development, headline verified
+          metrics (only when the athlete actually has them), goal, completion.
+          Missing headline metrics fall back to real counts, never invented values. */}
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3" data-testid="profile-quick-cards">
         <Card className="rounded-2xl border-border"><CardContent className="py-4 text-center">
           <p className="text-2xl font-bold font-mono-num text-foreground">{summary.latest_overall ?? "—"}</p>
-          <p className="text-[10px] uppercase text-muted-foreground mt-1">Overall score</p>
+          <p className="text-[10px] uppercase text-muted-foreground mt-1">Current evaluation</p>
         </CardContent></Card>
-        <Card className="rounded-2xl border-border"><CardContent className="py-4 text-center">
+        <Card className="rounded-2xl border-brand/40 bg-brand/5" data-testid="kpi-development"><CardContent className="py-4 text-center">
           <p className={`text-2xl font-bold font-mono-num flex items-center justify-center gap-1 ${change > 0 ? "text-success" : change < 0 ? "text-destructive" : "text-muted-foreground"}`}>
-            {change > 0 ? <TrendingUp className="h-4 w-4" /> : change < 0 ? <TrendingDown className="h-4 w-4" /> : <Minus className="h-4 w-4" />}
+            {change > 0 ? <TrendingUp className="h-5 w-5" /> : change < 0 ? <TrendingDown className="h-5 w-5" /> : <Minus className="h-5 w-5" />}
             {change != null ? `${change > 0 ? "+" : ""}${change}` : "—"}
           </p>
-          <p className="text-[10px] uppercase text-muted-foreground mt-1">Score change</p>
+          <p className="text-[10px] uppercase text-brand font-bold mt-1">Development</p>
         </CardContent></Card>
-        <Card className="rounded-2xl border-border"><CardContent className="py-4 text-center">
-          <p className="text-2xl font-bold font-mono-num">{summary.evaluation_count ?? 0}</p>
-          <p className="text-[10px] uppercase text-muted-foreground mt-1">Evaluations</p>
-        </CardContent></Card>
-        <Card className="rounded-2xl border-border"><CardContent className="py-4 text-center">
-          <p className="text-2xl font-bold font-mono-num">{metricCount}</p>
-          <p className="text-[10px] uppercase text-muted-foreground mt-1">Verified metrics</p>
-        </CardContent></Card>
+        {exitVeloKpi ? (
+          <Card className="rounded-2xl border-border" data-testid="kpi-exit-velocity"><CardContent className="py-4 text-center">
+            <p className="text-2xl font-bold font-mono-num text-foreground">{exitVeloKpi.value}<span className="text-sm font-semibold text-muted-foreground ml-1">{exitVeloKpi.unit}</span></p>
+            <p className="text-[10px] uppercase text-muted-foreground mt-1">Exit velocity{exitVeloKpi.isBest ? " · best" : ""}</p>
+            {exitVeloKpi.source && <div className="mt-1 flex justify-center"><VerificationBadge source={exitVeloKpi.source} compact /></div>}
+          </CardContent></Card>
+        ) : (
+          <Card className="rounded-2xl border-border"><CardContent className="py-4 text-center">
+            <p className="text-2xl font-bold font-mono-num">{metricCount}</p>
+            <p className="text-[10px] uppercase text-muted-foreground mt-1">Verified metrics</p>
+          </CardContent></Card>
+        )}
+        {sixtyKpi ? (
+          <Card className="rounded-2xl border-border" data-testid="kpi-sixty-yard"><CardContent className="py-4 text-center">
+            <p className="text-2xl font-bold font-mono-num text-foreground">{sixtyKpi.value}<span className="text-sm font-semibold text-muted-foreground ml-1">{sixtyKpi.unit}</span></p>
+            <p className="text-[10px] uppercase text-muted-foreground mt-1">60-yard{sixtyKpi.isBest ? " · best" : ""}</p>
+            {sixtyKpi.source && <div className="mt-1 flex justify-center"><VerificationBadge source={sixtyKpi.source} compact /></div>}
+          </CardContent></Card>
+        ) : (
+          <Card className="rounded-2xl border-border"><CardContent className="py-4 text-center">
+            <p className="text-2xl font-bold font-mono-num">{summary.evaluation_count ?? 0}</p>
+            <p className="text-[10px] uppercase text-muted-foreground mt-1">Evaluations</p>
+          </CardContent></Card>
+        )}
         <Card className="rounded-2xl border-border"><CardContent className="py-4 text-center px-2">
           <p className="text-sm font-bold truncate">{activeGoal?.title || "—"}</p>
           <p className="text-[10px] uppercase text-muted-foreground mt-1">Current goal</p>
         </CardContent></Card>
         <Card className="rounded-2xl border-border"><CardContent className="py-4 text-center">
-          <p className="text-sm font-bold font-mono-num">{(a.updated_at || "").slice(0, 10) || "—"}</p>
-          <p className="text-[10px] uppercase text-muted-foreground mt-1">Last updated</p>
+          <p className="text-2xl font-bold font-mono-num text-brand">{completion.pct}%</p>
+          <p className="text-[10px] uppercase text-muted-foreground mt-1">Profile complete</p>
         </CardContent></Card>
       </div>
 
@@ -752,65 +836,20 @@ export default function PlayerProfile() {
         </div>
 
         {/* ---- Overview ---- */}
+        {/* Development-first: the change headline and progress story render
+            before rankings-flavored content (strengths/needs, skill radar). */}
         <TabsContent value="overview" className="mt-4 space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <Card className="rounded-2xl border-border"><CardContent className="py-4">
-              <p className="text-xs text-muted-foreground mb-2">Profile completion</p>
-              <Progress value={completion.pct} className="h-3" />
-              <p className="text-2xl font-bold font-mono-num text-brand mt-2">{completion.pct}%</p>
-              <ul className="mt-2 space-y-1" data-testid="completion-checklist">
-                {completion.checks.map((c) => (
-                  <li key={c.key} className="flex items-center gap-1.5 text-xs">
-                    {c.ok
-                      ? <Check className="h-3.5 w-3.5 text-success shrink-0" />
-                      : <X className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
-                    <span className={c.ok ? "text-muted-foreground" : "text-foreground"}>{c.label}</span>
-                  </li>
-                ))}
-              </ul>
-            </CardContent></Card>
-            {prevScore != null && summary.latest_overall != null && (
-              <Card className="rounded-2xl border-border sm:col-span-2"><CardContent className="py-3">
-                <p className="text-xs text-muted-foreground mb-1">Previous vs current</p>
-                <ResponsiveContainer width="100%" height={100}>
-                  <BarChart data={compareBar} layout="vertical" margin={{ left: 10, right: 10 }}>
-                    <XAxis type="number" domain={[0, 10]} hide />
-                    <YAxis type="category" dataKey="name" width={70} tick={{ fontSize: 11 }} />
-                    <Bar dataKey="score" fill="hsl(var(--brand))" radius={[0, 6, 6, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </CardContent></Card>
-            )}
-          </div>
-
-          {rankedCats.length > 0 && (
-            <Card className="rounded-2xl border-border" data-testid="strengths-needs-card">
-              <CardContent className="pt-4 pb-4 grid gap-4 sm:grid-cols-2">
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-success font-semibold mb-1.5">Strongest skills</p>
-                  <ul className="space-y-1" data-testid="overview-strengths">
-                    {topStrengths.map((c) => (
-                      <li key={c.name} className="flex items-center justify-between gap-2 text-sm">
-                        <span className="truncate">{c.name}</span>
-                        <span className="font-mono-num font-semibold text-foreground">{c.score}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-warning font-semibold mb-1.5">Main development needs</p>
-                  {topNeeds.length > 0 ? (
-                    <ul className="space-y-1" data-testid="overview-needs">
-                      {topNeeds.map((c) => (
-                        <li key={c.name} className="flex items-center justify-between gap-2 text-sm">
-                          <span className="truncate">{c.name}</span>
-                          <span className="font-mono-num font-semibold text-foreground">{c.score}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">More scored categories are needed to rank development needs.</p>
-                  )}
+          {change != null && (
+            <Card className="rounded-2xl border-brand/40 bg-brand/5" data-testid="development-headline">
+              <CardContent className="py-4 flex items-center gap-4">
+                {change > 0 ? <TrendingUp className="h-9 w-9 text-success shrink-0" /> : change < 0 ? <TrendingDown className="h-9 w-9 text-destructive shrink-0" /> : <Minus className="h-9 w-9 text-muted-foreground shrink-0" />}
+                <div className="min-w-0">
+                  <p className={`font-mono-num font-bold text-3xl ${change > 0 ? "text-success" : change < 0 ? "text-destructive" : "text-muted-foreground"}`}>
+                    {change > 0 ? "+" : ""}{change}{change === 0 ? " — holding steady" : " this season"}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Overall evaluation {prevScore != null ? `moved from ${Math.round(prevScore * 100) / 100} to ${summary.latest_overall}` : "change"} since the previous event.
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -819,28 +858,9 @@ export default function PlayerProfile() {
           <div className="grid gap-4 lg:grid-cols-2">
             <Card className="rounded-2xl border-border">
               <CardContent className="pt-4 pb-2">
-                <p className="font-semibold text-sm text-foreground mb-1">Skill Categories</p>
-                {radarData.length >= 3 ? (
-                  <IdRadarChart data={radarData} height={260} />
-                ) : radarData.length > 0 ? (
-                  <div className="space-y-2.5 py-2">
-                    {radarData.map((d) => (
-                      <div key={d.category}>
-                        <div className="flex justify-between text-xs mb-1"><span className="font-medium">{d.category}</span><span className="font-mono-num">{d.score}</span></div>
-                        <Progress value={d.score * 10} className="h-2" />
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground py-8 text-center">No scored evaluations yet.</p>
-                )}
-              </CardContent>
-            </Card>
-            <Card className="rounded-2xl border-border">
-              <CardContent className="pt-4 pb-2">
                 <p className="font-semibold text-sm text-foreground mb-1">Score Trend</p>
                 {trendData.length >= 2 ? (
-                  <ResponsiveContainer width="100%" height={260}>
+                  <ResponsiveContainer width="100%" height={220}>
                     <LineChart data={trendData} margin={{ top: 10, right: 10, bottom: 0, left: -20 }}>
                       <CartesianGrid stroke="hsl(var(--divider))" strokeDasharray="3 3" />
                       <XAxis dataKey="name" tick={{ fontSize: 10 }} />
@@ -854,7 +874,36 @@ export default function PlayerProfile() {
                 )}
               </CardContent>
             </Card>
+            {prevScore != null && summary.latest_overall != null && (
+              <Card className="rounded-2xl border-border"><CardContent className="pt-4 pb-3">
+                <p className="font-semibold text-sm text-foreground mb-1">Previous vs current</p>
+                <ResponsiveContainer width="100%" height={100}>
+                  <BarChart data={compareBar} layout="vertical" margin={{ left: 10, right: 10 }}>
+                    <XAxis type="number" domain={[0, 10]} hide />
+                    <YAxis type="category" dataKey="name" width={70} tick={{ fontSize: 11 }} />
+                    <Bar dataKey="score" fill="hsl(var(--brand))" radius={[0, 6, 6, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent></Card>
+            )}
           </div>
+
+          {(summary.goals || []).length > 0 && (
+            <Card className="rounded-2xl border-border">
+              <CardContent className="pt-4 pb-4 space-y-3">
+                <p className="font-semibold text-sm text-foreground">Current Development Goals</p>
+                {summary.goals.slice(0, 3).map((g) => (
+                  <div key={g.id} className="flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{g.title}</p>
+                      <Progress value={g.progress} className="h-2 mt-1" />
+                    </div>
+                    <StatusBadge status={g.status} />
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
 
           {growthRows.length > 0 && (
             <Card className="rounded-2xl border-border" data-testid="metric-growth-card">
@@ -910,6 +959,78 @@ export default function PlayerProfile() {
             </Card>
           )}
 
+          {rankedCats.length > 0 && (
+            <Card className="rounded-2xl border-border" data-testid="strengths-needs-card">
+              <CardContent className="pt-4 pb-4 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-success font-semibold mb-1.5">Strongest skills</p>
+                  <ul className="space-y-1" data-testid="overview-strengths">
+                    {topStrengths.map((c) => (
+                      <li key={c.name} className="flex items-center justify-between gap-2 text-sm">
+                        <span className="truncate">{c.name}</span>
+                        <span className="font-mono-num font-semibold text-foreground">{c.score}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-warning font-semibold mb-1.5">Main development needs</p>
+                  {topNeeds.length > 0 ? (
+                    <ul className="space-y-1" data-testid="overview-needs">
+                      {topNeeds.map((c) => (
+                        <li key={c.name} className="flex items-center justify-between gap-2 text-sm">
+                          <span className="truncate">{c.name}</span>
+                          <span className="font-mono-num font-semibold text-foreground">{c.score}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">More scored categories are needed to rank development needs.</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card className="rounded-2xl border-border">
+              <CardContent className="pt-4 pb-2">
+                <p className="font-semibold text-sm text-foreground mb-1">Skill Categories</p>
+                {radarData.length >= 3 ? (
+                  <IdRadarChart data={radarData} height={260} />
+                ) : radarData.length > 0 ? (
+                  <div className="space-y-2.5 py-2">
+                    {radarData.map((d) => (
+                      <div key={d.category}>
+                        <div className="flex justify-between text-xs mb-1"><span className="font-medium">{d.category}</span><span className="font-mono-num">{d.score}</span></div>
+                        <Progress value={d.score * 10} className="h-2" />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground py-8 text-center">No scored evaluations yet.</p>
+                )}
+              </CardContent>
+            </Card>
+            <Card className="rounded-2xl border-border">
+              <CardContent className="pt-4 pb-4">
+                <p className="font-semibold text-sm text-foreground mb-2">Profile completion</p>
+                <Progress value={completion.pct} className="h-3" />
+                <p className="text-2xl font-bold font-mono-num text-brand mt-2">{completion.pct}%</p>
+                <ul className="mt-2 space-y-1" data-testid="completion-checklist">
+                  {completion.checks.map((c) => (
+                    <li key={c.key} className="flex items-center gap-1.5 text-xs">
+                      {c.ok
+                        ? <Check className="h-3.5 w-3.5 text-success shrink-0" />
+                        : <X className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                      <span className={c.ok ? "text-muted-foreground" : "text-foreground"}>{c.label}</span>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          </div>
+
           {summary.latest_scout_assessment && (
             <Card className="rounded-2xl border-border" data-testid="scout-assessment-card">
               <CardContent className="pt-4 pb-4">
@@ -936,22 +1057,6 @@ export default function PlayerProfile() {
             </Card>
           )}
 
-          {(summary.goals || []).length > 0 && (
-            <Card className="rounded-2xl border-border">
-              <CardContent className="pt-4 pb-4 space-y-3">
-                <p className="font-semibold text-sm text-foreground">Current Development Goals</p>
-                {summary.goals.slice(0, 3).map((g) => (
-                  <div key={g.id} className="flex items-center gap-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{g.title}</p>
-                      <Progress value={g.progress} className="h-2 mt-1" />
-                    </div>
-                    <StatusBadge status={g.status} />
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          )}
         </TabsContent>
 
         {/* ---- Evaluations ---- */}
