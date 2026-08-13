@@ -33,8 +33,8 @@ todos:
     content: "Revision 2 (11 Aug): field eval mode, role-first dashboards, player card hero, grad-year nav, insight-card reports, Org HQ, athlete My Development — deployed to Surge/Render 11 Aug"
     status: completed
   - id: rev3
-    content: "Revision 3 (12 Aug, UI/UX-only): role-mode nav, command-center HQ, premium Players roster + Quick View, derived Teams pages, Scout watchlist — evaluation flow FROZEN for field testing"
-    status: in_progress
+    content: "Revision 3 (12 Aug, UI/UX-only): role-mode nav, command-center HQ, premium Players roster + Quick View, derived Teams pages, Scout watchlist — deployed 12 Aug, eval flow verified byte-identical"
+    status: completed
 isProject: false
 ---
 
