@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="How to use 60'6&quot; ID — roles, step-by-step guides, and common questions.">
+<title>60'6" ID — User Guide</title>
+<style>
+  :root{
+    --bg:#0A0A0A; --card:#141414; --card2:#1D1D1D; --line:#2A2A2A;
+    --ink:#F5F5F5; --mut:#9CA3AF; --brand:#DC2626; --brand-soft:rgba(220,38,38,.14);
+    --ok:#22C55E; --warn:#F59E0B; --info:#3B82F6; --r:16px;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#F6F6F4; --card:#FFFFFF; --card2:#F1F1EF; --line:#E5E5E3;
+           --ink:#111111; --mut:#5B6472; --brand-soft:rgba(220,38,38,.08); }
+  }
+  *{box-sizing:border-box; margin:0}
+  html{scroll-behavior:smooth; scroll-padding-top:84px}
+  body{background:var(--bg); color:var(--ink);
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:860px; margin:0 auto; padding:0 18px 80px}
+  a{color:var(--brand); text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  /* Header */
+  header{position:sticky; top:0; z-index:10; background:var(--bg);
+    border-bottom:1px solid var(--line); padding:12px 0}
+  .hrow{max-width:860px; margin:0 auto; padding:0 18px;
+    display:flex; align-items:center; gap:12px}
+  .mark{width:38px; height:38px; border-radius:11px; background:var(--brand-soft);
+    border:1px solid var(--brand); display:grid; place-items:center;
+    font-weight:800; color:var(--brand); font-size:13px; flex:none}
+  .hname{font-weight:800; font-size:18px; letter-spacing:.2px}
+  .hname span{color:var(--brand)}
+  .hsub{font-size:11px; color:var(--mut); text-transform:uppercase; letter-spacing:.12em}
+  .open-app{margin-left:auto; background:var(--brand); color:#fff; font-weight:700;
+    padding:9px 16px; border-radius:99px; font-size:14px; white-space:nowrap}
+  .open-app:hover{text-decoration:none; filter:brightness(1.1)}
+
+  /* Nav chips */
+  nav{display:flex; gap:8px; overflow-x:auto; padding:14px 0 4px;
+    -webkit-overflow-scrolling:touch; scrollbar-width:none}
+  nav::-webkit-scrollbar{display:none}
+  nav a{flex:none; border:1px solid var(--line); background:var(--card);
+    color:var(--ink); padding:8px 14px; border-radius:99px; font-size:14px; font-weight:600}
+  nav a:hover{border-color:var(--brand); text-decoration:none}
+
+  /* Hero */
+  .hero{padding:34px 0 10px}
+  .hero h1{font-size:clamp(30px,6vw,44px); line-height:1.1; font-weight:800; letter-spacing:-.5px}
+  .hero h1 span{color:var(--brand)}
+  .tag{color:var(--mut); margin-top:8px; font-size:17px}
+  .pill{display:inline-block; margin-top:14px; background:var(--brand-soft);
+    border:1px solid var(--brand); color:var(--brand); font-weight:700; font-size:13px;
+    padding:6px 12px; border-radius:99px}
+
+  h2{font-size:24px; font-weight:800; margin:44px 0 6px; letter-spacing:-.3px}
+  .lead{color:var(--mut); margin-bottom:18px}
+
+  /* Cards */
+  .card{background:var(--card); border:1px solid var(--line); border-radius:var(--r);
+    padding:18px; margin-bottom:14px}
+  .role-head{display:flex; align-items:center; gap:12px}
+  .badge{flex:none; width:44px; height:44px; border-radius:12px; display:grid;
+    place-items:center; font-size:22px; background:var(--card2)}
+  .role-head b{font-size:17px; display:block}
+  .role-head small{color:var(--mut)}
+  .kicker{font-size:11px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:var(--brand)}
+
+  ul.plain{list-style:none; padding:0; margin:10px 0 0}
+  ul.plain li{padding:7px 0 7px 26px; position:relative; border-top:1px solid var(--line)}
+  ul.plain li:first-child{border-top:0}
+  ul.plain li::before{content:"→"; position:absolute; left:2px; color:var(--brand); font-weight:700}
+
+  ol.steps{margin:10px 0 0; padding:0; counter-reset:s; list-style:none}
+  ol.steps li{counter-increment:s; padding:8px 0 8px 38px; position:relative; border-top:1px solid var(--line)}
+  ol.steps li:first-child{border-top:0}
+  ol.steps li::before{content:counter(s); position:absolute; left:0; top:8px; width:26px; height:26px;
+    border-radius:99px; background:var(--brand-soft); border:1px solid var(--brand);
+    color:var(--brand); font-weight:800; font-size:13px; display:grid; place-items:center}
+
+  /* Details / accordions */
+  details{background:var(--card); border:1px solid var(--line); border-radius:var(--r);
+    margin-bottom:10px; overflow:hidden}
+  summary{cursor:pointer; padding:15px 44px 15px 18px; font-weight:700; list-style:none;
+    position:relative; -webkit-tap-highlight-color:transparent}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:"+"; position:absolute; right:16px; top:50%; translate:0 -55%;
+    color:var(--brand); font-size:22px; font-weight:600}
+  details[open] summary::after{content:"–"}
+  details .body{padding:0 18px 16px; color:var(--ink)}
+  details .body p{margin-bottom:10px}
+  details .body p:last-child{margin-bottom:0}
+  .muted{color:var(--mut)}
+
+  .chip{display:inline-block; font-size:12px; font-weight:700; padding:3px 10px;
+    border-radius:99px; border:1px solid var(--line); background:var(--card2); margin:2px 4px 2px 0}
+  .chip.warn{color:var(--warn); border-color:var(--warn)}
+  .chip.ok{color:var(--ok); border-color:var(--ok)}
+  .chip.info{color:var(--info); border-color:var(--info)}
+  .chip.brand{color:var(--brand); border-color:var(--brand)}
+
+  .callout{border-left:4px solid var(--brand); background:var(--brand-soft);
+    border-radius:0 var(--r) var(--r) 0; padding:14px 16px; margin:16px 0}
+  .callout b{display:block; margin-bottom:4px}
+
+  footer{margin-top:56px; border-top:1px solid var(--line); padding-top:22px;
+    color:var(--mut); font-size:14px; text-align:center}
+  footer .motto{color:var(--brand); font-weight:800; letter-spacing:.14em;
+    text-transform:uppercase; font-size:12px; margin-bottom:6px}
+  @media (min-width:700px){ .grid2{display:grid; grid-template-columns:1fr 1fr; gap:14px} .grid2 .card{margin-bottom:0} }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hrow">
+    <div class="mark">60</div>
+    <div>
+      <div class="hname">60'6" <span>ID</span></div>
+      <div class="hsub">User Guide</div>
+    </div>
+    <a class="open-app" href="https://606-scout.surge.sh">Open the app →</a>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <section class="hero">
+    <h1>Every Player. Every Rep.<br>Every Season <span>Tells the Story.</span></h1>
+    <p class="tag">60'6" ID gives every athlete one permanent player profile that stores evaluations,
+      verified measurements, videos, coach feedback and year-to-year development.</p>
+    <span class="pill">Train. Elevate. Succeed.</span>
+    <nav aria-label="Sections">
+      <a href="#start">Getting started</a>
+      <a href="#roles">Your role</a>
+      <a href="#howto">How-to guides</a>
+      <a href="#faq">Common questions</a>
+    </nav>
+  </section>
+
+  <!-- ============ GETTING STARTED ============ -->
+  <h2 id="start">Getting started</h2>
+  <p class="lead">Three things to know before your first sign-in.</p>
+
+  <div class="card">
+    <span class="kicker">Sign in</span>
+    <ul class="plain">
+      <li>You'll receive an <b>invitation email</b> from your organization. Open the link, set a
+        password, and you're in. There is nothing to download — it works in the browser on any
+        phone, tablet, or computer.</li>
+      <li>Guest coaches at an event may instead receive a <b>6-character access code</b> — enter it
+        on the app's <i>Redeem</i> page with your email.</li>
+      <li>Forgot your password? Use <b>Forgot password?</b> on the sign-in page.</li>
+    </ul>
+  </div>
+
+  <div class="callout">
+    <b>First load of the day can take ~30–60 seconds.</b>
+    The app server naps when nobody is using it. Wait once and it stays fast. On camp days, open
+    the app before athletes arrive so it's already awake.
+  </div>
+
+  <!-- ============ ROLES ============ -->
+  <h2 id="roles">What you see depends on who you are</h2>
+  <p class="lead">Same athletes, same data — a different home screen and menu built around your job.
+    Tap your role.</p>
+
+  <details>
+    <summary>🏟️&nbsp; Organization Owner / Admin — <i>Organization HQ</i></summary>
+    <div class="body">
+      <p><b>You land on:</b> Organization HQ — athletes, teams, coaches, evaluations awaiting
+        review, upcoming events, and grad-class shortcuts. Every number is a button: tap
+        <i>Awaiting Review</i> to open the review queue, tap a team to open that team.</p>
+      <p><b>Your menu:</b> Overview · Teams · Athletes · Development · Events — with everything
+        else (Reports, Scout, Staff, Templates, Drills, Audit Log, Settings) under
+        <i>Administration</i>.</p>
+      <p><b>You can:</b></p>
+      <ul class="plain">
+        <li>Run events end to end — roster, check-in with bib numbers, stations, evaluator
+          assignments, live progress</li>
+        <li>Give a guest coach temporary access that <b>expires when the event ends</b></li>
+        <li>Manage staff, evaluation templates (by age band and position), and the drill catalog</li>
+        <li>See every report, export CSVs, and generate player PDFs with charts</li>
+        <li>Set your organization's logo (Settings) — it appears beside "Powered by 60'6" ID"</li>
+      </ul>
+    </div>
+  </details>
+
+  <details>
+    <summary>🧢&nbsp; Coach — <i>Coach Hub</i></summary>
+    <div class="body">
+      <p><b>You land on:</b> My Athletes — active development goals first, today's event actions,
+        and your athletes' recent progress.</p>
+      <p><b>Your menu:</b> Overview · My Teams · My Athletes · Evaluations · Development.</p>
+      <p><b>You can:</b></p>
+      <ul class="plain">
+        <li>Check athletes in at events and score at stations you're assigned to</li>
+        <li>Log <b>verified measurements</b> (exit velo, 60-yard, pop time…) — a new personal best
+          automatically celebrates and notifies the athlete</li>
+        <li>Create development goals with a target and a follow-up date</li>
+        <li>Write notes with a visibility level (general, development, private staff,
+          parent-visible…) — notes are never overwritten or lost</li>
+        <li>Upload photos/video tied to an athlete, an event, or an evaluation</li>
+      </ul>
+    </div>
+  </details>
+
+  <details>
+    <summary>📋&nbsp; Evaluator — <i>Evaluation Mode</i></summary>
+    <div class="body">
+      <p><b>You land on:</b> your assignments — station, group, how many players are left, and one
+        big button: <i>Continue Evaluating</i>. No admin screens, nothing to get lost in.</p>
+      <p><b>Your menu:</b> Today's Event · Evaluate · Submitted.</p>
+      <p><b>The field loop:</b> pick a player (search by name or <b>bib number</b>) → score with big
+        tap targets → add a quick note or photo → it <b>saves automatically</b> → Next player. The
+        player's photo, name, and bib stay pinned at the top; the app warns you before you submit
+        with required scores missing.</p>
+      <p><b>Weak wifi? Keep scoring.</b> Scores save on your device and sync when the connection
+        returns — the status pill tells you the truth (<i>Synced</i> vs <i>Waiting</i>). Don't
+        clear your browser data mid-event; that's where offline work lives.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>🔭&nbsp; Head Scout — <i>Scout Mode + Review</i></summary>
+    <div class="body">
+      <p><b>You land on:</b> the Review Desk — evaluations awaiting your approval, who's improving,
+        top movers, and flagged players.</p>
+      <p><b>Your menu:</b> Overview · Review · Discover · Watchlist · Compare · Events.</p>
+      <p><b>You can:</b></p>
+      <ul class="plain">
+        <li><b>Approve or return</b> submitted evaluations (returns go back to the evaluator with
+          your note)</li>
+        <li>Work the <b>Prospect Board</b> — filter by grad class and position, see verified
+          metrics with trust badges</li>
+        <li>⭐ <b>Star prospects</b> to your private Watchlist</li>
+        <li><b>Compare up to four players</b> side by side with charts</li>
+        <li>Open any evaluation's visual <b>results summary</b> — score, change, top strengths and
+          improvement areas</li>
+      </ul>
+    </div>
+  </details>
+
+  <details>
+    <summary>⚾&nbsp; Athlete / Parent — <i>My Development</i></summary>
+    <div class="body">
+      <p><b>You land on:</b> My Development — your development headline (e.g. <i>"↑ +14% development
+        this season"</i>), your <b>top 3 current priorities</b> from your coach, personal bests
+        with verification badges, and what's next.</p>
+      <p><b>Your permanent 60'6" ID</b> (like <span class="chip brand">606-A337F768</span>) stays
+        with you forever — across seasons, teams, and organizations. Every season stacks under the
+        same profile; nothing is ever erased.</p>
+      <p><b>You can:</b></p>
+      <ul class="plain">
+        <li>Complete your profile (photo, height/weight) — the app shows what's missing</li>
+        <li>See every evaluation result, measurement, and milestone</li>
+        <li>Turn on your <b>Public ID Story</b> — a shareable page (with QR) showing only approved
+          content</li>
+        <li><b>Parents:</b> approve or reject photos/videos of your child before anything is
+          displayed — nothing under-13 is ever shown without your approval</li>
+      </ul>
+    </div>
+  </details>
+
+  <!-- ============ HOW-TO ============ -->
+  <h2 id="howto">How-to guides</h2>
+  <p class="lead">The most common jobs, step by step.</p>
+
+  <details>
+    <summary>Run a camp / evaluation day (site manager)</summary>
+    <div class="body">
+      <ol class="steps">
+        <li>Open the app <b>before athletes arrive</b> (wakes the server, caches templates).</li>
+        <li>Events → your event → set status to <b>Evaluation Active</b>.</li>
+        <li><b>Check-In</b> tab: check athletes in, assign <b>bib numbers</b> and groups.</li>
+        <li>Confirm <b>Stations</b> and <b>Evaluators</b> assignments.</li>
+        <li>Watch the <b>Live Progress</b> tab: checked-in, in progress, complete, missing scores,
+          videos awaiting approval. Tap any player to see exactly which metrics are missing.</li>
+        <li>After the event: Review Queue → approve → Reports for rankings, CSV, and player PDFs.</li>
+      </ol>
+      <p class="muted" style="margin-top:10px">Print blank paper score sheets as backup. Dead
+        battery beats no plan.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Give a guest coach access for one event</summary>
+    <div class="body">
+      <ol class="steps">
+        <li>Event → <b>Evaluators</b> tab → enter the coach's personal email.</li>
+        <li>Pick their station / player group.</li>
+        <li>The app emails them a <b>secure 6-character code</b> (it's also shown on screen so you
+          can text it).</li>
+        <li>They sign in via the <b>Redeem</b> page with that code — and see <b>only their
+          assigned players and station</b>. No parent contacts, no medical info, no other coaches'
+          private notes.</li>
+        <li>Access <b>expires automatically when the event ends</b> — or revoke it instantly from
+          the same tab.</li>
+      </ol>
+    </div>
+  </details>
+
+  <details>
+    <summary>Score players at the field (evaluator)</summary>
+    <div class="body">
+      <ol class="steps">
+        <li>Sign in → tap <b>Continue Evaluating</b> on your assignment.</li>
+        <li>Find the player — type their <b>bib number</b> (fastest) or name.</li>
+        <li>Score each category with the big buttons. Only categories relevant to that player's
+          age and position appear.</li>
+        <li>Add a quick note or snap a photo/video right from the form if asked to.</li>
+        <li>Watch the pill say <b>Synced</b>. If you're offline it says so — keep going, it syncs
+          later.</li>
+        <li>Fix anything the <b>missing-scores warning</b> flags, then <b>Submit</b> and tap
+          <b>Next</b> (it shows the next player's bib and name).</li>
+      </ol>
+    </div>
+  </details>
+
+  <details>
+    <summary>Approve or return evaluations (head scout)</summary>
+    <div class="body">
+      <ol class="steps">
+        <li>Review → open a submitted evaluation.</li>
+        <li>Tap <b>Results summary</b> for the visual version — score, change, radar, top
+          strengths and improvement areas.</li>
+        <li><b>Approve</b> — it becomes part of the athlete's permanent record and feeds reports.</li>
+        <li>Or <b>Return</b> with a note — the evaluator sees it, fixes it, and resubmits.</li>
+      </ol>
+    </div>
+  </details>
+
+  <details>
+    <summary>Track development &amp; set goals (coach)</summary>
+    <div class="body">
+      <ol class="steps">
+        <li>My Athletes → open the athlete → <b>Development Goals</b>.</li>
+        <li>Create a goal: what needs improvement, the recommended action, target date, and a
+          follow-up evaluation date.</li>
+        <li>Update progress as they work — athletes see their <b>top 3 priorities</b> on their own
+          screen (never a wall of weaknesses).</li>
+        <li>Log <b>verified measurements</b> on the Verified tab — the athlete's charts compare
+          each number against their previous, their personal best, and age/position benchmarks.</li>
+      </ol>
+    </div>
+  </details>
+
+  <details>
+    <summary>Complete a profile &amp; share a Public Story (athlete / parent)</summary>
+    <div class="body">
+      <ol class="steps">
+        <li>My Development → <b>Edit</b> → add a photo and bio. Under-18 photos wait for approval
+          before they're shown anywhere.</li>
+        <li>The profile meter shows exactly what's missing (photo, height, weight, recent
+          evaluation, approved video).</li>
+        <li>Toggle <b>Public ID Story</b> to get a shareable link + QR. It shows only approved
+          evaluations, verified measurements, and approved media — nothing private, ever.</li>
+      </ol>
+    </div>
+  </details>
+
+  <!-- ============ FAQ ============ -->
+  <h2 id="faq">Common questions</h2>
+  <p class="lead">Quick answers to the things people actually ask.</p>
+
+  <details>
+    <summary>The app is stuck loading / the first login is slow</summary>
+    <div class="body">
+      <p>The server sleeps after ~15 quiet minutes and takes 30–60 seconds to wake. Wait once —
+        everything after that is fast. On event days, open the app before athletes arrive.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>It says "Too many attempts. Please wait a minute."</summary>
+    <div class="body">
+      <p>A safety limit: about 15 sign-ins per minute from one network. At an event, have people
+        sign in as they arrive rather than everyone at once. Waiting 60 seconds clears it.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>What happens to my scores if the wifi dies mid-evaluation?</summary>
+    <div class="body">
+      <p>Nothing is lost. Scores save to the device instantly and sync when connection returns —
+        the status pill only says <b>Synced</b> when the server has truly confirmed it. Even
+        closing the browser and reopening it offline keeps your work. The one thing to never do
+        mid-event: clear the browser's site data — that's where offline work lives.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Are photos and videos of kids safe here?</summary>
+    <div class="body">
+      <p>Yes — by design. Every file records who uploaded it and its consent status. Media of
+        athletes under 13 is <b>never displayed anywhere until a guardian approves it</b>. Files
+        marked private are staff-only regardless of consent. The public story page shows approved
+        content only, and files are stored in private cloud storage that only the app can serve.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>What does the "Verified" badge on a measurement mean?</summary>
+    <div class="body">
+      <p>Every number shows where it came from:
+        <span class="chip">Athlete Submitted</span>
+        <span class="chip">Parent Submitted</span>
+        <span class="chip ok">Coach Submitted</span>
+        <span class="chip ok">Event Verified</span>
+        <span class="chip info">Device Verified</span>
+        <span class="chip brand">60'6" Verified</span></p>
+      <p>Self-reported numbers look visibly different from staff-verified ones — a college coach
+        looking at "88 mph, Event Verified" knows a staff member measured it at a real event. The
+        app enforces this: an athlete literally cannot mark their own number as verified.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>My athlete changed teams / a new season started. Do we make a new profile?</summary>
+    <div class="body">
+      <p><b>No — never.</b> That's the whole point of the permanent 60'6" ID. Each season stacks
+        under the same profile with its own team, measurements, and evaluations, and the Career
+        Overview shows the multi-year story. Old evaluations are never erased or overwritten.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Why can't I see certain information (parent contacts, private notes)?</summary>
+    <div class="body">
+      <p>Access is role-based on purpose. Evaluators see only their assigned players and never see
+        family contacts, medical, or financial details. Coaches don't see other coaches' private
+        notes. Scout assessments marked confidential are visible only to organization leadership.
+        If you think you're missing something you should have, ask your organization's admin —
+        they control roles.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Can I use it on my phone? Is there an app to install?</summary>
+    <div class="body">
+      <p>It's built phone-first — evaluators score on phones at the field. Nothing to install:
+        open <a href="https://606-scout.surge.sh">the app</a> in your browser. Tip: use your
+        browser's <i>Add to Home Screen</i> to get an app-style icon.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>I didn't get my invitation email</summary>
+    <div class="body">
+      <p>Check spam first. Ask your organization admin to re-send the invite (Players → your
+        athlete → Invite, or Staff → Invite for coaches). For event access codes, the site manager
+        can also read the code off their screen and text it to you.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Who owns the data? What happens between camps?</summary>
+    <div class="body">
+      <p>Your organization's data belongs to your organization, in its own walled-off space —
+        organizations can never see each other's athletes. Everything persists between events:
+        run a camp in August and another in October, and every athlete's history simply grows.
+        Evaluations are permanent, timestamped records.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Something looks wrong or broke — what do I do?</summary>
+    <div class="body">
+      <p>Note <b>what you were doing, your role, and the screen you were on</b>, then tell your
+        organization admin. A hard refresh (pull down on mobile) fixes most display oddities after
+        an update. Your scores are safe either way — saving is the first thing the app does.</p>
+    </div>
+  </details>
+
+  <footer>
+    <div class="motto">Train · Elevate · Succeed</div>
+    <div>60'6" ID — Every Player. Every Rep. Every Season Tells the Story.</div>
+  </footer>
+
+</div>
+</body>
+</html>
