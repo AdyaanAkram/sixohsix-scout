@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Badge } from "@/components/ui/badge";
 import { PlayerAvatar } from "@/components/common/PlayerAvatar";
 import { StatusBadge } from "@/components/common/StatusBadge";
@@ -21,6 +22,7 @@ import {
   ArrowLeft, CalendarDays, MapPin, Users, Plus, Trash2, Search, UserPlus,
   CheckCircle2, XCircle, FileDown, Layers, Trophy, ClipboardList,
   Clock, Video, AlertTriangle, Activity, RefreshCw, ExternalLink, ChevronRight,
+  FileUp, Wand2, Pencil, GitMerge, ListChecks, Circle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -28,6 +30,316 @@ import {
 } from "recharts";
 
 const EVENT_STATUSES = ["Draft", "Registration Open", "Registration Closed", "Check-In Open", "Evaluation Active", "Evaluation Complete", "Reports Under Review", "Closed"];
+
+// ---------------- Roster CSV import wizard ----------------
+const IMPORT_STATUS_META = {
+  matched: { label: "Matched", cls: "bg-success/15 text-success border-success/30" },
+  new: { label: "New", cls: "bg-info/15 text-info border-info/30" },
+  possible_duplicate: { label: "Possible duplicate", cls: "bg-warning/15 text-warning border-warning/40" },
+  needs_grad_confirmation: { label: "Needs grad year", cls: "bg-warning/15 text-warning border-warning/40" },
+  error: { label: "Error", cls: "bg-brand/15 text-brand border-brand/30" },
+};
+
+const importDefaultAction = (status) =>
+  status === "matched" || status === "possible_duplicate" ? "use_match" : status === "error" ? "skip" : "create";
+
+const importRowName = (r) => {
+  const d = r.data || {};
+  const n = `${d.first_name || d["First Name"] || ""} ${d.last_name || d["Last Name"] || ""}`.trim();
+  return n || d.name || r.athlete_name || `Row ${r.row}`;
+};
+
+// Big-tap-target action chip (mirrors the check-in filter pills).
+const ActionChip = ({ active, onClick, children, testid }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    data-testid={testid}
+    className={cn(
+      "h-9 px-3 rounded-full text-xs font-semibold border",
+      active ? "bg-brand text-primary-foreground border-brand" : "bg-card text-muted-foreground border-border"
+    )}
+  >
+    {children}
+  </button>
+);
+
+const ImportRosterWizard = ({ eventId, onDone, onUnavailable }) => {
+  const [open, setOpen] = useState(false);
+  const [step, setStep] = useState("upload"); // upload | preview | confirm | done
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [rowState, setRowState] = useState({});
+  const [autoGroup, setAutoGroup] = useState(true);
+  const [result, setResult] = useState(null);
+
+  const reset = () => {
+    setStep("upload"); setFile(null); setPreview(null); setRowState({}); setAutoGroup(true); setResult(null);
+  };
+
+  const setRow = (row, patch) => setRowState((s) => ({ ...s, [row]: { ...s[row], ...patch } }));
+
+  const runPreview = async () => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await api.post(`/events/${eventId}/roster/import/preview`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      const rows = r.data?.rows || [];
+      const rs = {};
+      rows.forEach((row) => { rs[row.row] = { action: importDefaultAction(row.status), graduation_year: "" }; });
+      setRowState(rs);
+      setPreview(r.data);
+      setStep("preview");
+    } catch (e) {
+      if (e?.response?.status === 404) {
+        setOpen(false);
+        onUnavailable?.();
+        toast.error("CSV import isn't available on this server yet.");
+      } else toast.error(errMsg(e));
+    } finally { setBusy(false); }
+  };
+
+  const runConfirm = async () => {
+    setBusy(true);
+    try {
+      const rows = (preview?.rows || []).map((r) => {
+        const st = rowState[r.row] || {};
+        return {
+          row: r.row,
+          action: st.action || "skip",
+          data: r.data,
+          athlete_id: r.athlete_id || null,
+          graduation_year: st.graduation_year ? Number(st.graduation_year) : null,
+        };
+      });
+      const r = await api.post(`/events/${eventId}/roster/import/confirm`, { rows, auto_group: autoGroup });
+      setResult(r.data);
+      setStep("done");
+      onDone?.();
+    } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
+  };
+
+  const summary = preview?.summary || {};
+  const chips = [
+    { label: "Matched ✓", value: summary.matched, cls: IMPORT_STATUS_META.matched.cls },
+    { label: "New", value: summary.new, cls: IMPORT_STATUS_META.new.cls },
+    { label: "Possible duplicates ⚠", value: summary.possible_duplicates, cls: IMPORT_STATUS_META.possible_duplicate.cls },
+    { label: "Needs grad confirmation", value: summary.needs_confirmation, cls: IMPORT_STATUS_META.needs_grad_confirmation.cls },
+    { label: "Errors ✗", value: summary.errors, cls: IMPORT_STATUS_META.error.cls },
+  ];
+
+  const actionCounts = (preview?.rows || []).reduce(
+    (acc, r) => {
+      const a = rowState[r.row]?.action || "skip";
+      acc[a] = (acc[a] || 0) + 1;
+      if (r.status === "needs_grad_confirmation" && a === "create" && !rowState[r.row]?.graduation_year) acc.no_grad += 1;
+      return acc;
+    },
+    { use_match: 0, create: 0, skip: 0, no_grad: 0 }
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
+      <DialogTrigger asChild>
+        <Button className="rounded-xl bg-primary hover:bg-brand-secondary h-10" data-testid="event-import-button">
+          <FileUp className="h-4 w-4 mr-1" /> Import Roster CSV
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="rounded-2xl max-w-lg max-h-[85vh] flex flex-col" data-testid="event-import-dialog">
+        <DialogHeader>
+          <DialogTitle className="font-display text-2xl text-foreground">
+            {step === "upload" && "Import Roster — Upload CSV"}
+            {step === "preview" && "Import Roster — Review Rows"}
+            {step === "confirm" && "Import Roster — Confirm"}
+            {step === "done" && "Import Complete"}
+          </DialogTitle>
+        </DialogHeader>
+
+        {step === "upload" && (
+          <div className="space-y-3">
+            <label className="flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border bg-card px-4 py-8 cursor-pointer hover:bg-secondary">
+              <FileUp className="h-6 w-6 text-muted-foreground" />
+              <span className="text-sm font-semibold text-foreground">{file ? file.name : "Choose a .csv file"}</span>
+              <span className="text-[11px] text-muted-foreground">Tap to browse</span>
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                data-testid="event-import-file-input"
+              />
+            </label>
+            <p className="text-[11px] text-muted-foreground">
+              Supported columns: First/Last Name, DOB or Age, Grad Year, Positions, B/T, Team, Organization, Bib&nbsp;#.
+              Matching rows link to each player's existing 60'6" ID — no duplicate profiles.
+            </p>
+            <DialogFooter>
+              <Button className="w-full rounded-xl bg-primary h-11" disabled={!file || busy} onClick={runPreview} data-testid="event-import-preview-button">
+                {busy ? "Analyzing…" : "Preview Import"}
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+
+        {step === "preview" && preview && (
+          <div className="flex-1 min-h-0 flex flex-col gap-3">
+            <div className="flex flex-wrap gap-1.5" data-testid="event-import-summary">
+              {chips.map((c) => (
+                <span key={c.label} className={cn("text-[11px] font-semibold rounded-full border px-2 py-0.5", c.cls)}>
+                  {c.label}: <span className="font-mono-num">{c.value ?? 0}</span>
+                </span>
+              ))}
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-[200px]">
+              {(preview.rows || []).map((r) => {
+                const st = rowState[r.row] || {};
+                const meta = IMPORT_STATUS_META[r.status] || IMPORT_STATUS_META.error;
+                const isError = r.status === "error";
+                return (
+                  <div key={r.row} className="rounded-xl border border-border p-3 space-y-2" data-testid={`event-import-row-${r.row}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-foreground truncate">
+                          {importRowName(r)} <span className="text-[11px] text-muted-foreground font-normal">row {r.row}</span>
+                        </p>
+                        {r.status === "matched" && (
+                          <p className="text-[11px] text-success">Links to existing 60'6" ID{r.athlete_name ? ` — ${r.athlete_name}` : ""}</p>
+                        )}
+                        {(r.reasons || []).length > 0 && (
+                          <p className="text-[11px] text-muted-foreground">{r.reasons.join(" · ")}</p>
+                        )}
+                      </div>
+                      <span className={cn("text-[11px] font-semibold rounded-full border px-2 py-0.5 shrink-0", meta.cls)}>{meta.label}</span>
+                    </div>
+
+                    {isError ? (
+                      <p className="text-[11px] text-brand">This row can't be imported and will be skipped.</p>
+                    ) : r.status === "possible_duplicate" ? (
+                      <div className="space-y-1.5">
+                        <RadioGroup value={st.action} onValueChange={(v) => setRow(r.row, { action: v })} className="gap-1.5">
+                          <label className="flex items-center gap-2 text-sm cursor-pointer min-h-[36px]">
+                            <RadioGroupItem value="use_match" data-testid={`event-import-row-${r.row}-use-match`} />
+                            Use existing {r.athlete_name || "athlete"}
+                          </label>
+                          <label className="flex items-center gap-2 text-sm cursor-pointer min-h-[36px]">
+                            <RadioGroupItem value="create" data-testid={`event-import-row-${r.row}-create`} />
+                            Create new athlete
+                          </label>
+                          <label className="flex items-center gap-2 text-sm cursor-pointer min-h-[36px]">
+                            <RadioGroupItem value="skip" data-testid={`event-import-row-${r.row}-skip`} />
+                            Skip this row
+                          </label>
+                        </RadioGroup>
+                        {st.action === "create" && (
+                          <p className="text-[11px] text-warning">Creating a new athlete may duplicate an existing 60'6" ID — use the match if it's the same player.</p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-2">
+                        {r.status === "matched" ? (
+                          <ActionChip active={st.action === "use_match"} onClick={() => setRow(r.row, { action: "use_match" })} testid={`event-import-row-${r.row}-use-match`}>
+                            Use existing
+                          </ActionChip>
+                        ) : (
+                          <ActionChip active={st.action === "create"} onClick={() => setRow(r.row, { action: "create" })} testid={`event-import-row-${r.row}-create`}>
+                            Create
+                          </ActionChip>
+                        )}
+                        <ActionChip active={st.action === "skip"} onClick={() => setRow(r.row, { action: "skip" })} testid={`event-import-row-${r.row}-skip`}>
+                          Skip
+                        </ActionChip>
+                        {r.status === "needs_grad_confirmation" && st.action !== "skip" && (
+                          <div className="flex items-center gap-1.5">
+                            <Input
+                              type="number"
+                              inputMode="numeric"
+                              placeholder="Grad yr"
+                              value={st.graduation_year || ""}
+                              onChange={(e) => setRow(r.row, { graduation_year: e.target.value })}
+                              className="h-9 w-24 rounded-lg font-mono-num"
+                              data-testid={`event-import-row-${r.row}-grad-year`}
+                            />
+                            <span className="text-[11px] text-muted-foreground">blank = imports ungrouped</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" className="rounded-xl h-11" onClick={() => setStep("upload")}>Back</Button>
+              <Button className="rounded-xl bg-primary h-11 flex-1" onClick={() => setStep("confirm")} data-testid="event-import-continue-button">
+                Continue
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+
+        {step === "confirm" && preview && (
+          <div className="space-y-3">
+            <div className="rounded-xl border border-border bg-card p-3 text-sm space-y-1">
+              <p><span className="font-mono-num font-bold">{actionCounts.use_match}</span> linked to existing 60'6" IDs</p>
+              <p><span className="font-mono-num font-bold">{actionCounts.create}</span> new athletes created</p>
+              <p><span className="font-mono-num font-bold">{actionCounts.skip}</span> rows skipped</p>
+              {actionCounts.no_grad > 0 && (
+                <p className="text-[11px] text-warning">{actionCounts.no_grad} row(s) have no grad year and will import ungrouped.</p>
+              )}
+            </div>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox checked={autoGroup} onCheckedChange={(v) => setAutoGroup(!!v)} data-testid="event-import-autogroup-checkbox" />
+              Auto-group by graduation year (creates "Class of…" groups)
+            </label>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" className="rounded-xl h-11" onClick={() => setStep("preview")}>Back</Button>
+              <Button className="rounded-xl bg-primary h-11 flex-1" disabled={busy} onClick={runConfirm} data-testid="event-import-confirm-button">
+                {busy ? "Importing…" : "Confirm Import"}
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+
+        {step === "done" && result && (
+          <div className="space-y-3" data-testid="event-import-result">
+            <div className="rounded-xl border border-success/30 bg-success/10 p-3 text-sm space-y-1">
+              <p className="font-semibold text-success">Roster imported.</p>
+              <p className="text-foreground">
+                <span className="font-mono-num font-bold">{result.added ?? 0}</span> added to roster ·{" "}
+                <span className="font-mono-num">{result.matched ?? 0}</span> matched ·{" "}
+                <span className="font-mono-num">{result.created ?? 0}</span> created ·{" "}
+                <span className="font-mono-num">{result.skipped ?? 0}</span> skipped
+              </p>
+              {(result.flagged_no_grad ?? 0) > 0 && (
+                <p className="text-[11px] text-warning">{result.flagged_no_grad} player(s) had no grad year — assign a group manually.</p>
+              )}
+            </div>
+            {(result.groups || []).length > 0 && (
+              <div>
+                <p className="text-xs text-muted-foreground mb-1.5">Groups</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {result.groups.map((g) => (
+                    <span key={g.id} className="text-[11px] font-semibold rounded-full border border-border bg-card px-2 py-0.5">
+                      {g.name} <span className="font-mono-num text-muted-foreground">({g.count})</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button className="w-full rounded-xl bg-primary h-11" onClick={() => { setOpen(false); reset(); }} data-testid="event-import-done-button">
+                Done
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+};
 
 // ---------------- Roster tab ----------------
 const RosterTab = ({ eventId, isAdmin }) => {
@@ -38,6 +350,7 @@ const RosterTab = ({ eventId, isAdmin }) => {
   const [selected, setSelected] = useState({});
   const [dirSearch, setDirSearch] = useState("");
   const [addGroupId, setAddGroupId] = useState("");
+  const [importAvailable, setImportAvailable] = useState(true);
 
   const load = useCallback(() => {
     api.get(`/events/${eventId}/roster`).then((r) => setRoster(r.data));
@@ -96,6 +409,10 @@ const RosterTab = ({ eventId, isAdmin }) => {
           )}
         </div>
         {isAdmin && (
+          <div className="flex flex-wrap items-center gap-2">
+            {importAvailable && (
+              <ImportRosterWizard eventId={eventId} onDone={load} onUnavailable={() => setImportAvailable(false)} />
+            )}
           <Dialog open={addOpen} onOpenChange={(o) => { setAddOpen(o); if (!o) { setSelected({}); setAddGroupId(""); } }}>
             <DialogTrigger asChild>
               <Button className="rounded-xl bg-primary hover:bg-brand-secondary h-10" data-testid="roster-add-players-button">
@@ -140,6 +457,7 @@ const RosterTab = ({ eventId, isAdmin }) => {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          </div>
         )}
       </div>
       {roster.length === 0 ? (
@@ -345,6 +663,15 @@ const CheckInTab = ({ eventId, isAdmin }) => {
 const GroupsTab = ({ eventId, isAdmin }) => {
   const [groups, setGroups] = useState(null);
   const [name, setName] = useState("");
+  const [autoAvailable, setAutoAvailable] = useState(true);
+  const [autoOpen, setAutoOpen] = useState(false);
+  const [regroupAll, setRegroupAll] = useState(false);
+  const [autoBusy, setAutoBusy] = useState(false);
+  const [unassigned, setUnassigned] = useState(null); // set after auto-grouping
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [mergeFrom, setMergeFrom] = useState(null); // group being merged away
+  const [mergeInto, setMergeInto] = useState("");
   const load = useCallback(() => api.get(`/events/${eventId}/groups`).then((r) => setGroups(r.data)), [eventId]);
   useEffect(() => { load(); }, [load]);
 
@@ -360,30 +687,159 @@ const GroupsTab = ({ eventId, isAdmin }) => {
     try { await api.delete(`/events/${eventId}/groups/${gid}`); load(); } catch (e) { toast.error(errMsg(e)); }
   };
 
+  const runAutoGroup = async () => {
+    setAutoBusy(true);
+    try {
+      const r = await api.post(`/events/${eventId}/groups/auto-by-grad`, { regroup_all: regroupAll });
+      setUnassigned(r.data?.unassigned || []);
+      toast.success(`Auto-grouped into ${(r.data?.groups || []).length} group(s) by grad year.`);
+      setAutoOpen(false);
+      setRegroupAll(false);
+      load();
+    } catch (e) {
+      if (e?.response?.status === 404) {
+        setAutoAvailable(false);
+        setAutoOpen(false);
+        toast.error("Auto-grouping isn't available on this server yet.");
+      } else toast.error(errMsg(e));
+    } finally { setAutoBusy(false); }
+  };
+
+  const saveRename = async (gid) => {
+    const n = editName.trim();
+    if (!n) { setEditingId(null); return; }
+    try {
+      await api.patch(`/events/${eventId}/groups/${gid}`, { name: n });
+      setEditingId(null);
+      load();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+
+  const runMerge = async () => {
+    if (!mergeFrom || !mergeInto) return;
+    try {
+      await api.post(`/events/${eventId}/groups/${mergeFrom.id}/merge`, { into_group_id: mergeInto });
+      toast.success("Groups merged.");
+      setMergeFrom(null);
+      setMergeInto("");
+      load();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+
   if (!groups) return <Skeleton className="h-40 rounded-2xl" />;
   return (
     <div className="space-y-3">
       {isAdmin && (
-        <div className="flex gap-2">
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="New group name (e.g. Group A - 12U)" className="h-11 rounded-xl bg-card" data-testid="group-name-input" onKeyDown={(e) => e.key === "Enter" && add()} />
-          <Button className="rounded-xl bg-primary h-11" onClick={add} data-testid="group-add-button"><Plus className="h-4 w-4" /></Button>
+        <div className="flex flex-wrap gap-2">
+          <div className="flex gap-2 flex-1 min-w-[220px]">
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="New group name (e.g. Group A - 12U)" className="h-11 rounded-xl bg-card" data-testid="group-name-input" onKeyDown={(e) => e.key === "Enter" && add()} />
+            <Button className="rounded-xl bg-primary h-11" onClick={add} data-testid="group-add-button"><Plus className="h-4 w-4" /></Button>
+          </div>
+          {autoAvailable && (
+            <Dialog open={autoOpen} onOpenChange={setAutoOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" className="rounded-xl h-11" data-testid="groups-autograd">
+                  <Wand2 className="h-4 w-4 mr-1" /> Auto-group by grad year
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="rounded-2xl max-w-sm">
+                <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Auto-Group by Grad Year</DialogTitle></DialogHeader>
+                <p className="text-sm text-muted-foreground">
+                  Players with a graduation year are placed into "Class of…" groups. Players without one stay ungrouped.
+                </p>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <Checkbox checked={regroupAll} onCheckedChange={(v) => setRegroupAll(!!v)} data-testid="groups-autograd-regroup-all" />
+                  Re-group everyone (moves players already in a group)
+                </label>
+                <DialogFooter>
+                  <Button className="w-full rounded-xl bg-primary h-11" disabled={autoBusy} onClick={runAutoGroup} data-testid="groups-autograd-confirm">
+                    {autoBusy ? "Grouping…" : "Auto-Group"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
         </div>
       )}
-      {groups.length === 0 ? <EmptyState icon={Layers} title="No groups yet" hint="Create groups like 'Group A - 10U' to organize players." /> : (
-        <div className="grid gap-2 sm:grid-cols-2">
-          {groups.map((g) => (
-            <Card key={g.id} className="rounded-2xl border-border">
-              <CardContent className="py-4 flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-foreground">{g.name}</p>
-                  <p className="text-xs text-muted-foreground">{g.player_count} players</p>
-                </div>
-                {isAdmin && <Button variant="ghost" size="icon" onClick={() => remove(g.id)} data-testid={`group-delete-${g.id}`}><Trash2 className="h-4 w-4 text-muted-foreground" /></Button>}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+      {unassigned && unassigned.length > 0 && (
+        <Card className="rounded-2xl border-warning/40 bg-warning/10" data-testid="groups-unassigned">
+          <CardContent className="py-3 space-y-1">
+            <p className="text-sm font-semibold text-warning">No grad year — assign manually</p>
+            <p className="text-xs text-muted-foreground">
+              {unassigned.map((u) => u.name).join(", ")}
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              Set their group on the <Link to={`/events/${eventId}?tab=roster`} className="text-info hover:underline">Roster</Link> or{" "}
+              <Link to={`/events/${eventId}?tab=checkin`} className="text-info hover:underline">Check-In</Link> tab.
+            </p>
+          </CardContent>
+        </Card>
       )}
+      {groups.length === 0 ? <EmptyState icon={Layers} title="No groups yet" hint="Create groups like 'Group A - 10U' to organize players, or auto-group by grad year." /> : (
+        <>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {groups.map((g) => (
+              <Card key={g.id} className="rounded-2xl border-border">
+                <CardContent className="py-4 flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    {editingId === g.id ? (
+                      <Input
+                        autoFocus
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") saveRename(g.id); if (e.key === "Escape") setEditingId(null); }}
+                        onBlur={() => saveRename(g.id)}
+                        className="h-9 rounded-lg"
+                        data-testid={`group-rename-input-${g.id}`}
+                      />
+                    ) : (
+                      <p className="font-semibold text-foreground truncate">{g.name}</p>
+                    )}
+                    <p className="text-xs text-muted-foreground">{g.player_count} players</p>
+                  </div>
+                  {isAdmin && (
+                    <div className="flex items-center shrink-0">
+                      <Button variant="ghost" size="icon" onClick={() => { setEditingId(g.id); setEditName(g.name); }} data-testid={`group-rename-${g.id}`} aria-label={`Rename ${g.name}`}>
+                        <Pencil className="h-4 w-4 text-muted-foreground" />
+                      </Button>
+                      {groups.length > 1 && (
+                        <Button variant="ghost" size="icon" onClick={() => { setMergeFrom(g); setMergeInto(""); }} data-testid={`group-merge-${g.id}`} aria-label={`Merge ${g.name}`}>
+                          <GitMerge className="h-4 w-4 text-muted-foreground" />
+                        </Button>
+                      )}
+                      <Button variant="ghost" size="icon" onClick={() => remove(g.id)} data-testid={`group-delete-${g.id}`}><Trash2 className="h-4 w-4 text-muted-foreground" /></Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            To move a single player between groups, use the <Link to={`/events/${eventId}?tab=checkin`} className="text-info hover:underline">Check-In</Link> tab.
+          </p>
+        </>
+      )}
+      <Dialog open={!!mergeFrom} onOpenChange={(o) => { if (!o) { setMergeFrom(null); setMergeInto(""); } }}>
+        <DialogContent className="rounded-2xl max-w-sm" data-testid="groups-merge-dialog">
+          <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Merge Group</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Move all players from <span className="font-semibold text-foreground">{mergeFrom?.name}</span> into:
+          </p>
+          <Select value={mergeInto || undefined} onValueChange={setMergeInto}>
+            <SelectTrigger className="h-11 rounded-xl" data-testid="groups-merge-into-select"><SelectValue placeholder="Destination group" /></SelectTrigger>
+            <SelectContent>
+              {groups.filter((g) => g.id !== mergeFrom?.id).map((g) => (
+                <SelectItem key={g.id} value={g.id}>{g.name} ({g.player_count})</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <DialogFooter>
+            <Button className="w-full rounded-xl bg-primary h-11" disabled={!mergeInto} onClick={runMerge} data-testid="groups-merge-confirm">
+              Merge
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
@@ -395,6 +851,10 @@ const StationsTab = ({ eventId, isAdmin }) => {
   const [groups, setGroups] = useState([]);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ name: "", template_id: "", group_ids: [], start_time: "09:30", end_time: "14:30" });
+  const [presets, setPresets] = useState(null); // null = unavailable/unknown
+  const [presetOpen, setPresetOpen] = useState(false);
+  const [presetSel, setPresetSel] = useState({});
+  const [presetBusy, setPresetBusy] = useState(false);
 
   const load = useCallback(() => {
     api.get(`/events/${eventId}/stations`).then((r) => setStations(r.data));
@@ -402,6 +862,13 @@ const StationsTab = ({ eventId, isAdmin }) => {
     api.get(`/events/${eventId}/groups`).then((r) => setGroups(r.data));
   }, [eventId]);
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    api.get("/station-presets")
+      .then((r) => setPresets(Array.isArray(r.data) ? r.data : []))
+      .catch(() => setPresets(null)); // 404 / error → hide the presets button
+  }, [isAdmin]);
 
   const add = async () => {
     try {
@@ -416,10 +883,70 @@ const StationsTab = ({ eventId, isAdmin }) => {
     try { await api.delete(`/events/${eventId}/stations/${sid}`); load(); } catch (e) { toast.error(errMsg(e)); }
   };
 
+  const addPresets = async () => {
+    const keys = Object.keys(presetSel).filter((k) => presetSel[k]);
+    if (!keys.length) return;
+    setPresetBusy(true);
+    try {
+      await api.post(`/events/${eventId}/stations/presets`, { keys });
+      toast.success(`${keys.length} station(s) added from presets.`);
+      setPresetOpen(false);
+      setPresetSel({});
+      load();
+    } catch (e) {
+      if (e?.response?.status === 404) {
+        setPresets(null);
+        setPresetOpen(false);
+        toast.error("Station presets aren't available on this server yet.");
+      } else toast.error(errMsg(e));
+    } finally { setPresetBusy(false); }
+  };
+
   if (!stations) return <Skeleton className="h-40 rounded-2xl" />;
+  const existingNames = new Set(stations.map((s) => (s.name || "").trim().toLowerCase()));
   return (
     <div className="space-y-3">
       {isAdmin && (
+        <div className="flex flex-wrap gap-2">
+        {presets && presets.length > 0 && (
+          <Dialog open={presetOpen} onOpenChange={(o) => { setPresetOpen(o); if (!o) setPresetSel({}); }}>
+            <DialogTrigger asChild>
+              <Button variant="outline" className="rounded-xl h-10" data-testid="stations-presets">
+                <ListChecks className="h-4 w-4 mr-1" /> Add preset stations
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="rounded-2xl max-w-sm max-h-[80vh] flex flex-col" data-testid="stations-presets-dialog">
+              <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Preset Stations</DialogTitle></DialogHeader>
+              <div className="flex-1 overflow-y-auto space-y-1.5 min-h-[120px]">
+                {presets.map((p) => {
+                  const exists = existingNames.has((p.name || "").trim().toLowerCase());
+                  return (
+                    <label key={p.key} className={cn("flex items-start gap-3 rounded-xl border border-border px-3 py-2.5", exists ? "opacity-60" : "cursor-pointer hover:bg-secondary")}>
+                      <Checkbox
+                        checked={exists || !!presetSel[p.key]}
+                        disabled={exists}
+                        onCheckedChange={(v) => setPresetSel((s) => ({ ...s, [p.key]: !!v }))}
+                        data-testid={`stations-preset-${p.key}`}
+                        className="mt-0.5"
+                      />
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-foreground">
+                          {p.name} {exists && <span className="text-[11px] font-normal text-muted-foreground">— already added</span>}
+                        </p>
+                        {p.description && <p className="text-[11px] text-muted-foreground">{p.description}</p>}
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+              <DialogFooter>
+                <Button className="w-full rounded-xl bg-primary h-11" disabled={presetBusy || !Object.values(presetSel).some(Boolean)} onClick={addPresets} data-testid="stations-presets-submit">
+                  {presetBusy ? "Adding…" : `Add ${Object.values(presetSel).filter(Boolean).length} Station(s)`}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button className="rounded-xl bg-primary h-10" data-testid="station-add-button"><Plus className="h-4 w-4 mr-1" /> Add Station</Button>
@@ -454,6 +981,7 @@ const StationsTab = ({ eventId, isAdmin }) => {
             <DialogFooter><Button className="w-full rounded-xl bg-primary h-11" disabled={!form.name || !form.template_id} onClick={add} data-testid="station-create-submit">Create Station</Button></DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       )}
       {stations.length === 0 ? <EmptyState icon={Layers} title="No stations yet" hint="Create stations like Hitting, Infield, Pitching with an evaluation template." /> : (
         <div className="grid gap-2 md:grid-cols-2">
@@ -620,36 +1148,38 @@ const EvaluatorsTab = ({ eventId, isAdmin }) => {
           <DialogTrigger asChild>
             <Button className="rounded-xl bg-primary h-10" data-testid="assignment-add-button"><Plus className="h-4 w-4 mr-1" /> Assign Evaluator</Button>
           </DialogTrigger>
-          <DialogContent className="rounded-2xl max-w-sm">
+          <DialogContent className="rounded-2xl max-w-sm" data-testid="assign-stepper">
             <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Assign Evaluator</DialogTitle></DialogHeader>
+            <p className="text-[11px] text-muted-foreground -mt-2">Evaluator → Group → Station → Save. Event: this one.</p>
             <div className="space-y-3">
               <div className="space-y-1">
-                <Label className="text-xs">Evaluator *</Label>
+                <Label className="text-xs"><span className="font-mono-num text-muted-foreground">1.</span> Evaluator *</Label>
                 <Select value={form.evaluator_id || undefined} onValueChange={(v) => setForm((f) => ({ ...f, evaluator_id: v }))}>
-                  <SelectTrigger className="h-10 rounded-lg" data-testid="assignment-evaluator-select"><SelectValue placeholder="Select staff member" /></SelectTrigger>
+                  <SelectTrigger className="h-11 rounded-lg" data-testid="assignment-evaluator-select"><SelectValue placeholder="Select staff member" /></SelectTrigger>
                   <SelectContent>{staff.map((s) => <SelectItem key={s.id} value={s.id}>{s.full_name} ({s.role})</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Station *</Label>
-                <Select value={form.station_id || undefined} onValueChange={(v) => setForm((f) => ({ ...f, station_id: v }))}>
-                  <SelectTrigger className="h-10 rounded-lg" data-testid="assignment-station-select"><SelectValue placeholder="Select station" /></SelectTrigger>
-                  <SelectContent>{stations.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Player groups (leave empty for all)</Label>
+                <Label className="text-xs"><span className="font-mono-num text-muted-foreground">2.</span> Player groups (leave empty for all)</Label>
                 <div className="space-y-1.5">
                   {groups.map((g) => (
-                    <label key={g.id} className="flex items-center gap-2 text-sm">
+                    <label key={g.id} className="flex items-center gap-2 text-sm min-h-[32px] cursor-pointer">
                       <Checkbox checked={form.group_ids.includes(g.id)} onCheckedChange={(v) => setForm((f) => ({ ...f, group_ids: v ? [...f.group_ids, g.id] : f.group_ids.filter((x) => x !== g.id) }))} />
                       {g.name}
                     </label>
                   ))}
+                  {groups.length === 0 && <p className="text-[11px] text-muted-foreground">No groups yet — assignment covers all players.</p>}
                 </div>
               </div>
+              <div className="space-y-1">
+                <Label className="text-xs"><span className="font-mono-num text-muted-foreground">3.</span> Station *</Label>
+                <Select value={form.station_id || undefined} onValueChange={(v) => setForm((f) => ({ ...f, station_id: v }))}>
+                  <SelectTrigger className="h-11 rounded-lg" data-testid="assignment-station-select"><SelectValue placeholder="Select station" /></SelectTrigger>
+                  <SelectContent>{stations.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
             </div>
-            <DialogFooter><Button className="w-full rounded-xl bg-primary h-11" disabled={!form.evaluator_id || !form.station_id} onClick={add} data-testid="assignment-create-submit">Assign</Button></DialogFooter>
+            <DialogFooter><Button className="w-full rounded-xl bg-primary h-11" disabled={!form.evaluator_id || !form.station_id} onClick={add} data-testid="assignment-create-submit">Save Assignment</Button></DialogFooter>
           </DialogContent>
         </Dialog>
       )}
@@ -657,12 +1187,16 @@ const EvaluatorsTab = ({ eventId, isAdmin }) => {
         <div className="space-y-2">
           {assignments.map((a) => (
             <Card key={a.id} className="rounded-2xl border-border">
-              <CardContent className="py-3.5 flex items-center gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-foreground">{a.evaluator_name}</p>
-                  <p className="text-xs text-muted-foreground">{a.station_name} · {(a.group_names || []).join(", ") || "All groups"}</p>
-                </div>
-                {isAdmin && <Button variant="ghost" size="icon" onClick={() => remove(a.id)} data-testid={`assignment-delete-${a.id}`}><Trash2 className="h-4 w-4 text-muted-foreground" /></Button>}
+              <CardContent className="py-3 flex items-center gap-3">
+                <p className="flex-1 min-w-0 text-sm truncate">
+                  <span className="font-semibold text-foreground">{a.evaluator_name}</span>
+                  <span className="text-muted-foreground"> — {(a.group_names || []).join(", ") || "All groups"} · {a.station_name}</span>
+                </p>
+                {isAdmin && (
+                  <Button variant="ghost" size="sm" className="h-8 rounded-lg text-muted-foreground shrink-0" onClick={() => remove(a.id)} data-testid={`assignment-delete-${a.id}`}>
+                    <Trash2 className="h-4 w-4 mr-1" /> Revoke
+                  </Button>
+                )}
               </CardContent>
             </Card>
           ))}
@@ -992,6 +1526,40 @@ const ResultsTab = ({ eventId }) => {
   );
 };
 
+// ---------------- Setup progress strip (Overview) ----------------
+const SetupProgressStrip = ({ event, onGo }) => {
+  const activeIdx = EVENT_STATUSES.indexOf("Evaluation Active");
+  const curIdx = EVENT_STATUSES.indexOf(event.status);
+  const steps = [
+    { id: "roster", label: "Roster", done: (event.player_count ?? 0) > 0, tab: "roster" },
+    { id: "groups", label: "Groups", done: (event.group_count ?? 0) > 0, tab: "groups" },
+    { id: "stations", label: "Stations", done: (event.station_count ?? 0) > 0, tab: "stations" },
+    { id: "evaluators", label: "Evaluators", done: (event.evaluator_count ?? 0) > 0, tab: "evaluators" },
+    { id: "activated", label: "Activated", done: curIdx >= activeIdx && curIdx !== -1, tab: "overview" },
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-y-1 rounded-xl border border-border bg-card px-3 py-2" data-testid="event-setup-progress">
+      {steps.map((s, i) => (
+        <span key={s.id} className="inline-flex items-center">
+          {i > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground mx-0.5" />}
+          <button
+            type="button"
+            onClick={() => onGo(s.tab)}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold hover:bg-secondary",
+              s.done ? "text-success" : "text-muted-foreground"
+            )}
+            data-testid={`event-setup-step-${s.id}`}
+          >
+            {s.done ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
+            {s.label}
+          </button>
+        </span>
+      ))}
+    </div>
+  );
+};
+
 // ---------------- Main event page ----------------
 export default function EventDetail() {
   const { eventId } = useParams();
@@ -1067,6 +1635,7 @@ export default function EventDetail() {
         </div>
 
         <TabsContent value="overview" className="mt-4">
+          {isAdmin && <div className="mb-3"><SetupProgressStrip event={event} onGo={(t) => setParams({ tab: t })} /></div>}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             {[
               { label: "Players", value: event.player_count, icon: Users },

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/common/StatusBadge";
+import { useWorkspace, getActiveWorkspace } from "@/components/layout/AppLayout";
 import { PlayerAvatar } from "@/components/common/PlayerAvatar";
 import { EmptyState } from "@/components/common/EmptyState";
 import {
@@ -78,6 +79,13 @@ const fmtChange = (v) => {
 
 export default function Dashboard() {
   const { user } = useAuth();
+  // The dashboard renders by ACTIVE WORKSPACE (a lens, not an access grant):
+  // an owner in the "coach" workspace sees the Coach Hub dashboard (data stays
+  // org-wide), in "evaluator" the evaluator dashboard (honestly empty unless
+  // they hold assignments). Unauthorized stored values fall back to the first
+  // authorized workspace inside getActiveWorkspace.
+  const wsCtx = useWorkspace();
+  const workspace = wsCtx?.workspace || getActiveWorkspace(user);
   const [data, setData] = useState(null);
   const [insights, setInsights] = useState(null);
   const [orgSummary, setOrgSummary] = useState(null);
@@ -87,13 +95,13 @@ export default function Dashboard() {
 
   useEffect(() => {
     let alive = true;
-    const r = user?.role;
+    setLoading(true); // re-entered on workspace switch — don't show stale lens
     const soft = (path) => api.get(path).then((res) => res.data).catch(() => null);
     Promise.all([
       soft("/dashboard"),
-      ["head_scout", "coach"].includes(r) ? soft("/reports/insights") : Promise.resolve(null),
-      ["owner", "admin"].includes(r) ? soft("/organizations/summary") : Promise.resolve(null),
-      r === "coach" ? soft("/development/overview") : Promise.resolve(null),
+      ["scout", "coach"].includes(workspace) ? soft("/reports/insights") : Promise.resolve(null),
+      workspace === "hq" ? soft("/organizations/summary") : Promise.resolve(null),
+      workspace === "coach" ? soft("/development/overview") : Promise.resolve(null),
     ]).then(([d, ins, org, dev]) => {
       if (!alive) return;
       setData(d);
@@ -102,7 +110,7 @@ export default function Dashboard() {
       setDevOverview(dev);
     }).finally(() => alive && setLoading(false));
     return () => { alive = false; };
-  }, [user?.role]);
+  }, [user?.role, workspace]);
 
   if (loading)
     return (
@@ -117,8 +125,8 @@ export default function Dashboard() {
 
   const role = data?.role || user?.role;
 
-  // -------- EVALUATOR — Evaluation Mode: assignments only, zero distraction --------
-  if (role === "evaluator") {
+  // -------- EVALUATION MODE workspace: assignments only, zero distraction --------
+  if (workspace === "evaluator") {
     const assignments = data?.assignments || [];
     const remaining = assignments.reduce((sum, a) => sum + (a.remaining ?? Math.max(0, (a.expected || 0) - (a.completed || 0))), 0);
     return (
@@ -184,8 +192,8 @@ export default function Dashboard() {
     );
   }
 
-  // -------- HEAD SCOUT — review-first --------
-  if (role === "head_scout") {
+  // -------- SCOUT MODE workspace — review-first --------
+  if (workspace === "scout") {
     const awaiting = insights?.needs_review ?? data?.awaiting_review;
     const flagged = insights?.flagged ?? data?.flagged_players;
     const movers = (insights?.top_movers || []).slice(0, 5);
@@ -300,8 +308,8 @@ export default function Dashboard() {
     );
   }
 
-  // -------- COACH — "My Athletes": today's work first --------
-  if (role === "coach") {
+  // -------- COACH HUB workspace — "My Athletes": today's work first --------
+  if (workspace === "coach") {
     const ev = data?.upcoming_event;
     const stats = data?.event_stats || {};
     const goals = devOverview?.goals || [];
@@ -419,7 +427,7 @@ export default function Dashboard() {
     );
   }
 
-  // -------- OWNER / ADMIN — Organization HQ --------
+  // -------- HQ workspace (owner/admin) — Organization HQ --------
   const ev = data?.upcoming_event;
   const stats = data?.event_stats || {};
   const isAdmin = role === "owner" || role === "admin";

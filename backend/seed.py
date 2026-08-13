@@ -440,6 +440,16 @@ async def main():
 
     all_templates += [tpl_athletic, tpl_hitting_station, tpl_baserunning, tpl_iq,
                       tpl_character, tpl_default]
+    # 8–12 developmental model: young-band rating scales read as skill proficiency,
+    # not recruiting projection. Bandless station templates get it too — they serve
+    # the youth camp. Older bands keep the default Needs work/Average/Elite legend.
+    DEV_SCALE_LEGEND = ("1 Beginning · 2 Developing · 3 Age-Appropriate · "
+                        "4 Above Age-Level · 5 Advanced")
+    for t in all_templates:
+        if t.get("age_group") in YOUNGER_BANDS or t.get("age_group") is None:
+            for m in t.get("metrics", []):
+                if m.get("metric_type") == "rating_5":
+                    m["scale_legend"] = DEV_SCALE_LEGEND
     for t in all_templates:
         await db.evaluation_templates.insert_one(t)
 

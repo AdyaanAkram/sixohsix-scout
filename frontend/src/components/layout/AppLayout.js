@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { NavLink, useLocation, Navigate } from "react-router-dom";
+import { createContext, useContext, useEffect, useState } from "react";
+import { NavLink, useLocation, useNavigate, Navigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 import {
@@ -16,32 +16,90 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-/** Primary nav keys by role (order = display order). Admin keys listed separately. */
-// Role-based modes: each role's primary tabs are its daily workspace; everything
-// else stays reachable under Administration. Same routes, re-tiered per role.
-//   owner/admin  — Organization HQ:   Overview | Teams | Athletes | Development | Events
-//   coach        — Coach Hub:         Overview | My Teams | My Athletes | Evaluations | Development
-//   head_scout   — Scout Mode (review-first): Overview | Review | Discover | Watchlist | Compare | Events
-//   evaluator    — Evaluation Mode:   Today's Event | Evaluate | Submitted
-//   athlete/parent — My Development
-const NAV_BY_ROLE = {
-  owner: ["dashboard", "teams", "players", "development", "events"],
-  admin: ["dashboard", "teams", "players", "development", "events"],
-  head_scout: ["dashboard", "hs-review", "discover", "watchlist", "compare", "events"],
-  coach: ["dashboard", "my-teams", "my-athletes", "coach-evals", "development"],
-  evaluator: ["todays-event", "evaluate", "submitted"],
-  athlete: ["my-id", "settings"],
-  parent: ["my-id", "settings"],
+/** ---------------------------------------------------------------------------
+ * Workspace model — a workspace is a LENS over the app, never an access grant.
+ * Every route keeps its existing role gates; switching workspaces only changes
+ * which nav set / dashboard framing the account sees. One account moves between
+ * the modes it is entitled to (client: "workspace/role switcher, not five
+ * duplicate applications").
+ *   hq        — Organization HQ:   Overview | Teams | Athletes | Development | Events
+ *   coach     — Coach Hub:         Overview | My Teams | My Athletes | Evaluations | Development
+ *   scout     — Scout Mode (review-first): Overview | Review | Discover | Watchlist | Compare | Events
+ *   evaluator — Evaluation Mode:   Today's Event | Evaluate | Submitted
+ *   athlete   — My Development
+ * ------------------------------------------------------------------------- */
+export const WORKSPACES_BY_ROLE = {
+  // Athlete View intentionally omitted for staff: no linked athlete profile
+  // on staff accounts (already flagged to the client).
+  owner: ["hq", "coach", "scout", "evaluator"],
+  admin: ["hq", "coach", "scout", "evaluator"],
+  head_scout: ["scout"], // scout mode already includes Review
+  coach: ["coach", "evaluator"],
+  evaluator: ["evaluator"],
+  athlete: ["athlete"],
+  parent: ["athlete"],
 };
 
-const ADMIN_BY_ROLE = {
-  owner: ["review", "scout", "reports", "programs", "staff", "templates", "drills", "audit", "settings"],
-  admin: ["review", "scout", "reports", "programs", "staff", "templates", "drills", "audit", "settings"],
-  head_scout: ["players", "reports", "programs", "settings"],
+export const WORKSPACE_META = {
+  hq: { label: "Organization HQ", blurb: "Full administration", icon: Building2 },
+  coach: { label: "Coach Hub", blurb: "My teams & athletes", icon: Shield },
+  scout: { label: "Scout Mode", blurb: "Discover, watchlist, compare", icon: Crosshair },
+  evaluator: { label: "Evaluation Mode", blurb: "Field scoring", icon: ClipboardCheck },
+  athlete: { label: "My Development", blurb: "My profile, progress & goals", icon: IdCard },
+};
+
+export const WORKSPACE_HOME = {
+  hq: "/dashboard",
+  coach: "/dashboard",
+  scout: "/scout",
+  evaluator: "/evaluate",
+  athlete: "/my-id",
+};
+
+export const getAuthorizedWorkspaces = (role) =>
+  WORKSPACES_BY_ROLE[role] || WORKSPACES_BY_ROLE.evaluator;
+
+const workspaceStorageKey = (userId) => `606_workspace_${userId || "anon"}`;
+
+/** True only when a stored choice exists AND it is authorized for the role. */
+export const hasStoredWorkspace = (user) => {
+  const authorized = getAuthorizedWorkspaces(user?.role);
+  let stored = null;
+  try { stored = localStorage.getItem(workspaceStorageKey(user?.id)); } catch { /* ignore */ }
+  return !!stored && authorized.includes(stored);
+};
+
+/** Active workspace = stored choice if authorized, else first authorized. */
+export const getActiveWorkspace = (user) => {
+  const authorized = getAuthorizedWorkspaces(user?.role);
+  let stored = null;
+  try { stored = localStorage.getItem(workspaceStorageKey(user?.id)); } catch { /* ignore */ }
+  return stored && authorized.includes(stored) ? stored : authorized[0];
+};
+
+export const persistWorkspace = (userId, workspace) => {
+  try { localStorage.setItem(workspaceStorageKey(userId), workspace); } catch { /* ignore */ }
+};
+
+const WorkspaceContext = createContext(null);
+/** { workspace, workspaces, switchWorkspace } — null outside AppLayout. */
+export const useWorkspace = () => useContext(WorkspaceContext);
+
+/** Primary nav keys by workspace (order = display order). Admin keys listed separately. */
+const NAV_BY_WORKSPACE = {
+  hq: ["dashboard", "teams", "players", "development", "events"],
+  coach: ["dashboard", "my-teams", "my-athletes", "coach-evals", "development"],
+  scout: ["dashboard", "hs-review", "discover", "watchlist", "compare", "events"],
+  evaluator: ["todays-event", "evaluate", "submitted"],
+  athlete: ["my-id", "settings"],
+};
+
+const ADMIN_BY_WORKSPACE = {
+  hq: ["review", "scout", "reports", "programs", "staff", "templates", "drills", "audit", "settings"],
   coach: ["scout", "reports", "programs", "settings"],
-  evaluator: ["settings"],
+  scout: ["players", "reports", "programs", "settings"],
+  evaluator: ["settings"], // owner/coach dropping into evaluator mode keep Settings
   athlete: [],
-  parent: [],
 };
 
 // `slug` overrides the label-derived data-testid suffix so existing testids
@@ -121,14 +179,12 @@ const SidebarLink = ({ item, onClick }) => {
   );
 };
 
-const MOBILE_PRIMARY = {
-  owner: ["dashboard", "teams", "players", "events"],
-  admin: ["dashboard", "teams", "players", "events"],
-  head_scout: ["dashboard", "hs-review", "discover", "events"],
+const MOBILE_PRIMARY_BY_WORKSPACE = {
+  hq: ["dashboard", "teams", "players", "events"],
   coach: ["dashboard", "my-teams", "my-athletes", "development"],
+  scout: ["dashboard", "hs-review", "discover", "events"],
   evaluator: ["todays-event", "evaluate", "submitted"],
   athlete: ["my-id", "settings"],
-  parent: ["my-id", "settings"],
 };
 
 const MOBILE_LABELS = {
@@ -275,6 +331,61 @@ const OrgSwitcher = ({ compact }) => {
   );
 };
 
+/**
+ * Compact "Switch Workspace" control. Purely presentational — only the
+ * workspaces the account's role is authorized for are ever offered.
+ * Hidden entirely for single-workspace users.
+ */
+const WorkspaceSwitcher = ({ workspace, workspaces, onSwitch, onNavigate }) => {
+  if ((workspaces || []).length <= 1) return null;
+  const current = WORKSPACE_META[workspace] || WORKSPACE_META.evaluator;
+  const CurrentIcon = current.icon;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          data-testid="workspace-switcher"
+          className="w-full flex items-center gap-2 rounded-xl border border-border bg-secondary/60 px-3 py-2 text-left hover:bg-secondary transition"
+        >
+          <div className="h-7 w-7 rounded-lg bg-brand-tertiary ring-1 ring-brand/40 flex items-center justify-center shrink-0">
+            <CurrentIcon className="h-3.5 w-3.5 text-brand" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-[9px] uppercase tracking-widest text-muted-foreground">Workspace</p>
+            <p className="text-sm font-semibold text-foreground truncate">{current.label}</p>
+          </div>
+          <ChevronsUpDown className="h-4 w-4 text-muted-foreground shrink-0" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-72">
+        <DropdownMenuLabel>Switch workspace</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {workspaces.map((key) => {
+          const meta = WORKSPACE_META[key];
+          if (!meta) return null;
+          const Icon = meta.icon;
+          return (
+            <DropdownMenuItem
+              key={key}
+              data-testid={`workspace-option-${key}`}
+              onClick={() => { onSwitch(key); onNavigate?.(); }}
+              className="flex items-start gap-2 cursor-pointer"
+            >
+              <Check className={cn("h-4 w-4 mt-0.5", key === workspace ? "opacity-100 text-brand" : "opacity-0")} />
+              <Icon className="h-4 w-4 mt-0.5 text-brand" />
+              <div className="min-w-0">
+                <p className="font-semibold truncate">{meta.label}</p>
+                <p className="text-[11px] text-muted-foreground">{meta.blurb}</p>
+              </div>
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
+
 export const AppLayout = ({ children }) => {
   const { user, logout } = useAuth();
   const [moreOpen, setMoreOpen] = useState(false);
@@ -282,12 +393,29 @@ export const AppLayout = ({ children }) => {
   const [notifs, setNotifs] = useState([]);
   const [unread, setUnread] = useState(0);
   const location = useLocation();
+  const navigate = useNavigate();
   const role = user?.role || "evaluator";
-  const navKeys = NAV_BY_ROLE[role] || NAV_BY_ROLE.evaluator;
-  const adminKeys = ADMIN_BY_ROLE[role] || [];
-  const mobileKeys = MOBILE_PRIMARY[role] || MOBILE_PRIMARY.evaluator;
+
+  // Active workspace: stored per user, guarded against unauthorized values.
+  const workspaces = getAuthorizedWorkspaces(role);
+  const [workspace, setWorkspace] = useState(() => getActiveWorkspace(user));
+  useEffect(() => { setWorkspace(getActiveWorkspace(user)); }, [user?.id, role]); // eslint-disable-line react-hooks/exhaustive-deps
+  const activeWorkspace = workspaces.includes(workspace) ? workspace : workspaces[0];
+
+  const switchWorkspace = (key) => {
+    if (!workspaces.includes(key)) return; // lens, not an access grant
+    persistWorkspace(user?.id, key);
+    setWorkspace(key);
+    navigate(WORKSPACE_HOME[key] || "/dashboard");
+  };
+
+  const navKeys = NAV_BY_WORKSPACE[activeWorkspace] || NAV_BY_WORKSPACE.evaluator;
+  const adminKeys = ADMIN_BY_WORKSPACE[activeWorkspace] || [];
+  const mobileKeys = MOBILE_PRIMARY_BY_WORKSPACE[activeWorkspace] || MOBILE_PRIMARY_BY_WORKSPACE.evaluator;
   const moreKeys = [...navKeys, ...adminKeys].filter((k) => !mobileKeys.includes(k));
   const focusMode = location.pathname.startsWith("/evaluation/");
+  const chooserMode = location.pathname === "/workspace";
+  const hideChrome = focusMode || chooserMode;
 
   const loadNotifs = () => {
     api.get("/notifications/unread-count").then((r) => setUnread(r.data.count || 0)).catch(() => {});
@@ -316,12 +444,21 @@ export const AppLayout = ({ children }) => {
     }
   }
 
+  // First arrival: multi-workspace users with no stored choice pick once at
+  // /workspace ("Where are you working today?"). Single-workspace users and
+  // returning users go straight in — never force a selection every login.
+  if (location.pathname === "/dashboard" && workspaces.length > 1 && !hasStoredWorkspace(user)) {
+    return <Navigate to="/workspace" replace />;
+  }
+
   return (
+    <WorkspaceContext.Provider value={{ workspace: activeWorkspace, workspaces, switchWorkspace }}>
     <div className="min-h-screen bg-background">
-      <aside className={cn("hidden md:flex fixed inset-y-0 left-0 w-[268px] flex-col border-r border-border bg-surface-2 z-40", focusMode && "md:hidden")} data-testid="desktop-sidebar-nav">
+      <aside className={cn("hidden md:flex fixed inset-y-0 left-0 w-[268px] flex-col border-r border-border bg-surface-2 z-40", hideChrome && "md:hidden")} data-testid="desktop-sidebar-nav">
         <div className="px-5 py-5 border-b border-divider space-y-3">
           <Logo />
           <OrgSwitcher />
+          <WorkspaceSwitcher workspace={activeWorkspace} workspaces={workspaces} onSwitch={switchWorkspace} />
         </div>
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {navKeys.map((k) => (
@@ -372,7 +509,7 @@ export const AppLayout = ({ children }) => {
         </SheetContent>
       </Sheet>
 
-      {!focusMode && (
+      {!hideChrome && (
         <header className="md:hidden sticky top-0 z-40 glass-bar border-b">
           <div className="flex items-center justify-between px-4 h-14 gap-2">
             <div className="min-w-0 flex-1">
@@ -392,20 +529,22 @@ export const AppLayout = ({ children }) => {
         </header>
       )}
 
-      <main className={cn(!focusMode && "md:pl-[268px]")}>
+      <main className={cn(!hideChrome && "md:pl-[268px]")}>
         <div
           className={cn(
             "mx-auto max-w-[1200px] px-4 sm:px-6 pt-5 sm:pt-7",
             focusMode
               ? "pb-6 max-w-2xl"
-              : "pb-safe-nav md:pb-10"
+              : chooserMode
+                ? "pb-10"
+                : "pb-safe-nav md:pb-10"
           )}
         >
           {children}
         </div>
       </main>
 
-      {!focusMode && (
+      {!hideChrome && (
       <nav
         className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t glass-bar"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
@@ -449,6 +588,14 @@ export const AppLayout = ({ children }) => {
               </SheetTrigger>
               <SheetContent side="bottom" className="rounded-t-2xl pb-8 bg-surface-2 border-border">
                 <p className="font-display text-2xl text-foreground mb-3">More</p>
+                <div className="mb-3">
+                  <WorkspaceSwitcher
+                    workspace={activeWorkspace}
+                    workspaces={workspaces}
+                    onSwitch={switchWorkspace}
+                    onNavigate={() => setMoreOpen(false)}
+                  />
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   {moreKeys.map((k) => {
                     const item = NAV_ITEMS[k];
@@ -474,5 +621,6 @@ export const AppLayout = ({ children }) => {
       </nav>
       )}
     </div>
+    </WorkspaceContext.Provider>
   );
 };

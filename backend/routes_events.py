@@ -1,10 +1,13 @@
+import csv
+import io
+import re
 import statistics
 from collections import defaultdict
 from datetime import datetime as _dt
 from datetime import timedelta as _td
 from datetime import timezone as _tz
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from auth import (ADMIN_ROLES, COACH_ROLES, STAFF_ROLES, active_assignment_filter,
@@ -1062,3 +1065,614 @@ async def redeem_event_invite(body: RedeemBody):
         "event_id": inv["event_id"],
         "expires_at": access_expires,
     }
+
+
+# ---------------- Event-scoped CSV roster import (Revision 4, Task 1) ----------------
+#
+# Reuses the header-mapping vocabulary from routes_players (CSV_COLUMNS,
+# _normalize_header, _split_full_name, parse_dob) so the two importers can never
+# drift apart on what "grad year" or "B/T" means. Imports are done lazily inside
+# the functions, matching the existing add_walk_up pattern in this file.
+
+# Columns the org-level importer does not know but an event roster needs.
+ROSTER_IMPORT_EXTRA_COLUMNS = {
+    "bib": "bib_number", "bib number": "bib_number", "bib #": "bib_number",
+    "bib num": "bib_number", "age": "age",
+}
+
+
+def _grad_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _athlete_display_name(a: dict) -> str:
+    return f"{a.get('first_name') or ''} {a.get('last_name') or ''}".strip()
+
+
+def _build_roster_column_mapping(fieldnames):
+    from routes_players import CSV_COLUMNS, _normalize_header
+    mapping = {}
+    unmapped = []
+    for col in fieldnames:
+        key = _normalize_header(col)
+        if key in ROSTER_IMPORT_EXTRA_COLUMNS:
+            mapping[col] = ROSTER_IMPORT_EXTRA_COLUMNS[key]
+        elif key in CSV_COLUMNS:
+            mapping[col] = CSV_COLUMNS[key]
+        elif key in ("b/t", "bats/throws", "bat/throw"):
+            mapping[col] = "bats_throws"
+        else:
+            unmapped.append(col)
+    return mapping, unmapped
+
+
+def _parse_roster_row(row: dict, mapping: dict) -> tuple[dict, list[str]]:
+    """One CSV row -> (parsed record, errors). Mirrors routes_players.import_preview
+    field-by-field so both importers accept the same files."""
+    from positions import normalize_age_band
+    from routes_players import _split_full_name, parse_dob
+    record = {}
+    errors = []
+    for col, field in mapping.items():
+        val = (row.get(col) or "").strip()
+        if field == "full_name":
+            fn, ln = _split_full_name(val)
+            if not record.get("first_name") and fn:
+                record["first_name"] = fn
+            if not record.get("last_name") and ln:
+                record["last_name"] = ln
+        elif field == "bats_throws":
+            # "R/R", "L-R", "S/R"
+            parts = [p.strip().upper()[:1] for p in val.replace("-", "/").split("/") if p.strip()]
+            if parts:
+                record["bats"] = parts[0]
+            if len(parts) > 1:
+                record["throws"] = parts[1]
+        elif field == "age_group_hint":
+            record["age_group_hint"] = normalize_age_band(val) if val else None
+        elif field == "date_of_birth":
+            parsed, err = parse_dob(val)
+            if err:
+                errors.append(err)
+            record[field] = parsed
+        elif field == "age":
+            if val:
+                digits = "".join(ch for ch in val if ch.isdigit())
+                record["age"] = int(digits) if digits else None
+                if record["age"] is None:
+                    errors.append(f"Age must be a number: {val}")
+            else:
+                record["age"] = None
+        elif field == "graduation_year":
+            if val:
+                digits = "".join(ch for ch in val if ch.isdigit())
+                record[field] = int(digits[:4]) if digits else None
+                if record[field] is None:
+                    errors.append(f"Graduation year must be a number: {val}")
+            else:
+                record[field] = None
+        elif field == "secondary_positions":
+            record[field] = [p.strip() for p in val.replace(";", ",").split(",") if p.strip()] if val else []
+        else:
+            # don't overwrite a stronger explicit field with empty
+            if val or field not in record:
+                record[field] = val or None
+    if not record.get("first_name"):
+        errors.append("First name is required")
+    if not record.get("last_name"):
+        errors.append("Last name is required")
+    return record, errors
+
+
+def _classify_roster_row(record: dict, errors: list[str], candidates: list[dict],
+                         on_roster_ids: set) -> tuple[str, str | None, str | None, list[str]]:
+    """Matching rules against the org's athletes (permanent-ID reuse).
+
+    Returns (status, athlete_id, athlete_name, reasons).
+      - exact first+last (ci) + same DOB                      -> matched
+      - exact first+last + same grad year, no DOB either side -> matched
+      - exact first+last, evidence conflicting/absent         -> possible_duplicate
+      - no name match                                         -> new
+      - missing first or last name / parse error              -> error
+      - valid new row, NO grad year but DOB/age present       -> needs_grad_confirmation
+    """
+    if errors:
+        return "error", None, None, errors
+    dob = record.get("date_of_birth")
+    grad = _grad_int(record.get("graduation_year"))
+
+    def _matched(cand, why):
+        reasons = [why]
+        if cand["id"] in on_roster_ids:
+            reasons.append("already on roster")
+        return "matched", cand["id"], _athlete_display_name(cand), reasons
+
+    if candidates:
+        if dob:
+            hit = next((c for c in candidates if c.get("date_of_birth") == dob), None)
+            if hit:
+                return _matched(hit, "matched by name + date of birth")
+        if not dob and grad is not None:
+            hit = next((c for c in candidates
+                        if not c.get("date_of_birth")
+                        and _grad_int(c.get("graduation_year")) == grad), None)
+            if hit:
+                return _matched(hit, "matched by name + graduation year (no DOB on either side)")
+        cand = candidates[0]
+        reasons = ["name matches an existing athlete but DOB/graduation year evidence "
+                   "is conflicting or absent — confirm before importing"]
+        if len(candidates) > 1:
+            reasons.append(f"{len(candidates)} existing athletes share this name")
+        if cand["id"] in on_roster_ids:
+            reasons.append("candidate already on this event roster")
+        return "possible_duplicate", cand["id"], _athlete_display_name(cand), reasons
+
+    if grad is None and (dob or record.get("age") is not None):
+        return ("needs_grad_confirmation", None, None,
+                ["no graduation year on the row — confirm one before auto-grouping "
+                 "(row is still importable but will stay ungrouped)"])
+    return "new", None, None, []
+
+
+@router.post("/events/{event_id}/roster/import/preview")
+async def roster_import_preview(event_id: str, file: UploadFile = File(...),
+                                user=Depends(require_roles(*ADMIN_ROLES, "coach"))):
+    """Parse an event roster CSV and classify every row against the org's athletes.
+    Read-only: nothing is written until /confirm."""
+    await get_org_event(event_id, user)
+    org = user["organization_id"]
+    if not (file.filename or "").lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Please upload a .csv file.")
+    raw = await file.read()
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="CSV file is too large (max 5 MB).")
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=400, detail="CSV appears to be empty.")
+    mapping, _unmapped = _build_roster_column_mapping(reader.fieldnames)
+
+    existing = await db.athletes.find(
+        {"organization_id": org, "status": {"$ne": "merged"}},
+        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1,
+         "date_of_birth": 1, "graduation_year": 1}).to_list(5000)
+    by_name: dict = {}
+    for a in existing:
+        key = ((a.get("first_name") or "").strip().lower(),
+               (a.get("last_name") or "").strip().lower())
+        by_name.setdefault(key, []).append(a)
+    on_roster_ids = {e["athlete_id"] for e in await db.event_athletes.find(
+        {"event_id": event_id, "organization_id": org},
+        {"_id": 0, "athlete_id": 1}).to_list(2000)}
+
+    rows = []
+    for idx, row in enumerate(reader):
+        if idx >= 500:
+            break
+        record, errors = _parse_roster_row(row, mapping)
+        key = ((record.get("first_name") or "").strip().lower(),
+               (record.get("last_name") or "").strip().lower())
+        status, aid, aname, reasons = _classify_roster_row(
+            record, errors, by_name.get(key, []), on_roster_ids)
+        rows.append({"row": idx + 2, "data": record, "status": status,
+                     "athlete_id": aid, "athlete_name": aname, "reasons": reasons})
+
+    summary = {
+        "total": len(rows),
+        "matched": sum(1 for r in rows if r["status"] == "matched"),
+        "new": sum(1 for r in rows if r["status"] == "new"),
+        "possible_duplicates": sum(1 for r in rows if r["status"] == "possible_duplicate"),
+        "needs_confirmation": sum(1 for r in rows if r["status"] == "needs_grad_confirmation"),
+        "errors": sum(1 for r in rows if r["status"] == "error"),
+    }
+    return {"rows": rows, "summary": summary}
+
+
+class RosterImportRowAction(BaseModel):
+    row: int
+    action: str  # use_match | create | skip
+    data: dict = {}
+    athlete_id: str | None = None
+    graduation_year: int | None = None  # lets the UI resolve needs_grad_confirmation rows
+
+
+class RosterImportConfirmBody(BaseModel):
+    rows: list[RosterImportRowAction]
+    auto_group: bool = True
+
+
+async def _add_import_row_to_roster(org: str, event_id: str, athlete_id: str,
+                                    bib_number: str | None) -> bool:
+    """Add an athlete to the event roster — same doc shape as add_to_roster, plus
+    the CSV bib. Idempotent: returns False when the athlete is already rostered."""
+    existing = await db.event_athletes.find_one({
+        "event_id": event_id, "athlete_id": athlete_id, "organization_id": org})
+    if existing:
+        return False
+    await db.event_athletes.insert_one({
+        "id": new_id(), "organization_id": org,
+        "event_id": event_id, "athlete_id": athlete_id, "status": "registered",
+        "bib_number": bib_number or None, "group_id": None, "late_arrival": False,
+        "flagged_incomplete": False, "walk_up": False,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    })
+    return True
+
+
+@router.post("/events/{event_id}/roster/import/confirm")
+async def roster_import_confirm(event_id: str, body: RosterImportConfirmBody,
+                                user=Depends(require_roles(*ADMIN_ROLES, "coach"))):
+    """Apply the reviewed preview rows. use_match adds the EXISTING athlete
+    (permanent-ID reuse — never a duplicate profile); create makes a new athlete
+    via routes_players.athlete_doc; skip does nothing. create re-runs the match
+    first, so confirming the same rows twice can never mint a duplicate."""
+    from positions import age_band_for_age
+    from routes_players import AthleteBody, athlete_doc
+    await get_org_event(event_id, user)
+    org = user["organization_id"]
+    added = created = matched = skipped = flagged_no_grad = 0
+
+    for r in body.rows:
+        data = dict(r.data or {})
+        if r.graduation_year is not None:
+            data["graduation_year"] = r.graduation_year
+        # Bib: a dedicated bib column wins; a jersey/# column doubles as the bib
+        # on an event roster sheet. Jersey still lands on the athlete profile.
+        bib = str(data.get("bib_number") or data.get("jersey_number") or "").strip() or None
+
+        if r.action == "skip":
+            skipped += 1
+            continue
+
+        if r.action == "use_match":
+            if not r.athlete_id:
+                skipped += 1
+                continue
+            athlete = await db.athletes.find_one({"id": r.athlete_id, "organization_id": org})
+            if not athlete:
+                skipped += 1
+                continue
+            if r.graduation_year is not None and _grad_int(athlete.get("graduation_year")) is None:
+                await db.athletes.update_one(
+                    {"id": athlete["id"], "organization_id": org},
+                    {"$set": {"graduation_year": r.graduation_year, "updated_at": now_iso()}})
+                athlete["graduation_year"] = r.graduation_year
+            matched += 1
+            if await _add_import_row_to_roster(org, event_id, athlete["id"], bib):
+                added += 1
+            if _grad_int(athlete.get("graduation_year")) is None:
+                flagged_no_grad += 1
+            continue
+
+        if r.action == "create":
+            first = (data.get("first_name") or "").strip()
+            last = (data.get("last_name") or "").strip()
+            if not first or not last:
+                skipped += 1
+                continue
+            # Permanent-ID guard: NEVER create when a match exists, even if the
+            # caller said "create" (e.g. the same confirm replayed after a retry).
+            candidates = await db.athletes.find(
+                {"organization_id": org, "status": {"$ne": "merged"},
+                 "first_name": {"$regex": f"^{re.escape(first)}$", "$options": "i"},
+                 "last_name": {"$regex": f"^{re.escape(last)}$", "$options": "i"}},
+                {"_id": 0}).to_list(20)
+            dob = data.get("date_of_birth")
+            grad = _grad_int(data.get("graduation_year"))
+            dup = None
+            if dob:
+                dup = next((c for c in candidates if c.get("date_of_birth") == dob), None)
+            elif grad is not None:
+                dup = next((c for c in candidates
+                            if not c.get("date_of_birth")
+                            and _grad_int(c.get("graduation_year")) == grad), None)
+            if dup:
+                matched += 1
+                if await _add_import_row_to_roster(org, event_id, dup["id"], bib):
+                    added += 1
+                if _grad_int(dup.get("graduation_year")) is None:
+                    flagged_no_grad += 1
+                continue
+            # Explicit age band: a normalized CSV division wins, else derive from a
+            # bare age column when there is no DOB (athlete_doc derives from DOB).
+            if not data.get("age_group"):
+                hint = data.get("age_group_hint")
+                if hint:
+                    data["age_group"] = hint
+                elif not dob and data.get("age") is not None:
+                    data["age_group"] = age_band_for_age(data.get("age"))
+            allowed = set(AthleteBody.model_fields)
+            payload = {k: v for k, v in data.items() if k in allowed and v not in (None, "")}
+            try:
+                athlete_body = AthleteBody(**payload)
+            except Exception:
+                skipped += 1
+                continue
+            doc = athlete_doc(athlete_body, org, user["id"])
+            await db.athletes.insert_one(doc)
+            created += 1
+            if await _add_import_row_to_roster(org, event_id, doc["id"], bib):
+                added += 1
+            if _grad_int(doc.get("graduation_year")) is None:
+                flagged_no_grad += 1
+            continue
+
+        skipped += 1  # unknown action
+
+    groups_out = []
+    if body.auto_group:
+        result = await _auto_group_by_grad(event_id, org)
+        groups_out = result["groups"]
+
+    await log_audit(org, user, "roster_csv_imported", "event", event_id,
+                    {"added": added, "created": created, "matched": matched,
+                     "skipped": skipped, "flagged_no_grad": flagged_no_grad,
+                     "auto_group": body.auto_group})
+    return {"added": added, "created": created, "matched": matched,
+            "skipped": skipped, "flagged_no_grad": flagged_no_grad,
+            "groups": groups_out}
+
+
+# ---------------- Auto-group by graduation year (Revision 4, Task 2) ----------------
+
+async def _auto_group_by_grad(event_id: str, org: str, *, regroup_all: bool = False) -> dict:
+    """Ensure a "Class of {year}" group per rostered grad year and place athletes.
+    Manual placements (a non-null group_id) are preserved unless regroup_all.
+    Athletes with no graduation_year are never bucketed into an invented year."""
+    entries = await db.event_athletes.find(
+        {"event_id": event_id, "organization_id": org}, {"_id": 0}).to_list(2000)
+    athlete_ids = [e["athlete_id"] for e in entries]
+    athletes = await db.athletes.find(
+        {"id": {"$in": athlete_ids}, "organization_id": org},
+        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "graduation_year": 1}).to_list(2000)
+    amap = {a["id"]: a for a in athletes}
+    groups = await db.event_groups.find(
+        {"event_id": event_id, "organization_id": org}, {"_id": 0}).to_list(200)
+    by_name = {g["name"]: g for g in groups}
+
+    unassigned = []
+    grad_group_ids = set()
+    for e in entries:
+        a = amap.get(e["athlete_id"])
+        if not a:
+            continue
+        grad = _grad_int(a.get("graduation_year"))
+        if grad is None:
+            unassigned.append({"athlete_id": a["id"], "name": _athlete_display_name(a)})
+            continue
+        gname = f"Class of {grad}"
+        g = by_name.get(gname)
+        if not g:
+            g = {"id": new_id(), "organization_id": org, "event_id": event_id,
+                 "name": gname, "created_at": now_iso()}
+            await db.event_groups.insert_one({**g})
+            by_name[gname] = g
+        grad_group_ids.add(g["id"])
+        if (e.get("group_id") is None or regroup_all) and e.get("group_id") != g["id"]:
+            await db.event_athletes.update_one(
+                {"id": e["id"], "organization_id": org},
+                {"$set": {"group_id": g["id"], "updated_at": now_iso()}})
+
+    out_groups = []
+    for g in by_name.values():
+        if g["id"] not in grad_group_ids:
+            continue
+        count = await db.event_athletes.count_documents(
+            {"event_id": event_id, "organization_id": org, "group_id": g["id"]})
+        out_groups.append({"id": g["id"], "name": g["name"], "count": count})
+    out_groups.sort(key=lambda g: g["name"])
+    return {"groups": out_groups, "unassigned": unassigned}
+
+
+class AutoGroupBody(BaseModel):
+    regroup_all: bool = False
+
+
+@router.post("/events/{event_id}/groups/auto-by-grad")
+async def auto_group_by_grad(event_id: str, body: AutoGroupBody | None = None,
+                             user=Depends(require_roles(*ADMIN_ROLES, "coach"))):
+    await get_org_event(event_id, user)
+    org = user["organization_id"]
+    regroup_all = bool(body and body.regroup_all)
+    result = await _auto_group_by_grad(event_id, org, regroup_all=regroup_all)
+    await log_audit(org, user, "groups_auto_by_grad", "event", event_id,
+                    {"groups": [g["name"] for g in result["groups"]],
+                     "unassigned": len(result["unassigned"]),
+                     "regroup_all": regroup_all})
+    return result
+
+
+@router.patch("/events/{event_id}/groups/{group_id}")
+async def rename_group(event_id: str, group_id: str, body: GroupBody,
+                       user=Depends(require_roles(*ADMIN_ROLES))):
+    await get_org_event(event_id, user)
+    org = user["organization_id"]
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Group name is required.")
+    res = await db.event_groups.update_one(
+        {"id": group_id, "event_id": event_id, "organization_id": org},
+        {"$set": {"name": name}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Group not found.")
+    await log_audit(org, user, "group_renamed", "event_group", group_id,
+                    {"event_id": event_id, "name": name})
+    return {"message": "Group renamed.", "id": group_id, "name": name}
+
+
+class GroupMergeBody(BaseModel):
+    into_group_id: str
+
+
+@router.post("/events/{event_id}/groups/{group_id}/merge")
+async def merge_group(event_id: str, group_id: str, body: GroupMergeBody,
+                      user=Depends(require_roles(*ADMIN_ROLES))):
+    """Move every member of {group_id} into into_group_id, repoint any
+    evaluator_assignments and stations referencing the source group, then delete
+    the source. (Single-athlete moves already exist: PATCH
+    /events/{event_id}/roster/{athlete_id} with {"group_id": ...}.)"""
+    await get_org_event(event_id, user)
+    org = user["organization_id"]
+    if body.into_group_id == group_id:
+        raise HTTPException(status_code=400, detail="Cannot merge a group into itself.")
+    src = await db.event_groups.find_one(
+        {"id": group_id, "event_id": event_id, "organization_id": org}, {"_id": 0})
+    dst = await db.event_groups.find_one(
+        {"id": body.into_group_id, "event_id": event_id, "organization_id": org}, {"_id": 0})
+    if not src or not dst:
+        raise HTTPException(status_code=404, detail="Group not found on this event.")
+    moved = await db.event_athletes.update_many(
+        {"event_id": event_id, "organization_id": org, "group_id": group_id},
+        {"$set": {"group_id": dst["id"], "updated_at": now_iso()}})
+    # Repoint group references. Two-step ($addToSet then $pull) because Mongo
+    # cannot address the same field in one update. Stations carry group_ids too —
+    # leaving a deleted id there would silently shrink a station's applicability.
+    for coll in (db.evaluator_assignments, db.stations):
+        await coll.update_many(
+            {"event_id": event_id, "organization_id": org, "group_ids": group_id},
+            {"$addToSet": {"group_ids": dst["id"]}})
+        await coll.update_many(
+            {"event_id": event_id, "organization_id": org, "group_ids": group_id},
+            {"$pull": {"group_ids": group_id}})
+    await db.event_groups.delete_one({"id": group_id, "event_id": event_id, "organization_id": org})
+    await log_audit(org, user, "groups_merged", "event_group", dst["id"],
+                    {"event_id": event_id, "from": src["name"], "into": dst["name"],
+                     "moved": moved.modified_count})
+    return {"message": f"Merged {src['name']} into {dst['name']}.",
+            "moved": moved.modified_count, "into_group_id": dst["id"],
+            "deleted_group_id": group_id}
+
+
+# ---------------- Station preset library (Revision 4, Task 3) ----------------
+#
+# The client's ten stations for the 8-12 station model. Presets create stations
+# through the EXISTING shape (same fields create_station writes) and bias
+# template resolution ONLY through the existing station.template_id field —
+# positions.resolve_template consults it at step 6, AFTER the athlete's own
+# age+position template (steps 1-5). So a P at the Pitching station gets his
+# age band's Pitching form; the hint only catches athletes the age/position
+# chain cannot place. No second evaluation engine, no new schema.
+
+STATION_PRESETS = [
+    {"key": "athletic_movement", "name": "Athletic Movement",
+     "description": "Speed, jumps and general athleticism testing (60-yard, home-to-first, broad/vertical jump)."},
+    {"key": "hitting", "name": "Hitting",
+     "description": "Batting practice rounds: exit velocity, bat speed, approach and contact quality."},
+    {"key": "infield", "name": "Infield",
+     "description": "Ground balls, footwork, glove work, infield throws and range."},
+    {"key": "outfield", "name": "Outfield",
+     "description": "Fly balls, routes and reads, closing speed and outfield throws."},
+    {"key": "throwing_arm", "name": "Throwing / Arm",
+     "description": "Arm strength and accuracy: throwing velocity, carry and exchange."},
+    {"key": "pitching", "name": "Pitching",
+     "description": "Bullpen work: velocity, command, secondary pitches and mechanics."},
+    {"key": "catching", "name": "Catching",
+     "description": "Receiving, blocking, pop time and throws to bases."},
+    {"key": "base_running", "name": "Base Running",
+     "description": "Home-to-first, leads and jumps, turns, reads and instincts."},
+    {"key": "baseball_iq", "name": "Baseball IQ / Instincts",
+     "description": "Situational awareness, decision-making and on-field communication."},
+    {"key": "character", "name": "Character / Coachability",
+     "description": "Effort, coachability, confidence, teammate impact and response to failure."},
+]
+
+# How each preset picks its station.template_id fallback:
+#   template_name -> the seeded age-neutral station form of that name
+#   position      -> the seeded position-family form via resolve_template itself
+#                    (mid band, same mixed-camp default seed.py uses)
+# throwing_arm has no dedicated seeded family: its station carries no template
+# hint and rides the athlete's own age/position resolution -> org default.
+_PRESET_TEMPLATE_HINTS = {
+    "athletic_movement": {"template_name": "Athletic Testing Station"},
+    "hitting": {"template_name": "Hitting Station"},
+    "infield": {"position": "IF"},
+    "outfield": {"position": "OF"},
+    "throwing_arm": {},
+    "pitching": {"position": "P"},
+    "catching": {"position": "C"},
+    "base_running": {"template_name": "Base Running Station"},
+    "baseball_iq": {"template_name": "Baseball IQ Station"},
+    "character": {"template_name": "Character and Coachability Station"},
+}
+
+PRESET_FALLBACK_AGE_BAND = "13U-14U"  # seed.py's sane default for a mixed camp
+
+
+def _preset_template_id(templates: list[dict], key: str) -> str | None:
+    """Best station-default template for a preset from the org's template list.
+    Returns None when no suitable template exists — the resolver's later steps
+    (org default) still guarantee a form, so never guess here."""
+    hint = _PRESET_TEMPLATE_HINTS.get(key) or {}
+    name = hint.get("template_name")
+    if name:
+        exact = next((t for t in templates
+                      if (t.get("name") or "").strip().lower() == name.lower()), None)
+        if exact:
+            return exact["id"]
+        sub = next((t for t in templates
+                    if name.lower() in (t.get("name") or "").lower()), None)
+        return sub["id"] if sub else None
+    pos = hint.get("position")
+    if pos:
+        tpl, reason = resolve_template(
+            templates, position=pos, station_template_id=None,
+            age_group=PRESET_FALLBACK_AGE_BAND)
+        # Only accept a real position-family hit — hinting the org default here
+        # would defeat the resolver's own fallback chain.
+        if tpl and (reason or "").startswith("position"):
+            return tpl["id"]
+    return None
+
+
+@router.get("/station-presets")
+async def list_station_presets(user=Depends(require_roles(*STAFF_ROLES))):
+    return STATION_PRESETS
+
+
+class StationPresetsBody(BaseModel):
+    keys: list[str]
+
+
+@router.post("/events/{event_id}/stations/presets")
+async def create_preset_stations(event_id: str, body: StationPresetsBody,
+                                 user=Depends(require_roles(*ADMIN_ROLES))):
+    """Bulk-create preset stations on an event. Idempotent: presets whose station
+    name already exists on the event are skipped, never duplicated."""
+    await get_org_event(event_id, user)
+    org = user["organization_id"]
+    by_key = {p["key"]: p for p in STATION_PRESETS}
+    unknown = [k for k in body.keys if k not in by_key]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown preset key(s): {', '.join(unknown)}. "
+                   f"Allowed: {', '.join(by_key)}")
+    templates = await db.evaluation_templates.find({"organization_id": org}, {"_id": 0}).to_list(500)
+    tmap = {t["id"]: t.get("name") for t in templates}
+    existing = await db.stations.find(
+        {"event_id": event_id, "organization_id": org}, {"_id": 0, "name": 1}).to_list(200)
+    existing_names = {(s.get("name") or "").strip().lower() for s in existing}
+
+    created, skipped = [], []
+    for key in dict.fromkeys(body.keys):  # de-dupe, keep order
+        preset = by_key[key]
+        if preset["name"].strip().lower() in existing_names:
+            skipped.append(preset["name"])
+            continue
+        tid = _preset_template_id(templates, key)
+        doc = {"id": new_id(), "organization_id": org, "event_id": event_id,
+               "name": preset["name"], "template_id": tid, "group_ids": [],
+               "start_time": None, "end_time": None, "preset_key": key,
+               "created_at": now_iso(), "updated_at": now_iso()}
+        await db.stations.insert_one(doc)
+        existing_names.add(preset["name"].strip().lower())
+        created.append({**clean(doc), "template_name": tmap.get(tid)})
+    await log_audit(org, user, "stations_presets_created", "event", event_id,
+                    {"created": [c["name"] for c in created], "skipped": skipped})
+    return {"created": created, "skipped": skipped}

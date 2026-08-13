@@ -139,7 +139,11 @@ const RatingControl = ({ metric, entry, onChange }) => {
           ))}
         </div>
       )}
-      <p className="text-[11px] text-muted-foreground mt-1.5">1 = Needs work · {Math.ceil(scale / 2)} = Average · {scale} = Elite</p>
+      {/* Templates may carry an age-appropriate legend (e.g. developmental wording
+          for the 8–12 model); the recruiting-style default only applies without one. */}
+      <p className="text-[11px] text-muted-foreground mt-1.5">
+        {metric.scale_legend || `1 = Needs work · ${Math.ceil(scale / 2)} = Average · ${scale} = Elite`}
+      </p>
       <NotObservedBtn
         notObserved={notObserved}
         testId={`not-observed-${metric.key || metric.id}`}
