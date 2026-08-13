@@ -32,6 +32,9 @@ todos:
   - id: rev2
     content: "Revision 2 (11 Aug): field eval mode, role-first dashboards, player card hero, grad-year nav, insight-card reports, Org HQ, athlete My Development — deployed to Surge/Render 11 Aug"
     status: completed
+  - id: rev4
+    content: "Revision 4 (13 Aug): event CSV roster import + permanent-ID matching, auto-group by grad year, station preset library, workspace switching + role landing, 8-12 developmental scoring legend — deployed 13 Aug"
+    status: completed
   - id: rev3
     content: "Revision 3 (12 Aug, UI/UX-only): role-mode nav, command-center HQ, premium Players roster + Quick View, derived Teams pages, Scout watchlist — deployed 12 Aug, eval flow verified byte-identical"
     status: completed
