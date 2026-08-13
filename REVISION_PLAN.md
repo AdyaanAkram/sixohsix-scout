@@ -30,7 +30,10 @@ todos:
     content: "Phase 8: Email (Resend) wired for invites/access-codes/resets; user must create the Resend account + verify domain"
     status: completed
   - id: rev2
-    content: "Revision 2 (11 Aug): field eval mode, role-first dashboards, player card hero, grad-year nav, insight-card reports, Org HQ, athlete My Development"
+    content: "Revision 2 (11 Aug): field eval mode, role-first dashboards, player card hero, grad-year nav, insight-card reports, Org HQ, athlete My Development — deployed to Surge/Render 11 Aug"
+    status: completed
+  - id: rev3
+    content: "Revision 3 (12 Aug, UI/UX-only): role-mode nav, command-center HQ, premium Players roster + Quick View, derived Teams pages, Scout watchlist — evaluation flow FROZEN for field testing"
     status: in_progress
 isProject: false
 ---
@@ -67,6 +70,34 @@ In flight (file-partitioned, six workstreams):
 Verified no-op: §9 media structure already supports the future film/feedback/drill split
 (athlete/event/evaluation/season linkage + consent + privacy are all on the row; drills are a
 separate collection). Nothing to change now.
+
+## Revision 3 — UI/UX & role efficiency (received 12 Aug 2026)
+
+Client's standing rules for this and future revisions: **UI/UX, navigation, hierarchy, and
+role-based efficiency only** — no rebuilds, no data-structure changes unless unavoidable, no new
+major features (AI/badges/payments/marketplace/scheduling stay roadmap). **The evaluation
+workflow is FROZEN** (Event → Assignment → Athlete → Evaluation → Autosave/Offline →
+Metrics/Notes/Media → Submit → Review → Approve → Results) while the client field-tests it with
+the playbook — no agent may touch those files.
+
+In flight (file-partitioned, five workstreams):
+- **Roster backend** — `GET /athletes/overview` (per-athlete score/trend/status in a handful of
+  queries, no N+1), derived `GET /teams` + `/teams/{name}/summary` over the existing
+  `current_team` string (no schema change), per-user scout watchlist endpoints.
+- **Players page** — grad-year DROPDOWN (chips retired), class snapshot strip
+  (Athletes | Evaluated | Improving | Needs Follow-Up), Card/List toggle, photo-first cards,
+  meaningful status chips (Follow-Up, Needs Evaluation, PB, New Video, Improving, Evaluated —
+  generic "Active" demoted), consolidated control bar, Quick View dialog before the full profile.
+  Import/Export/Add preserved. "Premium athlete development roster, not a database."
+- **Role-mode nav + command center** — Owner/Admin "Organization HQ" (Overview | Teams | Athletes
+  | Development | Events), Coach Hub, Evaluation Mode (Today's Event | Evaluate | Submitted),
+  Scout Mode (Discover | Watchlist | Compare | Events) with Review kept prominent for head scout;
+  everything demoted stays in Administration. HQ cards become clickable controls; grad classes
+  become a dropdown; recently-added players get real photos.
+- **Teams pages** — /teams and /teams/{name}: derived roster/dev/eval drill-ins; grad chips link
+  into filtered Players.
+- **Scout Mode** — Discover | Watchlist tabs; star-to-watch on prospect cards; Compare stays the
+  EXISTING comparison (no duplicate system).
 
 ---
 

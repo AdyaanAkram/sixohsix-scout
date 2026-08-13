@@ -6,7 +6,7 @@ import {
   LayoutDashboard, CalendarDays, Users, ClipboardList, BarChart3, TrendingUp,
   UserCog, FileSpreadsheet, Settings, LogOut, Home, ClipboardCheck,
   MoreHorizontal, ScrollText, IdCard, CalendarRange, Bell, Dumbbell,
-  ChevronsUpDown, Building2, Check, Crosshair,
+  ChevronsUpDown, Building2, Check, Crosshair, Shield, Star, ArrowLeftRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -17,47 +17,65 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 /** Primary nav keys by role (order = display order). Admin keys listed separately. */
-// Primary nav follows the §20 list: Dashboard, Players, Evaluations, Events,
-// Progress, Scout, Reports. Programs lives under Administration (it is deferred
-// scope per §24, not a day-to-day tab).
+// Role-based modes: each role's primary tabs are its daily workspace; everything
+// else stays reachable under Administration. Same routes, re-tiered per role.
+//   owner/admin  — Organization HQ:   Overview | Teams | Athletes | Development | Events
+//   coach        — Coach Hub:         Overview | My Teams | My Athletes | Evaluations | Development
+//   head_scout   — Scout Mode (review-first): Overview | Review | Discover | Watchlist | Compare | Events
+//   evaluator    — Evaluation Mode:   Today's Event | Evaluate | Submitted
+//   athlete/parent — My Development
 const NAV_BY_ROLE = {
-  owner: ["dashboard", "players", "review", "events", "development", "scout", "reports"],
-  admin: ["dashboard", "players", "review", "events", "development", "scout", "reports"],
-  head_scout: ["dashboard", "players", "review", "events", "development", "scout", "reports"],
-  coach: ["dashboard", "players", "events", "development", "reports"],
-  evaluator: ["dashboard", "events", "evaluate", "my-evaluations"],
+  owner: ["dashboard", "teams", "players", "development", "events"],
+  admin: ["dashboard", "teams", "players", "development", "events"],
+  head_scout: ["dashboard", "hs-review", "discover", "watchlist", "compare", "events"],
+  coach: ["dashboard", "my-teams", "my-athletes", "coach-evals", "development"],
+  evaluator: ["todays-event", "evaluate", "submitted"],
   athlete: ["my-id", "settings"],
   parent: ["my-id", "settings"],
 };
 
 const ADMIN_BY_ROLE = {
-  owner: ["programs", "staff", "templates", "drills", "audit", "settings"],
-  admin: ["programs", "staff", "templates", "drills", "audit", "settings"],
-  head_scout: ["programs", "settings"],
-  coach: ["programs", "settings"],
+  owner: ["review", "scout", "reports", "programs", "staff", "templates", "drills", "audit", "settings"],
+  admin: ["review", "scout", "reports", "programs", "staff", "templates", "drills", "audit", "settings"],
+  head_scout: ["players", "reports", "programs", "settings"],
+  coach: ["scout", "reports", "programs", "settings"],
   evaluator: ["settings"],
   athlete: [],
   parent: [],
 };
 
+// `slug` overrides the label-derived data-testid suffix so existing testids
+// survive relabels (e.g. Progress → Development keeps `nav-progress`).
 const NAV_ITEMS = {
-  dashboard: { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  dashboard: { to: "/dashboard", label: "Overview", icon: LayoutDashboard, slug: "dashboard" },
+  teams: { to: "/teams", label: "Teams", icon: Shield },
+  "my-teams": { to: "/teams", label: "My Teams", icon: Shield, slug: "teams" },
   programs: { to: "/programs", label: "Programs", icon: CalendarRange },
   events: { to: "/events", label: "Events", icon: CalendarDays },
-  players: { to: "/players", label: "Players", icon: Users },
+  "todays-event": { to: "/events", label: "Today's Event", icon: CalendarDays, slug: "events" },
+  players: { to: "/players", label: "Athletes", icon: Users, slug: "players" },
+  "my-athletes": { to: "/players", label: "My Athletes", icon: Users, slug: "players" },
   evaluate: { to: "/evaluate", label: "Evaluate", icon: ClipboardCheck },
+  "coach-evals": { to: "/evaluate", label: "Evaluations", icon: ClipboardCheck, slug: "evaluations" },
   "my-evaluations": { to: "/my-evaluations", label: "My Evaluations", icon: ClipboardList },
+  submitted: { to: "/my-evaluations", label: "Submitted", icon: ClipboardList, slug: "my-evaluations" },
   review: { to: "/review", label: "Evaluations", icon: ClipboardList },
+  "hs-review": { to: "/review", label: "Review", icon: ClipboardList, slug: "evaluations" },
   scout: { to: "/scout", label: "Scout", icon: Crosshair },
+  discover: { to: "/scout", label: "Discover", icon: Crosshair, slug: "scout" },
+  watchlist: { to: "/scout?tab=watchlist", label: "Watchlist", icon: Star },
+  compare: { to: "/scout/compare", label: "Compare", icon: ArrowLeftRight },
   reports: { to: "/reports", label: "Reports", icon: BarChart3 },
-  development: { to: "/development", label: "Progress", icon: TrendingUp },
+  development: { to: "/development", label: "Development", icon: TrendingUp, slug: "progress" },
   staff: { to: "/staff", label: "Staff", icon: UserCog },
   templates: { to: "/templates", label: "Templates", icon: FileSpreadsheet },
   drills: { to: "/drills", label: "Drills", icon: Dumbbell },
   audit: { to: "/audit-log", label: "Audit Log", icon: ScrollText },
   settings: { to: "/settings", label: "Settings", icon: Settings },
-  "my-id": { to: "/my-id", label: "My ID", icon: IdCard },
+  "my-id": { to: "/my-id", label: "My Development", icon: IdCard, slug: "my-id" },
 };
+
+const navSlug = (item) => item.slug || item.label.toLowerCase().replace(/\s+/g, "-");
 
 const ROLE_LABELS = {
   owner: "Organization Owner", admin: "Administrator", head_scout: "Head Scout",
@@ -87,7 +105,7 @@ const SidebarLink = ({ item, onClick }) => {
       to={item.to}
       end={item.to === "/dashboard" || item.to === "/my-id"}
       onClick={onClick}
-      data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
+      data-testid={`nav-${navSlug(item)}`}
       className={({ isActive }) =>
         cn(
           "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors duration-150",
@@ -104,29 +122,41 @@ const SidebarLink = ({ item, onClick }) => {
 };
 
 const MOBILE_PRIMARY = {
-  owner: ["dashboard", "players", "review", "events"],
-  admin: ["dashboard", "players", "review", "events"],
-  head_scout: ["dashboard", "players", "review", "events"],
-  coach: ["dashboard", "players", "events", "development"],
-  evaluator: ["dashboard", "events", "evaluate", "my-evaluations"],
+  owner: ["dashboard", "teams", "players", "events"],
+  admin: ["dashboard", "teams", "players", "events"],
+  head_scout: ["dashboard", "hs-review", "discover", "events"],
+  coach: ["dashboard", "my-teams", "my-athletes", "development"],
+  evaluator: ["todays-event", "evaluate", "submitted"],
   athlete: ["my-id", "settings"],
   parent: ["my-id", "settings"],
 };
 
 const MOBILE_LABELS = {
-  dashboard: "Home", programs: "Programs", events: "Events", players: "Players", review: "Evals",
-  evaluate: "Evaluate", development: "Progress", scout: "Scout", "my-evaluations": "My Evals",
+  dashboard: "Home", programs: "Programs", events: "Events", "todays-event": "Today",
+  teams: "Teams", "my-teams": "Teams", players: "Athletes", "my-athletes": "Athletes",
+  review: "Evals", "hs-review": "Review", evaluate: "Evaluate", "coach-evals": "Evals",
+  development: "Develop", scout: "Scout", discover: "Discover", watchlist: "Watchlist",
+  compare: "Compare", "my-evaluations": "My Evals", submitted: "Submitted",
   "my-id": "My ID", settings: "Settings", reports: "Reports",
 };
+// Testid suffix overrides so relabeled tabs keep their pre-existing testids.
+const MOBILE_SLUGS = {
+  players: "players", "my-athletes": "players", development: "progress",
+  "hs-review": "evals", "todays-event": "events", submitted: "my-evals",
+};
 const MOBILE_ICONS = {
-  dashboard: Home, programs: CalendarRange, events: CalendarDays, players: Users, review: ClipboardList,
-  evaluate: ClipboardCheck, development: TrendingUp, scout: Crosshair, "my-evaluations": ClipboardList,
+  dashboard: Home, programs: CalendarRange, events: CalendarDays, "todays-event": CalendarDays,
+  teams: Shield, "my-teams": Shield, players: Users, "my-athletes": Users,
+  review: ClipboardList, "hs-review": ClipboardList, evaluate: ClipboardCheck, "coach-evals": ClipboardCheck,
+  development: TrendingUp, scout: Crosshair, discover: Crosshair, watchlist: Star,
+  compare: ArrowLeftRight, "my-evaluations": ClipboardList, submitted: ClipboardList,
   "my-id": IdCard, settings: Settings, reports: BarChart3,
 };
 
 const STAFF_ONLY_PREFIXES = [
   "/players", "/evaluate", "/evaluation", "/events", "/review", "/reports", "/scout",
   "/staff", "/templates", "/drills", "/audit-log", "/development", "/my-evaluations", "/programs",
+  "/teams",
 ];
 
 /** Org identity mark: logo when the payload carries one, styled initial block otherwise. */
@@ -395,7 +425,7 @@ export const AppLayout = ({ children }) => {
               <NavLink
                 key={k}
                 to={item.to}
-                data-testid={`mobile-bottom-nav-${(MOBILE_LABELS[k] || item.label).toLowerCase().replace(/\s+/g, "-")}`}
+                data-testid={`mobile-bottom-nav-${MOBILE_SLUGS[k] || (MOBILE_LABELS[k] || item.label).toLowerCase().replace(/\s+/g, "-")}`}
                 className={cn(
                   "flex flex-col items-center justify-center gap-0.5 py-2.5 min-h-[60px] text-[11px] font-medium transition-colors",
                   active ? "text-brand" : "text-muted-foreground"
@@ -428,7 +458,7 @@ export const AppLayout = ({ children }) => {
                         key={k}
                         to={item.to}
                         onClick={() => setMoreOpen(false)}
-                        data-testid={`more-nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
+                        data-testid={`more-nav-${navSlug(item)}`}
                         className="flex items-center gap-3 rounded-xl border border-border bg-surface-3 px-4 py-3.5 text-sm font-medium text-foreground active:scale-[0.98] transition"
                       >
                         <Icon className="h-5 w-5 text-brand" />

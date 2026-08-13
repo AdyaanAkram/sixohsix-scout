@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/common/EmptyState";
 import { PlayerAvatar } from "@/components/common/PlayerAvatar";
 import { VerificationBadge, isVerifiedSource } from "@/components/common/StatusBadge";
@@ -12,15 +14,18 @@ import { GradYearChips } from "@/pages/PlayersList";
 import { cn } from "@/lib/utils";
 import {
   ClipboardList, GitCompare, Flag, ArrowRight, ArrowUpRight, ArrowDownRight,
-  Users, Video, ClipboardCheck,
+  Users, Video, ClipboardCheck, Star, CalendarDays, Target,
 } from "lucide-react";
 
 const POSITIONS = ["P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
 
-// Quick links kept from the previous Scout landing — same routes, same testids.
+// Header quick links kept from the previous Scout landing (same routes, same
+// testids) plus Events — Scout Mode is Discover | Watchlist | Compare | Events,
+// with Compare and Events living here as links to the existing pages.
 const ACTIONS = [
   { to: "/review", icon: ClipboardList, title: "Review Queue", testId: "scout-review-link" },
   { to: "/scout/compare", icon: GitCompare, title: "Compare Players", testId: "scout-compare-link" },
+  { to: "/events", icon: CalendarDays, title: "Events", testId: "scout-events-link" },
   { to: "/reports", icon: Flag, title: "Rankings & Reports", testId: "scout-reports-link" },
 ];
 
@@ -33,6 +38,8 @@ const CHIP_METRIC_ORDER = ["exit_velocity", "throwing_velocity", "sixty_yard_das
 // roster info and the leaderboard score.
 const ENRICH_CAP = 24;
 const ENRICH_BATCH = 4; // backend hard limit per compare call
+
+const errMsg = (e) => e?.response?.data?.detail || e?.message || "Something went wrong";
 
 // Latest-vs-previous event change from a compare payload's progress_series.
 // Returns null unless at least two scored event dates exist — a trend is
@@ -74,10 +81,16 @@ const TrendArrow = ({ change }) => {
   );
 };
 
-const ProspectCard = ({ athlete, score, payload }) => {
-  const overall = payload?.overall_score ?? score?.overall_score ?? null;
+// One prospect card, shared by Discover and Watchlist. `wl` is the athlete's
+// /watchlist entry (latest_overall, score_change, development_focus) used as a
+// fallback when the compare enrichment hasn't loaded; `onToggleWatch` being
+// undefined hides the star entirely (watchlist endpoint unavailable).
+const ProspectCard = ({ athlete, score, payload, wl, watched, onToggleWatch }) => {
+  const overall = payload?.overall_score ?? score?.overall_score ?? wl?.latest_overall ?? null;
   const evalCount = payload?.evaluation_count ?? score?.evaluation_count ?? null;
-  const change = trendOf(payload);
+  const enrichedChange = trendOf(payload);
+  const change = enrichedChange !== null ? enrichedChange
+    : (wl?.score_change !== null && wl?.score_change !== undefined ? Math.round(Number(wl.score_change) * 10) / 10 : null);
   const chips = chipMetrics(payload);
   return (
     <Card className="rounded-2xl border-border hover:border-brand/50 transition-colors" data-testid={`scout-prospect-card-${athlete.id}`}>
@@ -98,6 +111,19 @@ const ProspectCard = ({ athlete, score, payload }) => {
               <TrendArrow change={change} />
             </div>
           </div>
+          {onToggleWatch && (
+            <button
+              type="button"
+              onClick={() => onToggleWatch(athlete)}
+              className="shrink-0 -mt-1 -mr-1 h-7 w-7 inline-flex items-center justify-center rounded-full transition-colors hover:bg-secondary"
+              title={watched ? "Remove from watchlist" : "Add to watchlist"}
+              aria-label={watched ? "Remove from watchlist" : "Add to watchlist"}
+              aria-pressed={!!watched}
+              data-testid={`scout-watch-toggle-${athlete.id}`}
+            >
+              <Star className={cn("h-4 w-4 transition-colors", watched ? "fill-warning text-warning" : "text-muted-foreground")} />
+            </button>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5 min-h-[22px]">
@@ -113,6 +139,13 @@ const ProspectCard = ({ athlete, score, payload }) => {
             <span className="text-[11px] text-muted-foreground">No verified measurements on file.</span>
           )}
         </div>
+
+        {wl?.development_focus && (
+          <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Target className="h-3.5 w-3.5 shrink-0 text-brand" />
+            <span className="truncate" title={wl.development_focus}>{wl.development_focus}</span>
+          </p>
+        )}
 
         <div className="flex items-center justify-between border-t border-border pt-2.5">
           <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
@@ -135,6 +168,14 @@ const ProspectCard = ({ athlete, score, payload }) => {
   );
 };
 
+const CardGrid = ({ children, testId }) => (
+  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid={testId}>{children}</div>
+);
+
+const GridSkeleton = () => (
+  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-44 rounded-2xl" />)}</div>
+);
+
 export default function Scout() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [gradYears, setGradYears] = useState(null);
@@ -144,6 +185,35 @@ export default function Scout() {
   const [enriched, setEnriched] = useState({}); // athlete id → compare payload
   const [enrichBlocked, setEnrichBlocked] = useState(false);
   const enrichCache = useRef(new Map());
+
+  // Watchlist: null = loading, array = loaded. `watchAvailable` goes false when
+  // GET /watchlist errors (endpoint not shipped, or role without access) — the
+  // Watchlist tab and every star affordance then disappear and the page behaves
+  // exactly like the plain Prospect Board.
+  const [watchlist, setWatchlist] = useState(null);
+  const [watchAvailable, setWatchAvailable] = useState(null);
+
+  useEffect(() => {
+    api.get("/watchlist").then((r) => {
+      setWatchlist(Array.isArray(r.data) ? r.data : []);
+      setWatchAvailable(true);
+    }).catch(() => {
+      setWatchlist(null);
+      setWatchAvailable(false);
+    });
+  }, []);
+
+  const watchedIds = useMemo(() => new Set((watchlist || []).map((w) => w.id)), [watchlist]);
+
+  // Tab state lives in the URL (?tab=watchlist) so the nav can deep-link and
+  // refresh/back keep the tab. Discover is the unmarked default.
+  const tab = searchParams.get("tab") === "watchlist" && watchAvailable !== false ? "watchlist" : "discover";
+  const setTab = (t) => {
+    const next = new URLSearchParams(searchParams);
+    if (t === "watchlist") next.set("tab", "watchlist");
+    else next.delete("tab");
+    setSearchParams(next, { replace: true });
+  };
 
   // Same deep-link contract as /players: ?graduation_year=2029.
   const gradYear = searchParams.get("graduation_year") || "all";
@@ -197,13 +267,15 @@ export default function Scout() {
     });
   }, [athletes, scores]);
 
-  // Enrich the top of the board via /athletes/compare (verified measurements,
-  // per-event trend, video count) in batches of 4. One failed batch (403 for
-  // roles without compare access, or endpoint trouble) stops enrichment —
-  // cards degrade to roster + leaderboard data, never crash.
+  // Enrich the top of the board — plus every watched athlete — via
+  // /athletes/compare (verified measurements, per-event trend, video count) in
+  // batches of 4. One failed batch (403 for roles without compare access, or
+  // endpoint trouble) stops enrichment — cards degrade to roster + leaderboard
+  // + watchlist data, never crash.
   useEffect(() => {
     if (!board || enrichBlocked) return;
-    const targets = board.slice(0, ENRICH_CAP).map((a) => a.id).filter((id) => !enrichCache.current.has(id));
+    const wanted = [...board.slice(0, ENRICH_CAP).map((a) => a.id), ...(watchlist || []).map((w) => w.id)];
+    const targets = [...new Set(wanted)].filter((id) => id && !enrichCache.current.has(id));
     if (targets.length === 0) return;
     let cancelled = false;
     (async () => {
@@ -222,27 +294,31 @@ export default function Scout() {
       }
     })();
     return () => { cancelled = true; };
-  }, [board, enrichBlocked]);
+  }, [board, watchlist, enrichBlocked]);
 
-  return (
-    <div className="space-y-4" data-testid="scout-mode-page">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-[10px] uppercase tracking-[0.16em] text-brand font-semibold">60&apos;6&quot; Scout Mode</p>
-          <h1 className="font-display text-4xl text-foreground mt-1">Prospect Board</h1>
-          <p className="text-sm text-muted-foreground mt-1 max-w-xl">
-            Every active athlete with verified metrics, evaluation history and trend — filter by class and position.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {ACTIONS.map(({ to, icon: Icon, title, testId }) => (
-            <Button key={to} asChild variant="outline" className="rounded-xl h-11" data-testid={testId}>
-              <Link to={to}><Icon className="h-4 w-4 mr-1.5" /> {title}</Link>
-            </Button>
-          ))}
-        </div>
-      </div>
+  // Star toggle: optimistic flip, then reconcile against the server's list so
+  // the Watchlist tab shows the canonical entries (latest_overall, focus, …).
+  // Both endpoints are idempotent, so a double-tap is harmless.
+  const toggleWatch = useCallback(async (athlete) => {
+    const prev = watchlist;
+    const isWatched = (prev || []).some((w) => w.id === athlete.id);
+    setWatchlist(isWatched ? (prev || []).filter((w) => w.id !== athlete.id) : [...(prev || []), { ...athlete }]);
+    try {
+      if (isWatched) await api.delete(`/watchlist/${athlete.id}`);
+      else await api.post(`/watchlist/${athlete.id}`);
+      const r = await api.get("/watchlist");
+      if (Array.isArray(r.data)) setWatchlist(r.data);
+    } catch (e) {
+      setWatchlist(prev);
+      toast.error(errMsg(e));
+    }
+  }, [watchlist]);
 
+  const canWatch = watchAvailable !== false;
+  const onToggle = canWatch ? toggleWatch : undefined;
+
+  const discoverPanel = (
+    <div className="space-y-4">
       <GradYearChips years={gradYears} selected={gradYear} onSelect={setGradYear} testIdPrefix="scout" />
 
       <div className="flex flex-wrap items-center gap-2">
@@ -259,16 +335,83 @@ export default function Scout() {
       </div>
 
       {!board ? (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-44 rounded-2xl" />)}</div>
+        <GridSkeleton />
       ) : board.length === 0 ? (
         <EmptyState icon={Users} title="No prospects match" hint="Adjust the class or position filters, or add players from the directory." />
       ) : (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="scout-prospect-board">
+        <CardGrid testId="scout-prospect-board">
           {board.map((a) => (
-            <ProspectCard key={a.id} athlete={a} score={scores[a.id]} payload={enriched[a.id]} />
+            <ProspectCard key={a.id} athlete={a} score={scores[a.id]} payload={enriched[a.id]} watched={watchedIds.has(a.id)} onToggleWatch={onToggle} />
           ))}
-        </div>
+        </CardGrid>
       )}
     </div>
   );
+
+  // Endpoint missing → no tabs, no stars: exactly the pre-watchlist board.
+  if (!canWatch) {
+    return (
+      <div className="space-y-4" data-testid="scout-mode-page">
+        <ScoutHeader />
+        {discoverPanel}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4" data-testid="scout-mode-page">
+      <ScoutHeader />
+
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="rounded-xl">
+          <TabsTrigger value="discover" className="rounded-lg" data-testid="scout-tab-discover">Discover</TabsTrigger>
+          <TabsTrigger value="watchlist" className="rounded-lg" data-testid="scout-tab-watchlist">
+            Watchlist
+            {watchlist !== null && (
+              <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-secondary px-1.5 min-w-[20px] h-5 text-[11px] font-mono-num font-bold text-foreground" data-testid="scout-watchlist-count">
+                {watchlist.length}
+              </span>
+            )}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="discover" className="mt-4 space-y-4">
+          {discoverPanel}
+        </TabsContent>
+
+        <TabsContent value="watchlist" className="mt-4 space-y-4">
+          {watchlist === null ? (
+            <GridSkeleton />
+          ) : watchlist.length === 0 ? (
+            <EmptyState icon={Star} title="Your watchlist is empty" hint="Star prospects on the Discover board to track them here." />
+          ) : (
+            <CardGrid testId="scout-watchlist-board">
+              {watchlist.map((w) => (
+                <ProspectCard key={w.id} athlete={w} score={scores[w.id]} payload={enriched[w.id]} wl={w} watched onToggleWatch={toggleWatch} />
+              ))}
+            </CardGrid>
+          )}
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
 }
+
+const ScoutHeader = () => (
+  <div className="flex flex-wrap items-end justify-between gap-3">
+    <div>
+      <p className="text-[10px] uppercase tracking-[0.16em] text-brand font-semibold">60&apos;6&quot; Scout Mode</p>
+      <h1 className="font-display text-4xl text-foreground mt-1">Prospect Board</h1>
+      <p className="text-sm text-muted-foreground mt-1 max-w-xl">
+        Every active athlete with verified metrics, evaluation history and trend — filter by class and position.
+      </p>
+    </div>
+    <div className="flex flex-wrap gap-2">
+      {ACTIONS.map(({ to, icon: Icon, title, testId }) => (
+        <Button key={to} asChild variant="outline" className="rounded-xl h-11" data-testid={testId}>
+          <Link to={to}><Icon className="h-4 w-4 mr-1.5" /> {title}</Link>
+        </Button>
+      ))}
+    </div>
+  </div>
+);

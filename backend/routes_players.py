@@ -1,6 +1,6 @@
 import csv
 import io
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import (APIRouter, Depends, File, HTTPException, Query, Response,
                      UploadFile)
@@ -131,18 +131,13 @@ def restrict_guardian(doc, role):
     return doc
 
 
-@router.get("/athletes")
-async def list_athletes(
-    search: str | None = None,
-    age_group: str | None = None,
-    position: str | None = None,
-    status: str | None = None,
-    team: str | None = None,
-    graduation_year: int | None = None,
-    limit: int = 200,
-    user=Depends(require_roles(*STAFF_ROLES)),
-):
-    q = {"organization_id": user["organization_id"]}
+def _athlete_list_query(org_id: str, *, search: str | None = None,
+                        age_group: str | None = None, position: str | None = None,
+                        status: str | None = None, team: str | None = None,
+                        graduation_year: int | None = None) -> dict:
+    """The roster filter shared by /athletes and /athletes/overview — one
+    definition so the two surfaces can never disagree on what a filter means."""
+    q = {"organization_id": org_id}
     if status:
         q["status"] = status
     if graduation_year is not None:
@@ -163,6 +158,23 @@ async def list_athletes(
             {"preferred_name": {"$regex": search, "$options": "i"}},
             {"id": search},
         ]}]
+    return q
+
+
+@router.get("/athletes")
+async def list_athletes(
+    search: str | None = None,
+    age_group: str | None = None,
+    position: str | None = None,
+    status: str | None = None,
+    team: str | None = None,
+    graduation_year: int | None = None,
+    limit: int = 200,
+    user=Depends(require_roles(*STAFF_ROLES)),
+):
+    q = _athlete_list_query(user["organization_id"], search=search, age_group=age_group,
+                            position=position, status=status, team=team,
+                            graduation_year=graduation_year)
     athletes = await db.athletes.find(q, {"_id": 0}).sort([("last_name", 1), ("first_name", 1)]).to_list(min(limit, 500))
     return [restrict_guardian(a, user["role"]) for a in athletes]
 
@@ -192,6 +204,176 @@ async def _grad_year_counts(org_id: str) -> list[dict]:
 async def grad_years(user=Depends(require_roles(*STAFF_ROLES))):
     """[{year, count}] for the caller's org — powers the "Class of ____" chips."""
     return await _grad_year_counts(user["organization_id"])
+
+
+# ---------------- Roster intelligence (players page / teams / watchlist) ----------------
+
+def _day_fallback_checkpoints(evals: list[dict]) -> list[dict] | None:
+    """Progress needs >=2 checkpoints. Grouping by event alone hides development
+    when all evaluations share one event (a single camp) — fall back to
+    day-grouped checkpoints (submitted_at date). Shared by athlete_summary and
+    the roster overview so the two surfaces can never disagree. Returns None
+    when days don't yield >=2 scored checkpoints either."""
+    by_day: dict = {}
+    for ev in evals:
+        day = (ev.get("submitted_at") or ev.get("created_at") or "")[:10]
+        if day:
+            by_day.setdefault(day, []).append(ev)
+    if len(by_day) < 2:
+        return None
+    day_scores = []
+    for day, evs in sorted(by_day.items()):
+        agg = aggregate_player_scores(evs)
+        if agg["overall_score"] is not None:
+            day_scores.append({
+                "event_id": None,
+                "event_name": day,
+                "event_date": day,
+                "overall_score": agg["overall_score"],
+            })
+    return day_scores if len(day_scores) >= 2 else None
+
+
+def _latest_and_change(evals: list[dict], event_dates: dict) -> tuple[float | None, float | None]:
+    """(latest_overall, score_change) for one athlete's submitted/approved
+    evaluations — the same per-event aggregation athlete_summary uses (one
+    checkpoint per event, sorted by event date), including its day-grouped
+    fallback when events yield <2 checkpoints. Pure in-memory: `event_dates`
+    maps event_id -> date and is resolved once by the caller."""
+    by_event: dict = {}
+    for ev in evals:
+        by_event.setdefault(ev.get("event_id"), []).append(ev)
+    checkpoints = []
+    for event_id, evs in by_event.items():
+        agg = aggregate_player_scores(evs)
+        checkpoints.append({"event_date": event_dates.get(event_id),
+                            "overall_score": agg["overall_score"]})
+    checkpoints.sort(key=lambda x: x.get("event_date") or "")
+    if len(checkpoints) < 2:
+        fallback = _day_fallback_checkpoints(evals)
+        if fallback:
+            checkpoints = fallback
+    latest = checkpoints[-1] if checkpoints else None
+    previous = checkpoints[-2] if len(checkpoints) > 1 else None
+    latest_overall = latest["overall_score"] if latest else None
+    change = None
+    if latest and previous and latest["overall_score"] is not None and previous["overall_score"] is not None:
+        change = round(latest["overall_score"] - previous["overall_score"], 2)
+    return latest_overall, change
+
+
+async def _roster_intel(org_id: str, athletes: list[dict], role: str) -> list[dict]:
+    """Join score/trend/goal/milestone/media intelligence onto a set of athlete
+    docs. FIVE org-scoped queries total regardless of roster size — never a
+    per-athlete loop over the database. Everything after the fetches is an
+    in-memory join. Null/absent data stays null: nothing is fabricated."""
+    ids = [a["id"] for a in athletes]
+    if not ids:
+        return []
+    now = datetime.now(timezone.utc)
+    cutoff_12mo = (now - timedelta(days=365)).isoformat()
+    cutoff_60d = (now - timedelta(days=60)).isoformat()
+    cutoff_30d = (now - timedelta(days=30)).isoformat()
+
+    # 1) All submitted/approved evaluations for these athletes. Project only what
+    #    scoring needs — aggregate_player_scores reads computed.category_scores.
+    evals = await db.evaluations.find(
+        {"organization_id": org_id, "athlete_id": {"$in": ids},
+         "status": {"$in": ["submitted", "approved"]}},
+        {"_id": 0, "athlete_id": 1, "event_id": 1, "status": 1, "submitted_at": 1,
+         "created_at": 1, "computed.category_scores": 1, "computed.overall_score": 1},
+    ).sort("submitted_at", 1).to_list(20000)
+    evals_by_athlete: dict = {}
+    for ev in evals:
+        evals_by_athlete.setdefault(ev.get("athlete_id"), []).append(ev)
+
+    # 2) Event dates for every referenced event, resolved once (org-scoped).
+    event_ids = sorted({e.get("event_id") for e in evals if e.get("event_id")})
+    event_dates: dict = {}
+    if event_ids:
+        rows = await db.events.find(
+            {"id": {"$in": event_ids}, "organization_id": org_id},
+            {"_id": 0, "id": 1, "date": 1}).to_list(len(event_ids))
+        event_dates = {r["id"]: r.get("date") for r in rows}
+
+    # 3) Active goals (not Completed/Archived), newest first — the first goal
+    #    seen per athlete is their current development focus.
+    goals = await db.athlete_goals.find(
+        {"organization_id": org_id, "athlete_id": {"$in": ids},
+         "status": {"$nin": ["Completed", "Archived"]}},
+        {"_id": 0, "athlete_id": 1, "title": 1, "created_at": 1},
+    ).sort("created_at", -1).to_list(20000)
+    focus_by_athlete: dict = {}
+    for g in goals:
+        focus_by_athlete.setdefault(g.get("athlete_id"), g.get("title"))
+
+    # 4) Personal-best milestones in the last 60 days.
+    pb_athletes = set(await db.milestones.distinct("athlete_id", {
+        "organization_id": org_id, "athlete_id": {"$in": ids},
+        "kind": "personal_best", "created_at": {"$gte": cutoff_60d}}))
+
+    # 5) Approved video uploaded in the last 30 days. Consent-approved only —
+    #    pending youth media must never light up a roster badge.
+    video_athletes = set(await db.athlete_media.distinct("athlete_id", {
+        "organization_id": org_id, "athlete_id": {"$in": ids},
+        "file_type": "video", "consent_status": "approved",
+        "created_at": {"$gte": cutoff_30d}}))
+
+    out = []
+    for a in athletes:
+        aid = a["id"]
+        a_evals = evals_by_athlete.get(aid, [])
+        latest_overall, score_change = _latest_and_change(a_evals, event_dates)
+        # evals are sorted by submitted_at ascending, so the last one is newest.
+        last_eval_at = (a_evals[-1].get("submitted_at") or a_evals[-1].get("created_at") or "") if a_evals else ""
+        statuses = {
+            "evaluated": len(a_evals) > 0,
+            "needs_evaluation": (not a_evals) or last_eval_at < cutoff_12mo,
+            "improving": score_change is not None and score_change >= 0.1,
+            "follow_up": bool(a.get("flagged_follow_up")),
+            "personal_best": aid in pb_athletes,
+            "new_video": aid in video_athletes,
+        }
+        shaped = restrict_guardian(dict(a), role)
+        shaped.update({
+            "latest_overall": latest_overall,
+            "score_change": score_change,
+            "development_focus": focus_by_athlete.get(aid),
+            "statuses": statuses,
+        })
+        out.append(shaped)
+    return out
+
+
+# NOTE: registered before /athletes/{athlete_id} so the literal path matches first.
+@router.get("/athletes/overview")
+async def athletes_overview(
+    search: str | None = None,
+    graduation_year: int | None = None,
+    position: str | None = None,
+    team: str | None = None,
+    status: str | None = None,
+    limit: int = 200,
+    user=Depends(require_roles(*STAFF_ROLES)),
+):
+    """Players page in one round trip: every filtered athlete with score, trend,
+    development focus and status badges, plus snapshot counts over the SAME
+    filtered set. Six queries total (athletes + the five _roster_intel joins) —
+    never one per athlete."""
+    q = _athlete_list_query(user["organization_id"], search=search, position=position,
+                            status=status, team=team, graduation_year=graduation_year)
+    athletes = await db.athletes.find(q, {"_id": 0}).sort(
+        [("last_name", 1), ("first_name", 1)]).to_list(min(limit, 500))
+    shaped = await _roster_intel(user["organization_id"], athletes, user["role"])
+    return {
+        "athletes": shaped,
+        "snapshot": {
+            "total": len(shaped),
+            "evaluated": sum(1 for s in shaped if s["statuses"]["evaluated"]),
+            "improving": sum(1 for s in shaped if s["statuses"]["improving"]),
+            "follow_up": sum(1 for s in shaped if s["statuses"]["follow_up"]),
+        },
+    }
 
 
 @router.post("/athletes")
@@ -415,25 +597,11 @@ async def athlete_summary(athlete_id: str, season_id: str | None = None,
     # when all evaluations share one event (a single camp), while the dashboard's
     # insights group by day — so the two surfaces disagreed. Fall back to
     # day-grouped checkpoints (submitted_at date) when events give <2 points.
+    # (Shared with the roster overview via _day_fallback_checkpoints.)
     if len(event_scores) < 2:
-        by_day = {}
-        for ev in evals:
-            day = (ev.get("submitted_at") or ev.get("created_at") or "")[:10]
-            if day:
-                by_day.setdefault(day, []).append(ev)
-        if len(by_day) >= 2:
-            day_scores = []
-            for day, evs in sorted(by_day.items()):
-                agg = aggregate_player_scores(evs)
-                if agg["overall_score"] is not None:
-                    day_scores.append({
-                        "event_id": None,
-                        "event_name": day,
-                        "event_date": day,
-                        "overall_score": agg["overall_score"],
-                    })
-            if len(day_scores) >= 2:
-                event_scores = day_scores
+        day_scores = _day_fallback_checkpoints(evals)
+        if day_scores:
+            event_scores = day_scores
 
     latest = event_scores[-1] if event_scores else None
     previous = event_scores[-2] if len(event_scores) > 1 else None
@@ -1252,3 +1420,164 @@ async def export_athletes(user=Depends(require_roles(*ADMIN_ROLES, "head_scout")
     await log_audit(user["organization_id"], user, "athletes_exported", "athlete", None)
     return Response(content=output.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": "attachment; filename=606_players.csv"})
+
+
+# ---------------- Teams (derived from current_team — no schema change) ----------------
+#
+# A "team" here is purely a read-time grouping of athletes.current_team. Nothing
+# is written; renaming a team is just editing the athletes that carry the string.
+# Merged athletes are excluded — they are duplicates folded into another record.
+
+def _int_year(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _team_rollup(members: list[dict]) -> dict:
+    """avg/improving/follow_up over already-joined (Task-1 shaped) athletes."""
+    scores = [m["latest_overall"] for m in members if m.get("latest_overall") is not None]
+    return {
+        "athlete_count": len(members),
+        "avg_score": round(sum(scores) / len(scores), 2) if scores else None,
+        "improving": sum(1 for m in members if m["statuses"]["improving"]),
+        "follow_up": sum(1 for m in members if m["statuses"]["follow_up"]),
+    }
+
+
+@router.get("/teams")
+async def list_teams(user=Depends(require_roles(*STAFF_ROLES))):
+    """Every derived team in the caller's org with rollups, largest first."""
+    org = user["organization_id"]
+    athletes = await db.athletes.find(
+        {"organization_id": org, "current_team": {"$nin": [None, ""]},
+         "status": {"$ne": "merged"}},
+        {"_id": 0}).to_list(2000)
+    shaped = await _roster_intel(org, athletes, user["role"])
+    groups: dict = {}
+    for s in shaped:
+        groups.setdefault(s["current_team"], []).append(s)
+    out = []
+    for team, members in groups.items():
+        rollup = _team_rollup(members)
+        years = sorted({y for y in (_int_year(m.get("graduation_year")) for m in members) if y is not None})
+        out.append({"team": team, **rollup, "grad_years": years})
+    out.sort(key=lambda t: (-t["athlete_count"], t["team"]))
+    return out
+
+
+@router.get("/teams/{team_name}/summary")
+async def team_summary(team_name: str, user=Depends(require_roles(*STAFF_ROLES))):
+    """One derived team: rollups, grad-year distribution, the full Task-1-shaped
+    roster, active goal count and the 10 most recent evaluations. Exact match on
+    current_team (the path segment arrives URL-decoded)."""
+    org = user["organization_id"]
+    athletes = await db.athletes.find(
+        {"organization_id": org, "current_team": team_name, "status": {"$ne": "merged"}},
+        {"_id": 0}).sort([("last_name", 1), ("first_name", 1)]).to_list(500)
+    if not athletes:
+        raise HTTPException(status_code=404, detail="Team not found.")
+    shaped = await _roster_intel(org, athletes, user["role"])
+    rollup = _team_rollup(shaped)
+
+    year_counts: dict = {}
+    for a in athletes:
+        y = _int_year(a.get("graduation_year"))
+        if y is not None:
+            year_counts[y] = year_counts.get(y, 0) + 1
+    grad_years = [{"year": y, "count": c} for y, c in sorted(year_counts.items())]
+
+    ids = [a["id"] for a in athletes]
+    active_goals = await db.athlete_goals.count_documents(
+        {"organization_id": org, "athlete_id": {"$in": ids},
+         "status": {"$nin": ["Completed", "Archived"]}})
+
+    names = {a["id"]: f"{a.get('first_name', '')} {a.get('last_name', '')}".strip() for a in athletes}
+    recent = await db.evaluations.find(
+        {"organization_id": org, "athlete_id": {"$in": ids},
+         "status": {"$in": ["submitted", "approved"]}},
+        {"_id": 0, "athlete_id": 1, "submitted_at": 1, "computed.overall_score": 1},
+    ).sort("submitted_at", -1).to_list(10)
+    recent_evaluations = [{
+        "athlete_id": ev.get("athlete_id"),
+        "athlete_name": names.get(ev.get("athlete_id")),
+        "overall_score": (ev.get("computed") or {}).get("overall_score"),
+        "submitted_at": ev.get("submitted_at"),
+    } for ev in recent]
+
+    return {
+        "team": team_name,
+        **rollup,
+        "grad_years": grad_years,
+        "athletes": shaped,
+        "active_goals": active_goals,
+        "recent_evaluations": recent_evaluations,
+    }
+
+
+# ---------------- Scout watchlist (per-user AND per-org) ----------------
+#
+# scout_watchlist: {id, organization_id, user_id, athlete_id, created_at}.
+# Keyed by BOTH user and org so a scout who belongs to two organizations keeps
+# two independent lists and can never surface another org's minors.
+
+WATCHLIST_ROLES = (*REVIEW_ROLES, "coach")
+
+
+@router.get("/watchlist")
+async def get_watchlist(user=Depends(require_roles(*WATCHLIST_ROLES))):
+    """The caller's watchlist, each entry joined to the Task-1 per-athlete shape.
+    Entries whose athlete no longer exists in this org are skipped, not invented."""
+    org = user["organization_id"]
+    entries = await db.scout_watchlist.find(
+        {"organization_id": org, "user_id": user["id"]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(500)
+    if not entries:
+        return []
+    added_at = {e["athlete_id"]: e.get("created_at") for e in entries}
+    athletes = await db.athletes.find(
+        {"id": {"$in": list(added_at)}, "organization_id": org}, {"_id": 0}
+    ).sort([("last_name", 1), ("first_name", 1)]).to_list(500)
+    shaped = await _roster_intel(org, athletes, user["role"])
+    for s in shaped:
+        s["watchlisted_at"] = added_at.get(s["id"])
+    return shaped
+
+
+@router.post("/watchlist/{athlete_id}")
+async def add_to_watchlist(athlete_id: str, user=Depends(require_roles(*WATCHLIST_ROLES))):
+    """Idempotent add. The athlete must exist in the caller's org."""
+    org = user["organization_id"]
+    a = await db.athletes.find_one(
+        {"id": athlete_id, "organization_id": org},
+        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1})
+    if not a:
+        raise HTTPException(status_code=404, detail="Player not found.")
+    existing = await db.scout_watchlist.find_one(
+        {"organization_id": org, "user_id": user["id"], "athlete_id": athlete_id}, {"_id": 0})
+    if existing:
+        return {"message": "Already on your watchlist.", "entry": existing}
+    doc = {
+        "id": new_id(),
+        "organization_id": org,
+        "user_id": user["id"],
+        "athlete_id": athlete_id,
+        "created_at": now_iso(),
+    }
+    await db.scout_watchlist.insert_one(doc)
+    await log_audit(org, user, "watchlist_added", "athlete", athlete_id,
+                    {"name": f"{a.get('first_name', '')} {a.get('last_name', '')}".strip()})
+    return {"message": "Added to your watchlist.", "entry": clean(doc)}
+
+
+@router.delete("/watchlist/{athlete_id}")
+async def remove_from_watchlist(athlete_id: str, user=Depends(require_roles(*WATCHLIST_ROLES))):
+    """Idempotent remove — removing an entry that isn't there is not an error."""
+    org = user["organization_id"]
+    res = await db.scout_watchlist.delete_many(
+        {"organization_id": org, "user_id": user["id"], "athlete_id": athlete_id})
+    if res.deleted_count:
+        await log_audit(org, user, "watchlist_removed", "athlete", athlete_id)
+    return {"message": "Removed from your watchlist." if res.deleted_count else "Not on your watchlist.",
+            "removed": res.deleted_count}
