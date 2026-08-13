@@ -16,12 +16,35 @@ services:
         value: production
       - key: DEMO_HOSTING
         value: "1"
+      # ── Mail (dashboard-managed) ──────────────────────────────
+      # Until Resend is configured: MAIL_PROVIDER=stdout, MAIL_FROM=noreply@606athletics.demo
+      # After Resend setup:        MAIL_PROVIDER=resend, MAIL_FROM on the verified
+      # domain, RESEND_API_KEY set. See .env.example for the one-time Resend steps.
       - key: MAIL_PROVIDER
-        value: stdout
+        sync: false
       - key: MAIL_FROM
-        value: noreply@606athletics.demo
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      # ── Media storage (dashboard-managed) ─────────────────────
+      # Until R2 is configured:  STORAGE_BACKEND=local (files are EPHEMERAL on Render).
+      # After R2 setup, set all five together (deploy fails if s3 is set without them):
+      #   STORAGE_BACKEND=s3
+      #   S3_BUCKET=606-id-media
+      #   S3_ENDPOINT_URL=https://<CLOUDFLARE_ACCOUNT_ID>.r2.cloudflarestorage.com
+      #   S3_ACCESS_KEY=<R2 Access Key ID>
+      #   S3_SECRET_KEY=<R2 Secret Access Key>
+      # S3_REGION stays "auto" (R2 convention; config default).
       - key: STORAGE_BACKEND
-        value: local
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ENDPOINT_URL
+        sync: false
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false
       - key: DB_NAME
         value: pbg_scout
       - key: CORS_ORIGINS
