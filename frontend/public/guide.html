@@ -24,7 +24,6 @@
   a{color:var(--brand); text-decoration:none}
   a:hover{text-decoration:underline}
 
-  /* Header */
   header{position:sticky; top:0; z-index:10; background:var(--bg);
     border-bottom:1px solid var(--line); padding:12px 0}
   .hrow{max-width:860px; margin:0 auto; padding:0 18px;
@@ -39,7 +38,6 @@
     padding:9px 16px; border-radius:99px; font-size:14px; white-space:nowrap}
   .open-app:hover{text-decoration:none; filter:brightness(1.1)}
 
-  /* Nav chips */
   nav{display:flex; gap:8px; overflow-x:auto; padding:14px 0 4px;
     -webkit-overflow-scrolling:touch; scrollbar-width:none}
   nav::-webkit-scrollbar{display:none}
@@ -47,7 +45,6 @@
     color:var(--ink); padding:8px 14px; border-radius:99px; font-size:14px; font-weight:600}
   nav a:hover{border-color:var(--brand); text-decoration:none}
 
-  /* Hero */
   .hero{padding:34px 0 10px}
   .hero h1{font-size:clamp(30px,6vw,44px); line-height:1.1; font-weight:800; letter-spacing:-.5px}
   .hero h1 span{color:var(--brand)}
@@ -59,14 +56,8 @@
   h2{font-size:24px; font-weight:800; margin:44px 0 6px; letter-spacing:-.3px}
   .lead{color:var(--mut); margin-bottom:18px}
 
-  /* Cards */
   .card{background:var(--card); border:1px solid var(--line); border-radius:var(--r);
     padding:18px; margin-bottom:14px}
-  .role-head{display:flex; align-items:center; gap:12px}
-  .badge{flex:none; width:44px; height:44px; border-radius:12px; display:grid;
-    place-items:center; font-size:22px; background:var(--card2)}
-  .role-head b{font-size:17px; display:block}
-  .role-head small{color:var(--mut)}
   .kicker{font-size:11px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:var(--brand)}
 
   ul.plain{list-style:none; padding:0; margin:10px 0 0}
@@ -81,7 +72,6 @@
     border-radius:99px; background:var(--brand-soft); border:1px solid var(--brand);
     color:var(--brand); font-weight:800; font-size:13px; display:grid; place-items:center}
 
-  /* Details / accordions */
   details{background:var(--card); border:1px solid var(--line); border-radius:var(--r);
     margin-bottom:10px; overflow:hidden}
   summary{cursor:pointer; padding:15px 44px 15px 18px; font-weight:700; list-style:none;
@@ -105,12 +95,12 @@
   .callout{border-left:4px solid var(--brand); background:var(--brand-soft);
     border-radius:0 var(--r) var(--r) 0; padding:14px 16px; margin:16px 0}
   .callout b{display:block; margin-bottom:4px}
+  .callout.ok{border-left-color:var(--ok); background:rgba(34,197,94,.10)}
 
   footer{margin-top:56px; border-top:1px solid var(--line); padding-top:22px;
     color:var(--mut); font-size:14px; text-align:center}
   footer .motto{color:var(--brand); font-weight:800; letter-spacing:.14em;
     text-transform:uppercase; font-size:12px; margin-bottom:6px}
-  @media (min-width:700px){ .grid2{display:grid; grid-template-columns:1fr 1fr; gap:14px} .grid2 .card{margin-bottom:0} }
 </style>
 </head>
 <body>
@@ -136,6 +126,7 @@
     <nav aria-label="Sections">
       <a href="#start">Getting started</a>
       <a href="#roles">Your role</a>
+      <a href="#event">Running an event</a>
       <a href="#howto">How-to guides</a>
       <a href="#faq">Common questions</a>
     </nav>
@@ -146,19 +137,21 @@
   <p class="lead">Three things to know before your first sign-in.</p>
 
   <div class="card">
-    <span class="kicker">Sign in</span>
+    <span class="kicker">Sign in at 606athletics.com</span>
     <ul class="plain">
-      <li>You'll receive an <b>invitation email</b> from your organization. Open the link, set a
-        password, and you're in. There is nothing to download — it works in the browser on any
-        phone, tablet, or computer.</li>
-      <li>Guest coaches at an event may instead receive a <b>6-character access code</b> — enter it
-        on the app's <i>Redeem</i> page with your email.</li>
+      <li>You'll receive an <b>invitation email from noreply@606athletics.com</b>. Open the link,
+        set a password, and you're in. Nothing to download — it runs in the browser on any phone,
+        tablet, or computer.</li>
+      <li>Guest coaches working a single event may instead get a <b>6-character access code</b> —
+        enter it on the app's <i>Redeem</i> page with your email address.</li>
       <li>Forgot your password? Use <b>Forgot password?</b> on the sign-in page.</li>
+      <li>If your account has more than one role, you'll land on <b>"Where are you working
+        today?"</b> — pick a workspace. You can switch anytime without signing out.</li>
     </ul>
   </div>
 
   <div class="callout">
-    <b>First load of the day can take ~30–60 seconds.</b>
+    <b>First load of the day can take 30–60 seconds.</b>
     The app server naps when nobody is using it. Wait once and it stays fast. On camp days, open
     the app before athletes arrive so it's already awake.
   </div>
@@ -177,14 +170,21 @@
       <p><b>Your menu:</b> Overview · Teams · Athletes · Development · Events — with everything
         else (Reports, Scout, Staff, Templates, Drills, Audit Log, Settings) under
         <i>Administration</i>.</p>
+      <p><b>Workspaces:</b> use the <b>Workspace</b> switcher under your organization name to drop
+        into Coach Hub, Scout Mode, or Evaluation Mode and see exactly what those roles see —
+        useful for training staff or checking a coach's view.</p>
       <p><b>You can:</b></p>
       <ul class="plain">
-        <li>Run events end to end — roster, check-in with bib numbers, stations, evaluator
-          assignments, live progress</li>
+        <li>Run events end to end — <b>import a roster from CSV</b>, auto-group by graduation year,
+          add preset stations, assign evaluators, check in with bib numbers, watch live progress</li>
+        <li>Configure what each event offers: mark modules <b>Required / Optional / Not Offered</b>
+          based on your facility and equipment</li>
+        <li>See a <b>staffing recommendation</b> (minimum / recommended / ideal) with warnings like
+          "5 stations but only 3 evaluators assigned"</li>
         <li>Give a guest coach temporary access that <b>expires when the event ends</b></li>
         <li>Manage staff, evaluation templates (by age band and position), and the drill catalog</li>
-        <li>See every report, export CSVs, and generate player PDFs with charts</li>
-        <li>Set your organization's logo (Settings) — it appears beside "Powered by 60'6" ID"</li>
+        <li>Delete an event you no longer need (trash icon on the event header)</li>
+        <li>Set your organization's logo in Settings — it appears beside "Powered by 60'6" ID"</li>
       </ul>
     </div>
   </details>
@@ -198,8 +198,9 @@
       <p><b>You can:</b></p>
       <ul class="plain">
         <li>Check athletes in at events and score at stations you're assigned to</li>
-        <li>Log <b>verified measurements</b> (exit velo, 60-yard, pop time…) — a new personal best
-          automatically celebrates and notifies the athlete</li>
+        <li>Import an event roster from a CSV your club already keeps</li>
+        <li>Log <b>verified measurements</b> (exit velo, 60-yard, home-to-first, home-to-second,
+          10-yard split, broad jump) — a new personal best automatically notifies the athlete</li>
         <li>Create development goals with a target and a follow-up date</li>
         <li>Write notes with a visibility level (general, development, private staff,
           parent-visible…) — notes are never overwritten or lost</li>
@@ -211,16 +212,28 @@
   <details>
     <summary>📋&nbsp; Evaluator — <i>Evaluation Mode</i></summary>
     <div class="body">
-      <p><b>You land on:</b> your assignments — station, group, how many players are left, and one
+      <p><b>You land on:</b> your assignment — station, group, how many players are left, and one
         big button: <i>Continue Evaluating</i>. No admin screens, nothing to get lost in.</p>
       <p><b>Your menu:</b> Today's Event · Evaluate · Submitted.</p>
-      <p><b>The field loop:</b> pick a player (search by name or <b>bib number</b>) → score with big
-        tap targets → add a quick note or photo → it <b>saves automatically</b> → Next player. The
-        player's photo, name, and bib stay pinned at the top; the app warns you before you submit
-        with required scores missing.</p>
+      <p><b>The field loop:</b> pick a player (search by name or <b>bib number</b>) → tap scores
+        1–5 → add a quick note, tag, or photo if useful → it <b>saves automatically</b> → Next
+        player. The athlete's photo, name, and bib stay pinned at the top, and the app warns you
+        before you submit with required scores missing.</p>
+      <p><b>When a score doesn't apply,</b> use the one-tap buttons instead of guessing:</p>
+      <ul class="plain">
+        <li><b>N/O</b> — Not Observed (didn't get to see it)</li>
+        <li><b>N/A</b> — Not Applicable (doesn't apply to this athlete)</li>
+        <li><b>DNP</b> — Did Not Participate</li>
+        <li><b>Retest</b> — needs another look later</li>
+      </ul>
+      <p class="muted">None of these ever count as a zero, and they satisfy a required field so you
+        can finish the sheet honestly.</p>
+      <p><b>Quick tags:</b> on running and base-running metrics, tap chips like <i>Touched Front of
+        Bag</i>, <i>Proper Turn</i>, <i>Broke Down Properly</i>, <i>Wide Turn</i> instead of typing.
+        Enter the time → tap a tag or two → next athlete.</p>
       <p><b>Weak wifi? Keep scoring.</b> Scores save on your device and sync when the connection
-        returns — the status pill tells you the truth (<i>Synced</i> vs <i>Waiting</i>). Don't
-        clear your browser data mid-event; that's where offline work lives.</p>
+        returns — the status pill tells you the truth (<i>Synced</i> vs waiting). Don't clear your
+        browser data mid-event; that's where offline work lives.</p>
     </div>
   </details>
 
@@ -265,20 +278,74 @@
     </div>
   </details>
 
+  <!-- ============ RUNNING AN EVENT ============ -->
+  <h2 id="event">Running an event, start to finish</h2>
+  <p class="lead">The core workflow. Configure once, assign automatically where possible, evaluate
+    with minimum taps.</p>
+
+  <div class="card">
+    <span class="kicker">The seven steps</span>
+    <ol class="steps">
+      <li><b>Create the event</b> — name, date, location. The Overview tab shows a setup checklist:
+        Roster → Groups → Stations → Evaluators → Activated.</li>
+      <li><b>Import the roster</b> — Roster tab → <b>Import Roster CSV</b>. Existing athletes are
+        matched to their permanent 60'6" ID instead of being duplicated.</li>
+      <li><b>Groups build themselves</b> — athletes are auto-grouped into "Class of 2033", "Class
+        of 2034"… You can rename, merge, move athletes, or add walk-ins by hand.</li>
+      <li><b>Add stations</b> — pick from the preset library (Athletic Movement, Hitting, Infield,
+        Outfield, Throwing/Arm, Pitching, Catching, Base Running, Baseball IQ, Character) and set
+        each one <b>Required / Optional / Not Offered</b> for this event.</li>
+      <li><b>Check the staffing panel</b> — it tells you minimum, recommended and ideal staff for
+        your enrollment and station count, and warns about bottlenecks before the day.</li>
+      <li><b>Assign evaluators</b> — Evaluator → Group → Station → Save. They'll see only that.</li>
+      <li><b>Set status to Evaluation Active</b> and run the day from the <b>Live Progress</b> tab.</li>
+    </ol>
+  </div>
+
+  <div class="callout ok">
+    <b>Not Offered never counts against you.</b>
+    If your facility has no mound or no radar gun that day, mark those modules <i>Not Offered</i> —
+    they disappear from completion math instead of showing up as missing data.
+  </div>
+
   <!-- ============ HOW-TO ============ -->
   <h2 id="howto">How-to guides</h2>
   <p class="lead">The most common jobs, step by step.</p>
 
   <details>
-    <summary>Run a camp / evaluation day (site manager)</summary>
+    <summary>Import an event roster from a spreadsheet</summary>
+    <div class="body">
+      <ol class="steps">
+        <li>Export your roster from wherever you keep it as a <b>CSV</b>. Useful columns: First
+          Name, Last Name, DOB or Age, Grad Year, Primary Position, B/T, Team, Bib #.</li>
+        <li>Event → <b>Roster</b> tab → <b>Import Roster CSV</b> → choose the file.</li>
+        <li><b>Review the preview.</b> Every row is sorted for you:
+          <span class="chip ok">Matched</span> links to an existing athlete's permanent ID ·
+          <span class="chip">New</span> creates a profile ·
+          <span class="chip warn">Possible duplicate</span> asks you to choose ·
+          <span class="chip warn">Needs grad year</span> lets you type it in ·
+          <span class="chip">Error</span> is skipped with a reason.</li>
+        <li>Leave <b>Auto-group by graduation year</b> on, then <b>Confirm Import</b>.</li>
+        <li>Groups appear immediately with counts. Add walk-ins individually later — no second
+          import needed.</li>
+      </ol>
+      <p class="muted" style="margin-top:10px">The system will never silently create a duplicate
+        athlete, and never guesses a graduation year it wasn't given.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Run a camp day (site manager)</summary>
     <div class="body">
       <ol class="steps">
         <li>Open the app <b>before athletes arrive</b> (wakes the server, caches templates).</li>
         <li>Events → your event → set status to <b>Evaluation Active</b>.</li>
-        <li><b>Check-In</b> tab: check athletes in, assign <b>bib numbers</b> and groups.</li>
+        <li><b>Check-In</b> tab: check athletes in, assign <b>bib numbers</b> and groups. You can
+          also set which positions each athlete is being <b>evaluated for today</b>.</li>
         <li>Confirm <b>Stations</b> and <b>Evaluators</b> assignments.</li>
         <li>Watch the <b>Live Progress</b> tab: checked-in, in progress, complete, missing scores,
-          videos awaiting approval. Tap any player to see exactly which metrics are missing.</li>
+          videos awaiting approval. Tap any player to see exactly which metrics are missing and
+          whether they're <b>ready for final submission</b>.</li>
         <li>After the event: Review Queue → approve → Reports for rankings, CSV, and player PDFs.</li>
       </ol>
       <p class="muted" style="margin-top:10px">Print blank paper score sheets as backup. Dead
@@ -309,9 +376,11 @@
       <ol class="steps">
         <li>Sign in → tap <b>Continue Evaluating</b> on your assignment.</li>
         <li>Find the player — type their <b>bib number</b> (fastest) or name.</li>
-        <li>Score each category with the big buttons. Only categories relevant to that player's
-          age and position appear.</li>
-        <li>Add a quick note or snap a photo/video right from the form if asked to.</li>
+        <li>Tap scores <b>1–5</b>. Only categories relevant to that player's age and position
+          appear; use <i>Show all</i> if you need the rest.</li>
+        <li>If something doesn't apply, tap <b>N/O</b>, <b>N/A</b>, <b>DNP</b> or <b>Retest</b>
+          rather than guessing a number.</li>
+        <li>Add a tag, a quick note, or a photo/video if useful.</li>
         <li>Watch the pill say <b>Synced</b>. If you're offline it says so — keep going, it syncs
           later.</li>
         <li>Fix anything the <b>missing-scores warning</b> flags, then <b>Submit</b> and tap
@@ -393,6 +462,27 @@
   </details>
 
   <details>
+    <summary>What do N/O, N/A, DNP and Retest mean — and do they hurt the score?</summary>
+    <div class="body">
+      <p><b>N/O</b> Not Observed · <b>N/A</b> Not Applicable · <b>DNP</b> Did Not Participate ·
+        <b>Retest</b> needs another look. <b>None of them count as a zero</b> — they're excluded
+        from the athlete's score entirely. They also satisfy a required field, so an evaluator can
+        finish a sheet honestly instead of inventing a number. <i>Retest</i> additionally flags the
+        athlete for a follow-up without blocking submission.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Our field doesn't have a mound / radar gun / cage. Does that break anything?</summary>
+    <div class="body">
+      <p>No — that's exactly what <b>Required / Optional / Not Offered</b> is for. Mark what you
+        can't run that day as <i>Not Offered</i> and it's removed from completion math instead of
+        showing up as missing data. The same evaluation standard scales from one field and one
+        radar gun to a full facility.</p>
+    </div>
+  </details>
+
+  <details>
     <summary>Are photos and videos of kids safe here?</summary>
     <div class="body">
       <p>Yes — by design. Every file records who uploaded it and its consent status. Media of
@@ -439,10 +529,33 @@
   </details>
 
   <details>
+    <summary>How do I switch between roles without signing out?</summary>
+    <div class="body">
+      <p>If your account is authorized for more than one, use the <b>Workspace</b> switcher in the
+        sidebar (or the "More" menu on a phone), just under your organization name. Owners can drop
+        into Coach Hub, Scout Mode, or Evaluation Mode and back. Your permissions never change —
+        only the view.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>How do I delete a test event, or clear out practice athletes?</summary>
+    <div class="body">
+      <p><b>Event:</b> open it and use the trash icon on the header (admins only). It removes the
+        event, its roster links, groups, stations and assignments — athlete profiles are never
+        touched. An event with submitted evaluations is protected from deletion.</p>
+      <p><b>All athletes:</b> organization owners have <b>Settings → Danger Zone → Remove all
+        athletes</b>, which requires typing a confirmation phrase. It clears athletes and their
+        records for that organization only, keeping staff, events, stations and templates. It
+        cannot be undone — so use it for cleaning up after testing, not routine housekeeping.</p>
+    </div>
+  </details>
+
+  <details>
     <summary>Can I use it on my phone? Is there an app to install?</summary>
     <div class="body">
       <p>It's built phone-first — evaluators score on phones at the field. Nothing to install:
-        open <a href="https://606athletics.com">the app</a> in your browser. Tip: use your
+        open <a href="https://606athletics.com">606athletics.com</a> in your browser. Tip: use your
         browser's <i>Add to Home Screen</i> to get an app-style icon.</p>
     </div>
   </details>
@@ -450,9 +563,10 @@
   <details>
     <summary>I didn't get my invitation email</summary>
     <div class="body">
-      <p>Check spam first. Ask your organization admin to re-send the invite (Players → your
-        athlete → Invite, or Staff → Invite for coaches). For event access codes, the site manager
-        can also read the code off their screen and text it to you.</p>
+      <p>Check spam first — it comes from <b>noreply@606athletics.com</b>. Ask your organization
+        admin to re-send the invite (Players → your athlete → Invite, or Staff → Invite for
+        coaches). For event access codes, the site manager can also read the code off their screen
+        and text it to you.</p>
     </div>
   </details>
 
@@ -462,7 +576,7 @@
       <p>Your organization's data belongs to your organization, in its own walled-off space —
         organizations can never see each other's athletes. Everything persists between events:
         run a camp in August and another in October, and every athlete's history simply grows.
-        Evaluations are permanent, timestamped records.</p>
+        Evaluations are permanent, timestamped records, and the database is backed up nightly.</p>
     </div>
   </details>
 
