@@ -49,7 +49,7 @@ services:
         value: pbg_scout
       - key: CORS_ORIGINS
         # Both origins stay allowed through the domain cutover; drop surge later.
-        value: https://606-scout.surge.sh,https://id.606athletics.com
+        value: https://606-scout.surge.sh,https://id.606athletics.com,https://606athletics.com,https://www.606athletics.com
       - key: APP_PUBLIC_URL
         value: https://606-scout.surge.sh
       - key: JWT_SECRET
