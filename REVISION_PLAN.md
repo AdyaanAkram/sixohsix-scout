@@ -35,6 +35,9 @@ todos:
   - id: rev4
     content: "Revision 4 (13 Aug): event CSV roster import + permanent-ID matching, auto-group by grad year, station preset library, workspace switching + role landing, 8-12 developmental scoring legend — deployed 13 Aug"
     status: completed
+  - id: rev5
+    content: "Revision 5 (14 Aug, received): athletic testing library, observation tags, Required/Optional/Not-Offered modules, module-level completion, multi-position tracking, staffing calc, N/O|N/A|DNP|Retest, AI-assessment approval gating — P0 build starts after tonight's coach demo"
+    status: pending
   - id: rev3
     content: "Revision 3 (12 Aug, UI/UX-only): role-mode nav, command-center HQ, premium Players roster + Quick View, derived Teams pages, Scout watchlist — deployed 12 Aug, eval flow verified byte-identical"
     status: completed
