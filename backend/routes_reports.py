@@ -241,6 +241,12 @@ async def event_completion(event_id: str, user=Depends(require_roles(*REVIEW_ROL
         raise HTTPException(status_code=404, detail="Event not found.")
     roster = await db.event_athletes.find({"event_id": event_id}, {"_id": 0}).to_list(1000)
     stations = await db.stations.find({"event_id": event_id}, {"_id": 0}).to_list(50)
+    # Module-state awareness (Revision 5 §5): a station marked not_offered is not
+    # run at this event — it must never be counted as missing. Legacy stations
+    # carry no module_state and were always required. Column order follows the
+    # event's configured display_order (name breaks ties).
+    from routes_events import module_state_of, station_sort_key
+    stations.sort(key=station_sort_key)
     rows = []
     for entry in roster:
         athlete = await db.athletes.find_one({"id": entry["athlete_id"], "organization_id": user["organization_id"]}, {"_id": 0, "first_name": 1, "last_name": 1, "age_group": 1, "primary_position": 1, "id": 1})
@@ -253,6 +259,9 @@ async def event_completion(event_id: str, user=Depends(require_roles(*REVIEW_ROL
             applies = not gids or entry.get("group_id") in gids
             if not applies:
                 station_status[s["name"]] = "n/a"
+                continue
+            if module_state_of(s) == "not_offered":
+                station_status[s["name"]] = "not_offered"
                 continue
             ev = await db.evaluations.find_one({"event_id": event_id, "station_id": s["id"], "athlete_id": entry["athlete_id"], "status": {"$in": ["submitted", "approved"]}})
             if ev:

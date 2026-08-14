@@ -18,6 +18,112 @@ METRIC_TYPES = ["rating_5", "rating_10", "numeric", "time", "velocity", "yes_no"
                 "multiple_choice", "comment", "observation"]
 
 
+# ---------------- Metric result states & observation tags (rev 5, §17/§3) ----------------
+
+# Per-metric result states. None of these ever count as a zero: any non-null state
+# excludes the metric from computed scores, and any state satisfies a REQUIRED
+# metric at submit time. "retest" additionally surfaces in `retest_needed`.
+EVAL_METRIC_STATES = ("not_observed", "na", "dnp", "retest")
+
+OBSERVATION_TAGS = {
+    "base_running": ["Touched Front of Bag", "Proper Turn", "Broke Down Properly",
+                     "Wide Turn", "Missed Bag", "Stuttered", "Poor Running Path",
+                     "Lost Balance", "Slowed Early", "Needs Technique Work"],
+    "general": ["Good Energy", "Coachable Moment", "Fatigued", "Standout Rep",
+                "Inconsistent", "Mechanical Adjustment Needed"],
+}
+ALL_OBSERVATION_TAGS = {t for tags in OBSERVATION_TAGS.values() for t in tags}
+MAX_TAGS_PER_METRIC = 10
+
+
+def metric_state(entry) -> str | None:
+    """Effective state of a stored per-metric score entry.
+
+    An explicit `state` wins; the legacy `not_observed: true` flag (older
+    clients / offline drafts) reads as state "not_observed"."""
+    if not isinstance(entry, dict):
+        return None
+    state = entry.get("state")
+    if state in EVAL_METRIC_STATES:
+        return state
+    if entry.get("not_observed"):
+        return "not_observed"
+    return None
+
+
+def normalize_score_entries(scores):
+    """Additively validate/normalize an incoming autosave/submit `scores` map.
+
+    - `state` must be one of EVAL_METRIC_STATES or null ("" reads as null).
+    - Legacy `not_observed: true` (no state) keeps working: it is dual-written
+      as state "not_observed" so both old and new clients agree.
+    - When an explicit state is given, `not_observed` is synced to it
+      (true only for "not_observed") so legacy readers stay coherent.
+    - `tags` must be known observation tags, capped at MAX_TAGS_PER_METRIC.
+    Unknown states/tags are rejected with 422. Everything else round-trips
+    untouched (unknown keys, non-dict entries, absent fields)."""
+    if not isinstance(scores, dict):
+        return scores
+    out = {}
+    for mid, entry in scores.items():
+        if not isinstance(entry, dict):
+            out[mid] = entry
+            continue
+        e = dict(entry)
+        state = e.get("state")
+        if state in ("", None):
+            state = None
+        elif state not in EVAL_METRIC_STATES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown metric state '{state}'. Allowed: {', '.join(EVAL_METRIC_STATES)} or null.")
+        if state is None and e.get("not_observed"):
+            state = "not_observed"
+        if state is None:
+            e.pop("state", None)
+        else:
+            e["state"] = state
+            e["not_observed"] = state == "not_observed"
+        if e.get("tags") is not None:
+            tags = e["tags"]
+            if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+                raise HTTPException(status_code=422, detail="Metric tags must be a list of strings.")
+            tags = list(dict.fromkeys(tags))
+            unknown = [t for t in tags if t not in ALL_OBSERVATION_TAGS]
+            if unknown:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Unknown observation tags: {', '.join(unknown)}")
+            if len(tags) > MAX_TAGS_PER_METRIC:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"At most {MAX_TAGS_PER_METRIC} observation tags per metric.")
+            e["tags"] = tags
+        out[mid] = e
+    return out
+
+
+def evaluation_metric_flags(template: dict, scores: dict) -> dict:
+    """missing_required + retest_needed (lists of metric ids) for an evaluation.
+
+    Satisfaction rule (§17): a REQUIRED metric is satisfied by a value OR any
+    state. Retest never blocks submission — it only rides `retest_needed`.
+    Tags never participate in completeness."""
+    missing, retest = [], []
+    scores = scores or {}
+    for m in (template or {}).get("metrics") or []:
+        mid = m.get("id")
+        entry = scores.get(mid) or {}
+        state = metric_state(entry)
+        if state == "retest":
+            retest.append(mid)
+        if m.get("required") and m.get("metric_type") not in ("comment", "observation"):
+            value = entry.get("value") if isinstance(entry, dict) else entry
+            if state is None and value in (None, ""):
+                missing.append(mid)
+    return {"missing_required": missing, "retest_needed": retest}
+
+
 # ---------------- Templates ----------------
 
 class MetricBody(BaseModel):
@@ -226,6 +332,13 @@ async def list_positions(user=Depends(require_roles(*STAFF_ROLES))):
 @router.get("/age-bands")
 async def list_age_bands(user=Depends(require_roles(*STAFF_ROLES))):
     return {"age_bands": list(AGE_BANDS)}
+
+
+@router.get("/evaluation-tags")
+async def list_evaluation_tags(user=Depends(require_roles(*STAFF_ROLES))):
+    """Observation tag vocabulary (§3), grouped by tag set. Tags are optional
+    supplements on metric results — never a completeness requirement."""
+    return OBSERVATION_TAGS
 
 
 # ---------------- Position-based template resolution ----------------
@@ -564,6 +677,20 @@ async def _get_own_evaluation(evaluation_id: str, user):
     return ev
 
 
+def _scoring_input(scores: dict) -> dict:
+    """Scores as fed to the scoring engine: any entry with a non-null state other
+    than "not_observed" is withheld so na/dnp/retest never count as a zero
+    (the engine already skips not_observed itself). Stated entries are overlaid
+    back onto metric_results by _compute."""
+    out = {}
+    for mid, entry in (scores or {}).items():
+        state = metric_state(entry)
+        if state and state != "not_observed":
+            continue
+        out[mid] = entry
+    return out
+
+
 async def _compute(ev):
     org = ev["organization_id"]
     template = await db.evaluation_templates.find_one(
@@ -573,9 +700,33 @@ async def _compute(ev):
         {"id": ev["athlete_id"], "organization_id": org},
         {"_id": 0, "age_group": 1, "primary_position": 1})
     pos = ev.get("evaluated_as_position") or (athlete or {}).get("primary_position")
-    return compute_evaluation_scores(
-        template, ev.get("scores") or {}, benchmarks,
+    scores = ev.get("scores") or {}
+    computed = compute_evaluation_scores(
+        template, _scoring_input(scores), benchmarks,
         age_group=(athlete or {}).get("age_group"), position=pos)
+    # Overlay per-metric state/tags onto the results so every consumer of
+    # `computed` sees them without re-reading the raw scores map.
+    results = computed.setdefault("metric_results", {})
+    for mid, entry in scores.items():
+        if not isinstance(entry, dict):
+            continue
+        state = metric_state(entry)
+        tags = entry.get("tags") or []
+        if not state and not tags:
+            continue
+        row = results.get(mid)
+        if row is None:
+            row = {"raw": None, "normalized": None, "weighted": None, "percentile": None}
+            results[mid] = row
+        if state:
+            row["state"] = state
+            row["not_observed"] = state == "not_observed"
+        if tags:
+            row["tags"] = list(tags)
+    flags = evaluation_metric_flags(template, scores)
+    computed["missing_required"] = flags["missing_required"]
+    computed["retest_needed"] = flags["retest_needed"]
+    return computed
 
 
 @router.put("/evaluations/{evaluation_id}/autosave")
@@ -587,7 +738,7 @@ async def autosave(evaluation_id: str, body: AutosaveBody, user=Depends(require_
         return {"status": "stale_ignored", "updated_at": ev["updated_at"], "evaluation_id": evaluation_id}
     updates = {"updated_at": now_iso()}
     if body.scores is not None:
-        updates["scores"] = body.scores
+        updates["scores"] = normalize_score_entries(body.scores)
     if body.comments is not None:
         updates["comments"] = body.comments
     if body.client_updated_at:
@@ -648,17 +799,23 @@ async def get_evaluation(evaluation_id: str, user=Depends(require_roles(*STAFF_R
             {"id": ev["station_id"], "organization_id": org}, {"_id": 0, "name": 1, "template_id": 1})
     event = await db.events.find_one(
         {"id": ev["event_id"], "organization_id": org}, {"_id": 0, "name": 1})
+    flags = evaluation_metric_flags(template or {}, ev.get("scores") or {})
     return {**ev, "template": template, "athlete": athlete,
             "recommendation": ev.get("recommendation"),
             "next_evaluation_date": ev.get("next_evaluation_date"),
             "bib_number": (entry or {}).get("bib_number"),
             "station_name": (station or {}).get("name"), "event_name": (event or {}).get("name"),
-            "station_template_id": (station or {}).get("template_id")}
+            "station_template_id": (station or {}).get("template_id"),
+            "missing_required": flags["missing_required"],
+            "retest_needed": flags["retest_needed"]}
 
 
 class SubmitBody(BaseModel):
     recommendation: str | None = Field(default=None, max_length=4000)
     next_evaluation_date: str | None = None
+    # Optional final scores flush (rev 5): same shape as autosave `scores`,
+    # including per-metric `state` and `tags`. Absent = use the stored scores.
+    scores: dict | None = None
 
 
 @router.post("/evaluations/{evaluation_id}/submit")
@@ -666,6 +823,8 @@ async def submit_evaluation(evaluation_id: str, body: SubmitBody = SubmitBody(),
     ev = await _get_own_evaluation(evaluation_id, user)
     if ev["status"] in ("submitted", "approved"):
         raise HTTPException(status_code=409, detail="This evaluation was already submitted.")
+    if body.scores is not None:
+        ev["scores"] = normalize_score_entries(body.scores)
     template = await db.evaluation_templates.find_one(
         {"id": ev.get("template_id"), "organization_id": user["organization_id"]},
         {"_id": 0}) or {"metrics": []}
@@ -674,7 +833,9 @@ async def submit_evaluation(evaluation_id: str, body: SubmitBody = SubmitBody(),
     for m in template.get("metrics", []):
         if m.get("required") and m.get("metric_type") not in ("comment", "observation"):
             entry = scores.get(m["id"]) or {}
-            if entry.get("not_observed"):
+            if metric_state(entry):
+                # N/O, N/A, DNP and Retest all satisfy a required metric
+                # (never auto-zero, never block submission).
                 continue
             if entry.get("value") in (None, ""):
                 missing.append(m["name"])
@@ -686,6 +847,8 @@ async def submit_evaluation(evaluation_id: str, body: SubmitBody = SubmitBody(),
         "status": "submitted", "submitted_at": ts, "updated_at": ts, "computed": computed,
         "returned": False,
     }
+    if body.scores is not None:
+        updates["scores"] = ev["scores"]
     if body.recommendation is not None:
         updates["recommendation"] = body.recommendation.strip() or None
     if body.next_evaluation_date is not None:
@@ -697,6 +860,7 @@ async def submit_evaluation(evaluation_id: str, body: SubmitBody = SubmitBody(),
                      "recommendation_set": bool(updates.get("recommendation")),
                      "next_evaluation_date": updates.get("next_evaluation_date")})
     return {"status": "submitted", "submitted_at": ts, "computed": computed,
+            "retest_needed": computed.get("retest_needed", []),
             "recommendation": updates.get("recommendation", ev.get("recommendation")),
             "next_evaluation_date": updates.get("next_evaluation_date", ev.get("next_evaluation_date"))}
 
@@ -716,11 +880,15 @@ def _to_date(value):
         return None
 
 
-def _metric_rows(template: dict, computed: dict) -> list[dict]:
+def _metric_rows(template: dict, computed: dict, scores: dict | None = None) -> list[dict]:
     results = (computed or {}).get("metric_results") or {}
+    scores = scores or {}
     rows = []
     for m in sorted(template.get("metrics") or [], key=lambda x: int(x.get("display_order") or 0)):
         r = results.get(m["id"]) or {}
+        entry = scores.get(m["id"]) or {}
+        state = metric_state(entry) or r.get("state")
+        tags = (entry.get("tags") if isinstance(entry, dict) else None) or r.get("tags") or []
         rows.append({
             "metric_id": m["id"],
             "key": m.get("key"),
@@ -731,7 +899,9 @@ def _metric_rows(template: dict, computed: dict) -> list[dict]:
             "raw": r.get("raw"),
             "normalized": r.get("normalized"),
             "percentile": r.get("percentile"),
-            "not_observed": bool(r.get("not_observed")),
+            "not_observed": bool(r.get("not_observed")) or state == "not_observed",
+            "state": state,
+            "tags": list(tags),
         })
     return rows
 
@@ -782,7 +952,8 @@ async def evaluation_results(evaluation_id: str, user=Depends(require_roles(*STA
     # results page matches the number on the profile.
     current = aggregate_player_scores([ev])
     overall = current["overall_score"]
-    metric_rows = _metric_rows(template, ev.get("computed") or {})
+    metric_rows = _metric_rows(template, ev.get("computed") or {}, ev.get("scores") or {})
+    result_flags = evaluation_metric_flags(template, ev.get("scores") or {})
 
     cat_order = {c["name"]: int(c.get("display_order") or 0)
                  for c in (template.get("categories") or []) if c.get("name")}
@@ -894,6 +1065,8 @@ async def evaluation_results(evaluation_id: str, user=Depends(require_roles(*STA
         "verified_measurements": measurements,
         "recommendation": ev.get("recommendation"),
         "next_evaluation_date": ev.get("next_evaluation_date"),
+        "missing_required": result_flags["missing_required"],
+        "retest_needed": result_flags["retest_needed"],
         "full_evaluation": {
             "strengths": comments.get("strengths") or "",
             "development_needs": comments.get("development_needs") or "",
@@ -915,6 +1088,9 @@ async def my_evaluations(user=Depends(require_roles(*STAFF_ROLES))):
     org = user["organization_id"]
     evals = await db.evaluations.find(
         {"evaluator_id": user["id"], "organization_id": org}, {"_id": 0}).sort("updated_at", -1).to_list(200)
+    templates = await db.evaluation_templates.find(
+        {"organization_id": org}, {"_id": 0, "id": 1, "metrics": 1}).to_list(200)
+    tmap = {t["id"]: t for t in templates}
     out = []
     for ev in evals:
         athlete = await db.athletes.find_one(
@@ -922,9 +1098,12 @@ async def my_evaluations(user=Depends(require_roles(*STAFF_ROLES))):
             {"_id": 0, "first_name": 1, "last_name": 1, "age_group": 1, "photo_url": 1, "primary_position": 1})
         station = await db.stations.find_one(
             {"id": ev["station_id"], "organization_id": org}, {"_id": 0, "name": 1})
+        flags = evaluation_metric_flags(tmap.get(ev.get("template_id")) or {}, ev.get("scores") or {})
         out.append({**ev, "athlete": athlete, "station_name": (station or {}).get("name"),
                     "recommendation": ev.get("recommendation"),
-                    "next_evaluation_date": ev.get("next_evaluation_date")})
+                    "next_evaluation_date": ev.get("next_evaluation_date"),
+                    "missing_required": flags["missing_required"],
+                    "retest_needed": flags["retest_needed"]})
     return out
 
 
@@ -937,6 +1116,9 @@ async def review_queue(event_id: str | None = None, user=Depends(require_roles(*
     if event_id:
         q["event_id"] = event_id
     evals = await db.evaluations.find(q, {"_id": 0}).sort("submitted_at", -1).to_list(500)
+    templates = await db.evaluation_templates.find(
+        {"organization_id": org}, {"_id": 0, "id": 1, "metrics": 1}).to_list(200)
+    tmap = {t["id"]: t for t in templates}
     out = []
     for ev in evals:
         athlete = await db.athletes.find_one(
@@ -946,10 +1128,13 @@ async def review_queue(event_id: str | None = None, user=Depends(require_roles(*
             {"id": ev["station_id"], "organization_id": org}, {"_id": 0, "name": 1})
         event = await db.events.find_one(
             {"id": ev["event_id"], "organization_id": org}, {"_id": 0, "name": 1})
+        flags = evaluation_metric_flags(tmap.get(ev.get("template_id")) or {}, ev.get("scores") or {})
         out.append({**ev, "athlete": athlete, "station_name": (station or {}).get("name"),
                     "event_name": (event or {}).get("name"),
                     "recommendation": ev.get("recommendation"),
-                    "next_evaluation_date": ev.get("next_evaluation_date")})
+                    "next_evaluation_date": ev.get("next_evaluation_date"),
+                    "missing_required": flags["missing_required"],
+                    "retest_needed": flags["retest_needed"]})
     return out
 
 

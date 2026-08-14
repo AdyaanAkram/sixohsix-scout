@@ -22,6 +22,9 @@ from positions import POSITION_TO_GROUP
 CANONICAL_METRIC_CATALOG = {
     "sixty_yard_dash": {"label": "60-Yard Dash", "unit": "sec", "lower_better": True},
     "home_to_first": {"label": "Home to First", "unit": "sec", "lower_better": True},
+    # Client-confirmed independent metric (Revision 5 §2): a base-running time
+    # around the turn — explicitly NOT an alias of the straight-line 60-yard dash.
+    "home_to_second": {"label": "Home to Second", "unit": "sec", "lower_better": True},
     "exit_velocity": {"label": "Exit Velocity", "unit": "mph", "lower_better": False},
     "throwing_velocity": {"label": "Throwing Velocity", "unit": "mph", "lower_better": False},
     "pitching_velocity": {"label": "Pitch Velocity", "unit": "mph", "lower_better": False},
@@ -59,6 +62,8 @@ METRIC_KEY_ALIASES = {
     # other spellings seen in evaluation templates / imports
     "home_to_1st": "home_to_first",
     "h2f": "home_to_first",
+    "home_to_2nd": "home_to_second",
+    "h2s": "home_to_second",
     "vert_jump": "vertical_jump",
     "vertical_leap": "vertical_jump",
     "broad_jmp": "broad_jump",

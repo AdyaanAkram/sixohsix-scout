@@ -1,5 +1,6 @@
 import csv
 import io
+import math
 import re
 import statistics
 from collections import defaultdict
@@ -15,7 +16,8 @@ from auth import (ADMIN_ROLES, COACH_ROLES, STAFF_ROLES, active_assignment_filte
 from config import settings
 from db import clean, db, log_audit, new_id, now_iso
 from mailer import safe_send
-from positions import resolve_template
+from positions import AGE_BAND_SPANS, resolve_template, validate_positions
+from scoring import metric_meta
 
 router = APIRouter()
 
@@ -23,6 +25,27 @@ EVENT_STATUSES = ["Draft", "Registration Open", "Registration Closed", "Check-In
                   "Evaluation Active", "Evaluation Complete", "Reports Under Review", "Closed"]
 
 DONE_STATUSES = ["submitted", "approved"]
+
+# Module states (Revision 5 §5). Additive on stations and testing-config entries.
+# "required"    -> counts toward completeness; missing blocks submission-readiness.
+# "optional"    -> tracked when done, but missing NEVER blocks completeness.
+# "not_offered" -> the event does not run this module: it must NEVER count as
+#                  missing or expected anywhere (progress, reports, completion).
+MODULE_STATES = ("required", "optional", "not_offered")
+
+
+def module_state_of(doc: dict) -> str:
+    """Effective module state of a station/testing entry. Docs written before
+    Revision 5 carry no module_state — they were always required."""
+    ms = (doc or {}).get("module_state")
+    return ms if ms in MODULE_STATES else "required"
+
+
+def station_sort_key(s: dict):
+    """List ordering (Revision 5 §4): display_order first, name breaks ties.
+    Legacy stations without display_order sort as 0 (front, alphabetical)."""
+    order = s.get("display_order")
+    return (order if isinstance(order, int) else 0, s.get("name") or "")
 
 # A draft untouched for this long on a live event day means the device stopped syncing.
 STALE_DRAFT_MINUTES = 30
@@ -67,6 +90,9 @@ class StationBody(BaseModel):
     group_ids: list[str] = []
     start_time: str | None = None
     end_time: str | None = None
+    # Revision 5 additive fields (§4/§5)
+    module_state: str = "required"   # required | optional | not_offered
+    display_order: int = 0
 
 
 class AssignmentBody(BaseModel):
@@ -86,6 +112,9 @@ class CheckInBody(BaseModel):
     group_id: str | None = None
     late_arrival: bool | None = None
     flagged_incomplete: bool | None = None
+    # Revision 5 §15: positions this athlete is being evaluated at TODAY.
+    # Storage only this wave — evaluation resolution keeps its own override.
+    positions_today: list[str] | None = None
 
 
 @router.get("/events")
@@ -312,6 +341,7 @@ async def roster_search(event_id: str, q: str = "", user=Depends(require_roles(*
             "age_group": a.get("age_group"),
             "primary_position": a.get("primary_position"),
             "roster_status": e.get("status"),
+            "positions_today": e.get("positions_today") or [],
             "evaluation_id": primary_ev["id"] if primary_ev else None,
             "evaluation_status": primary_ev["status"] if primary_ev else "not_started",
             "default_assignment_id": (my_assignments[0]["id"] if my_assignments else None),
@@ -380,6 +410,12 @@ async def update_checkin(event_id: str, athlete_id: str, body: CheckInBody, user
             raise HTTPException(status_code=400, detail="That group is not on this event.")
     if "group_id" in updates and updates["group_id"] == "":
         updates["group_id"] = None
+    if "positions_today" in updates:
+        # Explicit null/[] clears the day's positions; codes validate against the taxonomy.
+        try:
+            updates["positions_today"] = validate_positions(updates["positions_today"])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
     if "bib_number" in updates:
         # ensure bib uniqueness within event
         dup = await db.event_athletes.find_one({
@@ -433,6 +469,78 @@ async def add_walk_up(event_id: str, body: WalkUpBody, user=Depends(require_role
     return {"athlete_id": aid, "message": "Walk-up player added and checked in."}
 
 
+# ---------------- Athletic testing library + per-event config (Revision 5 §2) ----------------
+#
+# The library is the fixed five-test menu the client runs at ID events. Entries
+# are sourced from scoring's canonical metric catalog (metric_meta) so labels,
+# units and direction can never drift from the scoring/benchmark engine.
+# home_to_second is its own catalog metric — the client is explicit it is NOT
+# a 60-yard dash.
+
+ATHLETIC_TEST_KEYS = ["ten_yd", "home_to_first", "home_to_second", "sixty_yard_dash", "broad_jump"]
+
+
+def athletic_test_library() -> list[dict]:
+    out = []
+    for key in ATHLETIC_TEST_KEYS:
+        meta = metric_meta(key)
+        if not meta:  # catalog is code-owned; this only trips on a bad edit
+            continue
+        out.append({"key": meta["key"], "label": meta["label"],
+                    "unit": meta["unit"], "lower_better": meta["lower_better"]})
+    return out
+
+
+@router.get("/athletic-tests")
+async def list_athletic_tests(user=Depends(require_roles(*STAFF_ROLES))):
+    """The five-test athletic testing menu every event configures from."""
+    return athletic_test_library()
+
+
+class TestingItem(BaseModel):
+    key: str
+    state: str = "required"  # required | optional | not_offered
+    order: int = 0
+
+
+class TestingBody(BaseModel):
+    tests: list[TestingItem]
+
+
+@router.put("/events/{event_id}/testing")
+async def set_event_testing(event_id: str, body: TestingBody,
+                            user=Depends(require_roles(*ADMIN_ROLES, "coach"))):
+    """Store which athletic tests this event runs (additive `testing_config` on
+    the event doc). Keys validate against the library; states against
+    MODULE_STATES. GET /events/{event_id} returns testing_config as stored."""
+    await get_org_event(event_id, user)
+    allowed = {t["key"] for t in athletic_test_library()}
+    config = []
+    seen = set()
+    for item in body.tests:
+        key = (item.key or "").strip()
+        if key not in allowed:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown athletic test key: {key or '(empty)'}. "
+                       f"Allowed: {', '.join(ATHLETIC_TEST_KEYS)}")
+        if item.state not in MODULE_STATES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"state must be one of: {', '.join(MODULE_STATES)}")
+        if key in seen:
+            raise HTTPException(status_code=400, detail=f"Duplicate athletic test key: {key}")
+        seen.add(key)
+        config.append({"key": key, "state": item.state, "order": item.order})
+    config.sort(key=lambda t: t["order"])
+    await db.events.update_one(
+        {"id": event_id, "organization_id": user["organization_id"]},
+        {"$set": {"testing_config": config, "updated_at": now_iso()}})
+    await log_audit(user["organization_id"], user, "event_testing_updated", "event", event_id,
+                    {"tests": {t["key"]: t["state"] for t in config}})
+    return {"message": "Testing configuration saved.", "testing_config": config}
+
+
 # ---------------- Groups ----------------
 
 @router.get("/events/{event_id}/groups")
@@ -476,30 +584,39 @@ async def list_stations(event_id: str, user=Depends(require_roles(*STAFF_ROLES))
     templates = await db.evaluation_templates.find({"organization_id": org}, {"_id": 0, "id": 1, "name": 1}).to_list(100)
     tmap = {t["id"]: t["name"] for t in templates}
     for s in stations:
+        s["module_state"] = module_state_of(s)
+        s["display_order"] = s.get("display_order") if isinstance(s.get("display_order"), int) else 0
         s["template_name"] = tmap.get(s.get("template_id"))
         assignments = await db.evaluator_assignments.find({
             "station_id": s["id"], "event_id": event_id,
             "organization_id": user["organization_id"], **active_assignment_filter(),
         }, {"_id": 0}).to_list(50)
         s["evaluator_count"] = len(assignments)
-        # completion
-        group_ids = s.get("group_ids") or []
-        q = {"event_id": event_id, "organization_id": org, "status": "checked_in"}
-        if group_ids:
-            q["group_id"] = {"$in": group_ids}
-        expected = await db.event_athletes.count_documents(q)
+        # completion — a not_offered station expects nobody (never counts as missing)
         done = await db.evaluations.count_documents({
             "event_id": event_id, "organization_id": org, "station_id": s["id"],
             "status": {"$in": DONE_STATUSES}})
+        if s["module_state"] == "not_offered":
+            expected = 0
+        else:
+            group_ids = s.get("group_ids") or []
+            q = {"event_id": event_id, "organization_id": org, "status": "checked_in"}
+            if group_ids:
+                q["group_id"] = {"$in": group_ids}
+            expected = await db.event_athletes.count_documents(q)
         s["expected"] = expected
         s["completed"] = done
         s["completion_pct"] = round(done / expected * 100) if expected else 0
+    stations.sort(key=station_sort_key)
     return stations
 
 
 @router.post("/events/{event_id}/stations")
 async def create_station(event_id: str, body: StationBody, user=Depends(require_roles(*ADMIN_ROLES))):
     await get_org_event(event_id, user)
+    if body.module_state not in MODULE_STATES:
+        raise HTTPException(status_code=400,
+                            detail=f"module_state must be one of: {', '.join(MODULE_STATES)}")
     doc = body.model_dump()
     doc.update({"id": new_id(), "organization_id": user["organization_id"], "event_id": event_id,
                 "created_at": now_iso(), "updated_at": now_iso()})
@@ -511,13 +628,21 @@ async def create_station(event_id: str, body: StationBody, user=Depends(require_
 @router.patch("/events/{event_id}/stations/{station_id}")
 async def update_station(event_id: str, station_id: str, body: StationBody, user=Depends(require_roles(*ADMIN_ROLES))):
     await get_org_event(event_id, user)
-    updates = body.model_dump()
+    # exclude_unset: true PATCH semantics — omitted fields keep their stored
+    # values, so an older client that never sends module_state/display_order
+    # can never silently reset a configured station back to defaults.
+    updates = body.model_dump(exclude_unset=True)
+    if "module_state" in updates and updates["module_state"] not in MODULE_STATES:
+        raise HTTPException(status_code=400,
+                            detail=f"module_state must be one of: {', '.join(MODULE_STATES)}")
     updates["updated_at"] = now_iso()
     res = await db.stations.update_one(
         {"id": station_id, "event_id": event_id, "organization_id": user["organization_id"]},
         {"$set": updates})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Station not found.")
+    await log_audit(user["organization_id"], user, "station_updated", "station", station_id,
+                    {k: v for k, v in updates.items() if k != "updated_at"})
     return {"message": "Station updated."}
 
 
@@ -668,30 +793,45 @@ async def event_progress(event_id: str, user=Depends(require_roles(*COACH_ROLES)
             draft_by_station[e.get("station_id")] += 1
             draft_by_athlete[e.get("athlete_id")].add(e.get("station_id"))
 
+    # Module-state awareness (Revision 5 §5): a not_offered station is skipped
+    # from expected/complete/missing everywhere — it can never count as missing.
+    stations.sort(key=station_sort_key)
     station_progress = []
     total_expected = 0
     total_done = 0
     total_drafts = 0
     for s in stations:
+        state = module_state_of(s)
+        if state == "not_offered":
+            station_progress.append({"station_id": s["id"], "station_name": s["name"],
+                                     "module_state": state, "expected": 0, "completed": 0,
+                                     "drafts": 0, "completion_pct": 0})
+            continue
         expected = sum(1 for e in checked_in_entries if _station_applies(s, e.get("group_id")))
         done = done_by_station.get(s["id"], 0)
         drafts = draft_by_station.get(s["id"], 0)
         total_expected += expected
         total_done += done
         total_drafts += drafts
-        station_progress.append({"station_id": s["id"], "station_name": s["name"], "expected": expected,
+        station_progress.append({"station_id": s["id"], "station_name": s["name"],
+                                 "module_state": state, "expected": expected,
                                  "completed": done, "drafts": drafts,
                                  "completion_pct": round(done / expected * 100) if expected else 0})
 
-    # Per-player rollup over the stations that actually apply to each player's group.
+    # Per-player rollup over the stations that actually apply to each player's
+    # group. Completeness = every REQUIRED applicable station done; optional
+    # stations count as activity (in-progress) but never block completeness.
     players_complete = 0
     players_in_progress = 0
     players_not_started = 0
     for e in checked_in_entries:
-        applicable = {s["id"] for s in stations if _station_applies(s, e.get("group_id"))}
-        done = applicable & done_by_athlete.get(e["athlete_id"], set())
-        drafted = applicable & draft_by_athlete.get(e["athlete_id"], set())
-        if applicable and done == applicable:
+        offered = [s for s in stations
+                   if module_state_of(s) != "not_offered" and _station_applies(s, e.get("group_id"))]
+        required = {s["id"] for s in offered if module_state_of(s) == "required"}
+        tracked = {s["id"] for s in offered}
+        done = tracked & done_by_athlete.get(e["athlete_id"], set())
+        drafted = tracked & draft_by_athlete.get(e["athlete_id"], set())
+        if tracked and required <= done:
             players_complete += 1
         elif done or drafted:
             players_in_progress += 1
@@ -704,11 +844,15 @@ async def event_progress(event_id: str, user=Depends(require_roles(*COACH_ROLES)
     users = await db.users.find({"id": {"$in": evaluator_ids}}, {"_id": 0, "id": 1, "full_name": 1}).to_list(200)
     umap = {u["id"]: u.get("full_name") for u in users}
     smap = {s["id"]: s["name"] for s in stations}
+    state_by_station = {s["id"]: module_state_of(s) for s in stations}
     evaluator_progress = []
     for a in assignments:
         group_ids = a.get("group_ids") or []
-        expected = sum(1 for e in checked_in_entries
-                       if not group_ids or e.get("group_id") in group_ids)
+        if state_by_station.get(a["station_id"]) == "not_offered":
+            expected = 0  # station not run at this event — nothing is owed
+        else:
+            expected = sum(1 for e in checked_in_entries
+                           if not group_ids or e.get("group_id") in group_ids)
         done = done_by_evaluator.get((a["station_id"], a["evaluator_id"]), 0)
         evaluator_progress.append({"evaluator_id": a["evaluator_id"], "evaluator_name": umap.get(a["evaluator_id"], ""),
                                    "station_name": smap.get(a["station_id"], ""), "expected": expected, "completed": done,
@@ -814,12 +958,25 @@ async def event_player_progress(event_id: str, athlete_id: str,
     rows = []
     counts = {"complete": 0, "draft": 0, "missing": 0}
     missing_stations = []
+    missing_required_stations = []  # required-module gaps only — the submission blockers
+    stations_not_offered = 0
+    stations.sort(key=station_sort_key)
     for s in stations:
+        state = module_state_of(s)
         if not _station_applies(s, entry.get("group_id")):
             rows.append({"station_id": s["id"], "station_name": s["name"], "applies": False,
-                         "status": "n/a", "evaluation_id": None, "evaluator_id": None,
-                         "evaluator_name": None, "updated_at": None, "submitted_at": None,
-                         "template_id": None, "missing_required": []})
+                         "module_state": state, "status": "n/a", "evaluation_id": None,
+                         "evaluator_id": None, "evaluator_name": None, "updated_at": None,
+                         "submitted_at": None, "template_id": None, "missing_required": []})
+            continue
+        if state == "not_offered":
+            # Not run at this event: reported for visibility, excluded from every
+            # count and never listed as missing (Revision 5 §5 critical rule).
+            stations_not_offered += 1
+            rows.append({"station_id": s["id"], "station_name": s["name"], "applies": True,
+                         "module_state": state, "status": "not_offered", "evaluation_id": None,
+                         "evaluator_id": None, "evaluator_name": None, "updated_at": None,
+                         "submitted_at": None, "template_id": None, "missing_required": []})
             continue
         station_evals = by_station.get(s["id"], [])
         done = next((e for e in station_evals if e.get("status") in DONE_STATUSES), None)
@@ -843,8 +1000,11 @@ async def event_player_progress(event_id: str, athlete_id: str,
         counts[status] += 1
         if status != "complete":
             missing_stations.append(s["name"])
+            if state == "required":
+                missing_required_stations.append(s["name"])
         rows.append({
-            "station_id": s["id"], "station_name": s["name"], "applies": True, "status": status,
+            "station_id": s["id"], "station_name": s["name"], "applies": True,
+            "module_state": state, "status": status,
             "evaluation_id": picked["id"] if picked else None,
             "evaluator_id": picked.get("evaluator_id") if picked else None,
             "evaluator_name": picked.get("evaluator_name") if picked else None,
@@ -855,6 +1015,9 @@ async def event_player_progress(event_id: str, athlete_id: str,
         })
 
     applicable = counts["complete"] + counts["draft"] + counts["missing"]
+    # A missing OPTIONAL module never blocks submission-readiness; a missing
+    # required one always does. not_offered stations are outside both counts.
+    required_complete = len(missing_required_stations) == 0
     return {
         "event": {"id": ev["id"], "name": ev.get("name"), "date": ev.get("date"), "status": ev.get("status")},
         "athlete": athlete,
@@ -866,11 +1029,15 @@ async def event_player_progress(event_id: str, athlete_id: str,
         "walk_up": bool(entry.get("walk_up")),
         "flagged_incomplete": bool(entry.get("flagged_incomplete")),
         "complete": applicable > 0 and counts["complete"] == applicable,
+        "required_complete": required_complete,
+        "ready_for_submission": applicable > 0 and required_complete,
         "stations_applicable": applicable,
         "stations_complete": counts["complete"],
         "stations_draft": counts["draft"],
         "stations_missing": counts["missing"],
+        "stations_not_offered": stations_not_offered,
         "missing_stations": missing_stations,
+        "missing_required_stations": missing_required_stations,
         "stations": rows,
     }
 
@@ -1713,3 +1880,154 @@ async def create_preset_stations(event_id: str, body: StationPresetsBody,
     await log_audit(org, user, "stations_presets_created", "event", event_id,
                     {"created": [c["name"] for c in created], "skipped": skipped})
     return {"created": created, "skipped": skipped}
+
+
+# ---------------- Staffing recommendation (Revision 5 §7-9) ----------------
+#
+# Pure deterministic arithmetic over live event data (roster, groups, stations,
+# assignments). Every knob is a named constant with its rationale. Missing data
+# produces honest zeros and no warnings — never an invented estimate.
+
+# Group sizing (§7): a group should clear one station rep-cycle without a queue.
+GROUP_TARGET_YOUNG = 7    # 8-12 majority: shorter attention spans -> tighter groups
+GROUP_TARGET_OLDER = 8    # 13U+ majority: older athletes sustain a larger rotation
+YOUNG_AGE_CEILING = 12    # an age band whose upper age <= this counts toward "young"
+
+# Evaluators (§8): minimum assumes one evaluator can float across adjacent
+# stations; recommended is one per active station; ideal adds a specialty/floater.
+EVALUATOR_SHARE_FACTOR = 0.6
+
+# Check-in/data staff (§8): one per 25 enrolled keeps the check-in line moving;
+# at least one whenever anyone is enrolled.
+CHECKIN_PER_ENROLLED = 25
+
+# Metrics/timing (§8): one operator runs a gun + stopwatch line; enrollment past
+# this threshold is worth splitting into a second parallel timing line.
+METRICS_SPLIT_ENROLLMENT = 40
+
+# Flow coaches (§8): recommended one per two groups keeps every rotation moving;
+# minimum one per four still functions with the site manager pitching in.
+FLOW_GROUPS_PER_COACH_REC = 2
+FLOW_GROUPS_PER_COACH_MIN = 4
+
+# Media/video (§9): never required to run the evaluation; one dedicated shooter
+# is worth it at showcase scale.
+MEDIA_ENROLLMENT_THRESHOLD = 40
+
+
+@router.get("/events/{event_id}/staffing")
+async def event_staffing(event_id: str, user=Depends(require_roles(*ADMIN_ROLES, "coach"))):
+    """Deterministic staffing recommendation computed from live event data.
+
+    Scales the 60'6\" standard from "12 athletes, one field, one radar gun" to
+    "80 athletes across multiple fields" using the documented constants above.
+    """
+    ev = await get_org_event(event_id, user)
+    org = user["organization_id"]
+    base = {"event_id": event_id, "organization_id": org}
+
+    entries = await db.event_athletes.find(base, {"_id": 0, "athlete_id": 1}).to_list(2000)
+    enrollment = len(entries)
+    group_docs = await db.event_groups.find(base, {"_id": 0, "id": 1, "name": 1}).to_list(200)
+    groups = len(group_docs)
+    stations = await db.stations.find(
+        base, {"_id": 0, "id": 1, "name": 1, "module_state": 1}).to_list(200)
+    active = [s for s in stations if module_state_of(s) != "not_offered"]
+    active_stations = len(active)
+
+    # Age mix from the rostered athletes' actual bands — unknown bands are
+    # counted as unknown, never guessed into a bucket.
+    athletes = await db.athletes.find(
+        {"id": {"$in": [e["athlete_id"] for e in entries]}, "organization_id": org},
+        {"_id": 0, "age_group": 1}).to_list(2000)
+    young = older = unknown = 0
+    for a in athletes:
+        span = AGE_BAND_SPANS.get(a.get("age_group"))
+        if not span:
+            unknown += 1
+        elif span[1] <= YOUNG_AGE_CEILING:
+            young += 1
+        else:
+            older += 1
+    group_target = GROUP_TARGET_YOUNG if young > older else GROUP_TARGET_OLDER
+    recommended_groups = math.ceil(enrollment / group_target) if enrollment else 0
+
+    assignments = await db.evaluator_assignments.find(
+        {**base, **active_assignment_filter()},
+        {"_id": 0, "evaluator_id": 1, "station_id": 1, "group_ids": 1}).to_list(500)
+    assigned_evaluators = len({a["evaluator_id"] for a in assignments})
+
+    # Timing work exists when the event offers any athletic test, or (for events
+    # configured before testing_config existed) runs an active testing station.
+    offered_tests = [t for t in (ev.get("testing_config") or [])
+                     if t.get("state") in ("required", "optional")]
+    has_timing_work = bool(offered_tests) or any(
+        "athletic" in (s.get("name") or "").lower() or "testing" in (s.get("name") or "").lower()
+        for s in active)
+
+    def role(name, minimum, recommended, ideal):
+        return {"role": name, "minimum": minimum,
+                "recommended": max(minimum, recommended), "ideal": max(minimum, recommended, ideal)}
+
+    checkin_min = max(1, math.ceil(enrollment / CHECKIN_PER_ENROLLED)) if enrollment else 0
+    eval_min = math.ceil(active_stations * EVALUATOR_SHARE_FACTOR)
+    metrics_rec = (2 if enrollment > METRICS_SPLIT_ENROLLMENT else 1) if has_timing_work else 0
+    flow_min = math.ceil(groups / FLOW_GROUPS_PER_COACH_MIN) if groups else 0
+    flow_rec = math.ceil(groups / FLOW_GROUPS_PER_COACH_REC) if groups else 0
+
+    roles = [
+        # Someone is always accountable for the site, even at 12 athletes.
+        role("Event/Site Manager", 1, 1, 1),
+        role("Check-In/Data Staff", checkin_min, checkin_min,
+             checkin_min + (1 if enrollment else 0)),  # ideal adds a walk-up buffer
+        role("Evaluators", eval_min, active_stations,
+             active_stations + (1 if active_stations else 0)),  # ideal adds a floater
+        role("Metrics/Timing", 1 if has_timing_work else 0, metrics_rec, metrics_rec),
+        role("Group/Flow Coaches", flow_min, flow_rec, groups),  # ideal: one per group
+        role("Media/Video", 0, 1 if enrollment >= MEDIA_ENROLLMENT_THRESHOLD else 0,
+             1 if enrollment else 0),
+    ]
+    staff = {
+        "minimum": sum(r["minimum"] for r in roles),
+        "recommended": sum(r["recommended"] for r in roles),
+        "ideal": sum(r["ideal"] for r in roles),
+    }
+
+    # Deterministic warnings (§10) — each derives from data actually present.
+    warnings = []
+    if active_stations and assigned_evaluators < active_stations:
+        warnings.append(f"⚠ {active_stations} active stations but only "
+                        f"{assigned_evaluators} evaluators assigned")
+    if assignments and group_docs:
+        # An assignment with empty group_ids covers every group.
+        covered = set()
+        for a in assignments:
+            gids = a.get("group_ids") or []
+            if not gids:
+                covered = {g["id"] for g in group_docs}
+                break
+            covered.update(gids)
+        uncovered = [g["name"] for g in group_docs if g["id"] not in covered]
+        if uncovered:
+            warnings.append(f"⚠ {len(uncovered)} group(s) have no evaluator "
+                            f"assignment coverage: {', '.join(sorted(uncovered))}")
+    if enrollment and groups and recommended_groups:
+        if groups < recommended_groups:
+            warnings.append(f"⚠ {enrollment} enrolled across {groups} group(s) — "
+                            f"recommend {recommended_groups} groups of ~{group_target}")
+        elif groups > recommended_groups * 2:
+            warnings.append(f"⚠ {groups} groups for {enrollment} enrolled is over-split — "
+                            f"recommend {recommended_groups} groups of ~{group_target}")
+
+    return {
+        "enrollment": enrollment,
+        "groups": groups,
+        "active_stations": active_stations,
+        "recommended_groups": recommended_groups,
+        "group_size_target": group_target,
+        "age_mix": {"young": young, "older": older, "unknown": unknown},
+        "staff": staff,
+        "roles": roles,
+        "assigned_evaluators": assigned_evaluators,
+        "warnings": warnings,
+    }

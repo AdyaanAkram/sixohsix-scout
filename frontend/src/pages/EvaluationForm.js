@@ -12,7 +12,7 @@ import { SaveStatusPill } from "@/components/common/SaveStatusPill";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, EyeOff, Camera, CheckCircle2, Lock, MessageSquarePlus, Send, CloudUpload, RotateCcw, Upload } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, Camera, CheckCircle2, Lock, MessageSquarePlus, Send, CloudUpload, RotateCcw, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   POSITIONS, loadStationTemplates, resolveTemplateLocal, saveStationTemplates,
@@ -23,6 +23,28 @@ import {
 } from "@/lib/templateCache";
 
 const QUICK_TAGS = ["Hustle", "Great attitude", "Quick hands", "Strong arm", "Needs reps", "High motor", "Raw but projectable", "Team leader"];
+
+// ---------- Rev 5 §3: per-metric observation tags ----------
+// Tag sets come from GET /evaluation-tags ({ base_running: [...], general: [...] })
+// and are cached in localStorage (same pattern as the template cache) so they
+// work offline. If the endpoint is unavailable (older server) and nothing is
+// cached, the tags UI simply does not render — nothing breaks.
+const TAGS_CACHE_KEY = "pbg_evaluation_tags";
+// Base-running set applies to metrics/categories named like Home-to-1st,
+// Base Running, 60-yard running, etc.
+const BASE_RUNNING_RE = /home.to|base.?running|running/i;
+
+const validTagSets = (d) => !!d && typeof d === "object" && !Array.isArray(d)
+  && Object.values(d).every((v) => Array.isArray(v) && v.every((t) => typeof t === "string"));
+
+const readCachedTagSets = () => {
+  try {
+    const v = JSON.parse(localStorage.getItem(TAGS_CACHE_KEY) || "null");
+    return v && validTagSets(v.sets) ? v.sets : null;
+  } catch { return null; }
+};
+
+const slugifyTag = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
 // Spec §11 media categories.
 const MEDIA_CATEGORIES = ["Profile photo", "Hitting", "Pitching", "Defense", "Running", "Other"];
@@ -75,23 +97,57 @@ const categoryApplicability = (catName, athletePositions) => {
 
 const fmtBytes = (n) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
-const NotObservedBtn = ({ notObserved, onToggle, testId }) => (
-  <button
-    type="button"
-    onClick={onToggle}
-    data-testid={testId}
-    className={cn(
-      "w-full mt-2 inline-flex items-center justify-center gap-1.5 rounded-xl border h-11 text-xs font-semibold transition active:scale-[0.98]",
-      notObserved ? "bg-warning/15 text-warning border-warning/40" : "bg-secondary text-muted-foreground border-border"
-    )}
-  >
-    <EyeOff className="h-3.5 w-3.5" /> {notObserved ? "Marked not observed — tap to undo" : "Not observed"}
-  </button>
-);
+// Rev 5 §17 — evaluator result states. One tap sets a state, tapping the same
+// option again clears it. Any state mutes the score inputs (same as the old
+// lone "Not observed" button). PAYLOAD COMPAT: alongside the additive `state`
+// string we always send the legacy `not_observed` boolean as true for ANY
+// state — the deployed API and old offline drafts only understand
+// `not_observed`, and every state means "exclude from scoring, never a zero".
+const EVAL_STATES = [
+  { key: "not_observed", label: "N/O", full: "Not Observed" },
+  { key: "na", label: "N/A", full: "Not Applicable" },
+  { key: "dnp", label: "DNP", full: "Did Not Participate" },
+  { key: "retest", label: "Retest", full: "Needs Retest" },
+];
+
+// Effective state of an entry — legacy drafts carry only `not_observed: true`.
+const entryState = (entry) => entry?.state || (entry?.not_observed ? "not_observed" : null);
+
+const StateControlRow = ({ metricKey, entry, onSelect }) => {
+  const active = entryState(entry);
+  return (
+    <div className="grid grid-cols-4 gap-1.5 mt-2" data-testid={`state-row-${metricKey}`}>
+      {EVAL_STATES.map(({ key, label, full }) => {
+        const selected = active === key;
+        return (
+          <button
+            key={key}
+            type="button"
+            title={full}
+            aria-pressed={selected}
+            onClick={() => onSelect(selected ? null : key)}
+            data-testid={key === "not_observed" ? `not-observed-${metricKey}` : `state-${key}-${metricKey}`}
+            className={cn(
+              "flex flex-col items-center justify-center text-center rounded-xl border min-h-[44px] px-1 py-1 leading-tight transition active:scale-[0.97]",
+              selected
+                ? key === "retest"
+                  ? "bg-warning/15 text-warning border-warning/40"
+                  : "bg-info/15 text-info border-info/40"
+                : "bg-secondary text-muted-foreground border-border",
+            )}
+          >
+            <span className="text-xs font-bold">{label}</span>
+            <span className="text-[9px] font-medium opacity-80">{full}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+};
 
 const RatingControl = ({ metric, entry, onChange }) => {
   const value = entry?.value;
-  const notObserved = entry?.not_observed;
+  const muted = !!entryState(entry);
   const scale = metric.metric_type === "rating_10" ? 10 : 5;
   const values = Array.from({ length: scale }, (_, i) => i + 1);
   return (
@@ -102,15 +158,15 @@ const RatingControl = ({ metric, entry, onChange }) => {
             <button
               key={v}
               type="button"
-              disabled={notObserved}
-              onClick={() => onChange({ ...entry, value: entry?.value === v ? null : v, not_observed: false })}
+              disabled={muted}
+              onClick={() => onChange({ ...entry, value: entry?.value === v ? null : v, not_observed: false, state: null })}
               data-testid={`rating-${metric.key || metric.id}-toggle-${v}`}
               className={cn(
                 "h-14 min-w-[44px] shrink-0 snap-start rounded-xl border text-lg font-bold transition-all duration-150 active:scale-[0.96]",
                 value === v
                   ? "bg-primary text-white border-transparent"
                   : "bg-card text-foreground border-border hover:bg-secondary",
-                notObserved && "opacity-40"
+                muted && "opacity-40"
               )}
             >
               {v}
@@ -123,15 +179,15 @@ const RatingControl = ({ metric, entry, onChange }) => {
             <button
               key={v}
               type="button"
-              disabled={notObserved}
-              onClick={() => onChange({ ...entry, value: entry?.value === v ? null : v, not_observed: false })}
+              disabled={muted}
+              onClick={() => onChange({ ...entry, value: entry?.value === v ? null : v, not_observed: false, state: null })}
               data-testid={`rating-${metric.key || metric.id}-toggle-${v}`}
               className={cn(
                 "h-14 rounded-xl border text-lg font-bold transition-all duration-150 active:scale-[0.96]",
                 value === v
                   ? "bg-primary text-white border-transparent"
                   : "bg-card text-foreground border-border hover:bg-secondary",
-                notObserved && "opacity-40"
+                muted && "opacity-40"
               )}
             >
               {v}
@@ -144,17 +200,17 @@ const RatingControl = ({ metric, entry, onChange }) => {
       <p className="text-[11px] text-muted-foreground mt-1.5">
         {metric.scale_legend || `1 = Needs work · ${Math.ceil(scale / 2)} = Average · ${scale} = Elite`}
       </p>
-      <NotObservedBtn
-        notObserved={notObserved}
-        testId={`not-observed-${metric.key || metric.id}`}
-        onToggle={() => onChange({ value: null, not_observed: !notObserved })}
+      <StateControlRow
+        metricKey={metric.key || metric.id}
+        entry={entry}
+        onSelect={(s) => onChange({ ...entry, value: null, not_observed: !!s, state: s })}
       />
     </div>
   );
 };
 
 const MeasurementControl = ({ metric, entry, onChange }) => {
-  const notObserved = entry?.not_observed;
+  const muted = !!entryState(entry);
   return (
     <div>
       <div className="flex flex-col sm:flex-row gap-2">
@@ -163,9 +219,9 @@ const MeasurementControl = ({ metric, entry, onChange }) => {
             type="number"
             inputMode="decimal"
             step="any"
-            disabled={notObserved}
+            disabled={muted}
             value={entry?.value ?? ""}
-            onChange={(e) => onChange({ ...entry, value: e.target.value === "" ? null : parseFloat(e.target.value), not_observed: false })}
+            onChange={(e) => onChange({ ...entry, value: e.target.value === "" ? null : parseFloat(e.target.value), not_observed: false, state: null })}
             placeholder="Attempt 1"
             className="h-14 rounded-xl text-lg font-mono-num pr-14 bg-card"
             data-testid={`measurement-${metric.key || metric.id}-input`}
@@ -177,7 +233,7 @@ const MeasurementControl = ({ metric, entry, onChange }) => {
             type="number"
             inputMode="decimal"
             step="any"
-            disabled={notObserved}
+            disabled={muted}
             value={entry?.attempt_2 ?? ""}
             onChange={(e) => onChange({ ...entry, attempt_2: e.target.value === "" ? null : parseFloat(e.target.value) })}
             placeholder="Attempt 2 (opt.)"
@@ -190,9 +246,10 @@ const MeasurementControl = ({ metric, entry, onChange }) => {
       <p className="text-[11px] text-muted-foreground mt-1.5">
         {metric.higher_is_better === false ? "Lower is better · best attempt counts" : "Higher is better · best attempt counts"}
       </p>
-      <NotObservedBtn
-        notObserved={notObserved}
-        onToggle={() => onChange({ value: null, attempt_2: null, not_observed: !notObserved })}
+      <StateControlRow
+        metricKey={metric.key || metric.id}
+        entry={entry}
+        onSelect={(s) => onChange({ ...entry, value: null, attempt_2: null, not_observed: !!s, state: s })}
       />
     </div>
   );
@@ -241,6 +298,10 @@ export default function EvaluationForm() {
   const [evaluateAs, setEvaluateAs] = useState("");
   // Spec §9: default to the position-filtered view; evaluators can reveal all.
   const [showAllCategories, setShowAllCategories] = useState(false);
+  // Rev 5 §3 — observation tag sets; seeded synchronously from the offline cache.
+  const [tagSets, setTagSets] = useState(() => readCachedTagSets());
+  // Which metrics have their tag chips expanded (metric id → true).
+  const [tagsOpen, setTagsOpen] = useState({});
   const [resolutionReason, setResolutionReason] = useState(null);
   const [overrideBusy, setOverrideBusy] = useState(false);
   const saveTimer = useRef(null);
@@ -706,21 +767,50 @@ export default function EvaluationForm() {
     setComment("quick_tags", next);
   };
 
+  // ---------- Rev 5 §3: per-metric observation tags ----------
+  // Fetch once and refresh the offline cache. Failure (offline, or an older
+  // server without the endpoint) silently keeps whatever the cache seeded.
+  useEffect(() => {
+    api.get("/evaluation-tags").then((r) => {
+      if (!validTagSets(r?.data)) return; // captive portal / unexpected shape
+      setTagSets(r.data);
+      try {
+        localStorage.setItem(TAGS_CACHE_KEY, JSON.stringify({ sets: r.data, cached_at: new Date().toISOString() }));
+      } catch { /* cache is best-effort */ }
+    }).catch(() => { /* older server or offline — tags UI stays cache-driven or hidden */ });
+  }, []);
+
+  // base_running set for running-flavored metrics/categories, general otherwise.
+  const tagSetFor = useCallback((metric) => {
+    if (!tagSets) return null;
+    const name = `${metric.name || ""} ${metric.category || ""} ${metric.key || ""}`;
+    const set = BASE_RUNNING_RE.test(name) ? tagSets.base_running : tagSets.general;
+    return Array.isArray(set) && set.length ? set : null;
+  }, [tagSets]);
+
+  // Additive `tags` array on the same score entry — rides the existing
+  // setMetric → queueSave autosave path untouched.
+  const toggleMetricTag = (metricId, tag) => {
+    if (locked) return;
+    const e = scores[metricId] || {};
+    const cur = Array.isArray(e.tags) ? e.tags : [];
+    const next = cur.includes(tag) ? cur.filter((t) => t !== tag) : [...cur, tag];
+    setMetric(metricId, { ...e, tags: next });
+  };
+
   // ---------- Completion / submit ----------
   // Count only VISIBLE metrics — an infielder isn't "incomplete" for hidden
   // catching metrics (spec §9). Entered scores in hidden categories are never
   // dropped from `scores`; this is a display/counting filter only.
   const scorableMetrics = useMemo(() => visibleMetrics.filter((m) => !["comment", "observation"].includes(m.metric_type)), [visibleMetrics]);
-  const filledCount = scorableMetrics.filter((m) => {
-    const e = scores[m.id];
-    return e && (e.not_observed || (e.value !== null && e.value !== undefined && e.value !== ""));
-  }).length;
+  // Rev 5 §17 (mirrors the backend rule): a metric is satisfied by a value OR
+  // any evaluator state (N/O, N/A, DNP, Retest) — a state never counts as zero
+  // and `retest` does not block submission. Legacy `not_observed` still counts.
+  const entrySatisfied = (e) =>
+    !!e && (!!e.not_observed || !!e.state || (e.value !== null && e.value !== undefined && e.value !== ""));
+  const filledCount = scorableMetrics.filter((m) => entrySatisfied(scores[m.id])).length;
   const completionPct = scorableMetrics.length ? Math.round((filledCount / scorableMetrics.length) * 100) : 0;
-  const missingRequired = scorableMetrics.filter((m) => {
-    if (!m.required) return false;
-    const e = scores[m.id];
-    return !(e && (e.not_observed || (e.value !== null && e.value !== undefined && e.value !== "")));
-  });
+  const missingRequired = scorableMetrics.filter((m) => m.required && !entrySatisfied(scores[m.id]));
 
   const flushDraft = async () => {
     try {
@@ -1098,7 +1188,13 @@ export default function EvaluationForm() {
               <span className="h-4 w-1 rounded bg-warning inline-block" /> {cat}
             </h2>
             <div className="space-y-4">
-              {(template?.metrics || []).filter((m) => m.category === cat).sort((a, b) => (a.display_order || 0) - (b.display_order || 0)).map((m) => (
+              {(template?.metrics || []).filter((m) => m.category === cat).sort((a, b) => (a.display_order || 0) - (b.display_order || 0)).map((m) => {
+                const mKey = m.key || m.id;
+                // Rev 5 §3 — observation tag chips (optional, one tap each).
+                const metricTagSet = ["comment", "observation"].includes(m.metric_type) ? null : tagSetFor(m);
+                const selectedTags = Array.isArray(scores[m.id]?.tags) ? scores[m.id].tags : [];
+                const tagsExpanded = !!tagsOpen[m.id] || selectedTags.length > 0;
+                return (
                 <div key={m.id} className="rounded-2xl bg-card border border-border p-4">
                   <div className="flex items-center justify-between mb-2.5">
                     <p className="font-semibold text-foreground text-sm">
@@ -1127,9 +1223,45 @@ export default function EvaluationForm() {
                     {["comment", "observation"].includes(m.metric_type) && (
                       <Textarea value={scores[m.id]?.value || ""} onChange={(e) => setMetric(m.id, { value: e.target.value })} rows={2} className="rounded-xl bg-card" placeholder="Notes…" />
                     )}
+                    {/* Rev 5 §3 — optional one-tap observation tags riding the
+                        same autosave entry (additive `tags` array). */}
+                    {metricTagSet && (
+                      <div className="mt-1">
+                        {!tagsExpanded ? (
+                          <button
+                            type="button"
+                            onClick={() => setTagsOpen((o) => ({ ...o, [m.id]: true }))}
+                            data-testid={`tags-toggle-${mKey}`}
+                            className="inline-flex items-center min-h-[44px] px-1.5 text-xs font-semibold text-info"
+                          >
+                            + Tags
+                          </button>
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5 pt-2" data-testid={`tags-chips-${mKey}`}>
+                            {metricTagSet.map((tag) => (
+                              <button
+                                key={tag}
+                                type="button"
+                                onClick={() => toggleMetricTag(m.id, tag)}
+                                data-testid={`metric-tag-${mKey}-${slugifyTag(tag)}`}
+                                className={cn(
+                                  "rounded-full border px-3 min-h-[44px] text-xs font-semibold transition active:scale-[0.96]",
+                                  selectedTags.includes(tag)
+                                    ? "bg-primary text-white border-transparent"
+                                    : "bg-card text-muted-foreground border-border hover:bg-secondary",
+                                )}
+                              >
+                                {tag}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </fieldset>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ))}

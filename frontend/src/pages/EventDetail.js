@@ -22,7 +22,7 @@ import {
   ArrowLeft, CalendarDays, MapPin, Users, Plus, Trash2, Search, UserPlus,
   CheckCircle2, XCircle, FileDown, Layers, Trophy, ClipboardList,
   Clock, Video, AlertTriangle, Activity, RefreshCw, ExternalLink, ChevronRight,
-  FileUp, Wand2, Pencil, GitMerge, ListChecks, Circle,
+  FileUp, Wand2, Pencil, GitMerge, ListChecks, Circle, ChevronUp, ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -500,6 +500,59 @@ const RosterTab = ({ eventId, isAdmin }) => {
   );
 };
 
+// ---------------- Positions being evaluated today (Check-In, additive) ----------------
+const ALL_POSITIONS = ["P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"];
+
+// Display-only default until the user makes an explicit change: primary + first secondary.
+const defaultPositionsToday = (r) => {
+  const secondary = Array.isArray(r.secondary_positions) ? r.secondary_positions[0] : r.secondary_position;
+  return [r.primary_position, secondary].filter(Boolean).filter((p, i, a) => a.indexOf(p) === i);
+};
+
+const PositionsToday = ({ r, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const explicit = Array.isArray(r.positions_today) && r.positions_today.length > 0;
+  const shown = explicit ? r.positions_today : defaultPositionsToday(r);
+  const options = [...new Set([...ALL_POSITIONS, ...shown])];
+  const toggle = (pos) => {
+    const next = shown.includes(pos) ? shown.filter((p) => p !== pos) : [...shown, pos];
+    onChange(next); // only persists on explicit change
+  };
+  return (
+    <div className="mt-2" data-testid={`positions-today-${r.athlete_id}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+        data-testid={`positions-today-toggle-${r.athlete_id}`}
+      >
+        <Pencil className="h-3 w-3" />
+        Evaluating today:{" "}
+        <span className="font-semibold text-foreground">{shown.length ? shown.join(", ") : "—"}</span>
+        {!explicit && shown.length > 0 && <span className="text-[10px] text-muted-foreground">(default)</span>}
+      </button>
+      {open && (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {options.map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => toggle(p)}
+              className={cn(
+                "h-8 px-2.5 rounded-full text-[11px] font-semibold border",
+                shown.includes(p) ? "bg-brand text-primary-foreground border-brand" : "bg-card text-muted-foreground border-border"
+              )}
+              data-testid={`positions-today-${r.athlete_id}-${p}`}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ---------------- Check-In tab ----------------
 const CheckInTab = ({ eventId, isAdmin }) => {
   const [roster, setRoster] = useState(null);
@@ -651,6 +704,7 @@ const CheckInTab = ({ eventId, isAdmin }) => {
                   <SelectContent>{groups.map((g) => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
+              <PositionsToday r={r} onChange={(next) => update(r.athlete_id, { positions_today: next })} />
             </CardContent>
           </Card>
         ))}
@@ -844,6 +898,174 @@ const GroupsTab = ({ eventId, isAdmin }) => {
   );
 };
 
+// ---------------- Module state + ordering controls (Stations / Athletic Testing) ----------------
+const MODULE_STATES = [
+  { id: "required", label: "Required" },
+  { id: "optional", label: "Optional" },
+  { id: "not_offered", label: "Not offered" },
+];
+
+const ModuleStateControl = ({ value, onChange, testid, disabled }) => (
+  <div className="inline-flex rounded-lg border border-border overflow-hidden" data-testid={testid}>
+    {MODULE_STATES.map((s) => {
+      const active = (value || "required") === s.id;
+      return (
+        <button
+          key={s.id}
+          type="button"
+          disabled={disabled}
+          onClick={() => !active && onChange(s.id)}
+          className={cn(
+            "h-8 px-2 text-[10px] font-semibold uppercase tracking-wide disabled:cursor-default",
+            active
+              ? s.id === "required"
+                ? "bg-brand text-primary-foreground"
+                : s.id === "optional"
+                  ? "bg-secondary text-foreground"
+                  : "bg-muted text-muted-foreground"
+              : "bg-card text-muted-foreground hover:bg-secondary"
+          )}
+          data-testid={`${testid}-${s.id}`}
+        >
+          {s.label}
+        </button>
+      );
+    })}
+  </div>
+);
+
+const OrderArrows = ({ testid, onUp, onDown, upDisabled, downDisabled }) => (
+  <div className="flex items-center gap-0.5" data-testid={testid}>
+    <button
+      type="button"
+      onClick={onUp}
+      disabled={upDisabled}
+      aria-label="Move up"
+      className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:bg-secondary disabled:opacity-40"
+      data-testid={`${testid}-up`}
+    >
+      <ChevronUp className="h-4 w-4" />
+    </button>
+    <button
+      type="button"
+      onClick={onDown}
+      disabled={downDisabled}
+      aria-label="Move down"
+      className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:bg-secondary disabled:opacity-40"
+      data-testid={`${testid}-down`}
+    >
+      <ChevronDown className="h-4 w-4" />
+    </button>
+  </div>
+);
+
+// ---------------- Athletic Testing card ----------------
+// Library-driven: hides itself entirely when GET /athletic-tests 404s (older server).
+const AthleticTestingCard = ({ eventId, canEdit }) => {
+  const [rows, setRows] = useState(null);
+  const [available, setAvailable] = useState(true);
+
+  useEffect(() => {
+    let live = true;
+    Promise.all([
+      api.get("/athletic-tests"),
+      api.get(`/events/${eventId}`).catch(() => null),
+    ])
+      .then(([lib, ev]) => {
+        if (!live) return;
+        const library = Array.isArray(lib.data) ? lib.data : [];
+        if (!library.length) { setAvailable(false); return; }
+        const tc = ev?.data?.testing_config;
+        const saved = Array.isArray(tc?.tests) ? tc.tests : Array.isArray(tc) ? tc : [];
+        const byKey = Object.fromEntries(saved.map((t) => [t.key, t]));
+        const merged = library.map((t, i) => ({
+          ...t,
+          state: byKey[t.key]?.state || "required",
+          order: byKey[t.key]?.order ?? i,
+        }));
+        merged.sort((a, b) => a.order - b.order);
+        setRows(merged);
+      })
+      .catch(() => { if (live) setAvailable(false); });
+    return () => { live = false; };
+  }, [eventId]);
+
+  const persist = async (next) => {
+    setRows(next);
+    try {
+      await api.put(`/events/${eventId}/testing`, {
+        tests: next.map((t, i) => ({ key: t.key, state: t.state, order: i })),
+      });
+    } catch (e) {
+      if (e?.response?.status === 404) {
+        setAvailable(false);
+        toast.error("Athletic testing configuration isn't available on this server yet.");
+      } else toast.error(errMsg(e));
+    }
+  };
+
+  const setState = (key, state) => persist(rows.map((t) => (t.key === key ? { ...t, state } : t)));
+  const move = (idx, dir) => {
+    const j = idx + dir;
+    if (j < 0 || j >= rows.length) return;
+    const arr = [...rows];
+    [arr[idx], arr[j]] = [arr[j], arr[idx]];
+    persist(arr);
+  };
+
+  if (!available || !rows) return null;
+  return (
+    <Card className="rounded-2xl border-border" data-testid="event-testing-card">
+      <CardContent className="py-4 space-y-3">
+        <div>
+          <p className="font-semibold text-sm text-foreground">Athletic Testing</p>
+          <p className="text-[11px] text-muted-foreground">
+            Independent measurements — recorded to each athlete's permanent history.
+          </p>
+        </div>
+        <div className="space-y-2">
+          {rows.map((t, idx) => (
+            <div
+              key={t.key}
+              className={cn(
+                "flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border px-3 py-2",
+                t.state === "not_offered" && "opacity-60"
+              )}
+              data-testid={`testing-row-${t.key}`}
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground truncate">{t.label || t.key}</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {t.unit || ""}
+                  {t.state === "not_offered" && (t.unit ? " · " : "") }
+                  {t.state === "not_offered" && "Not offered — not counted"}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <ModuleStateControl
+                  value={t.state}
+                  disabled={!canEdit}
+                  onChange={(v) => setState(t.key, v)}
+                  testid={`testing-state-${t.key}`}
+                />
+                {canEdit && (
+                  <OrderArrows
+                    testid={`testing-order-${t.key}`}
+                    onUp={() => move(idx, -1)}
+                    onDown={() => move(idx, 1)}
+                    upDisabled={idx === 0}
+                    downDisabled={idx === rows.length - 1}
+                  />
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
 // ---------------- Stations tab ----------------
 const StationsTab = ({ eventId, isAdmin }) => {
   const [stations, setStations] = useState(null);
@@ -855,6 +1077,7 @@ const StationsTab = ({ eventId, isAdmin }) => {
   const [presetOpen, setPresetOpen] = useState(false);
   const [presetSel, setPresetSel] = useState({});
   const [presetBusy, setPresetBusy] = useState(false);
+  const [moduleControls, setModuleControls] = useState(true); // flips off on 404 (older server)
 
   const load = useCallback(() => {
     api.get(`/events/${eventId}/stations`).then((r) => setStations(r.data));
@@ -881,6 +1104,39 @@ const StationsTab = ({ eventId, isAdmin }) => {
   };
   const remove = async (sid) => {
     try { await api.delete(`/events/${eventId}/stations/${sid}`); load(); } catch (e) { toast.error(errMsg(e)); }
+  };
+
+  const patchStation = async (sid, patch) => {
+    setStations((prev) => (prev || []).map((s) => (s.id === sid ? { ...s, ...patch } : s)));
+    try {
+      await api.patch(`/events/${eventId}/stations/${sid}`, patch);
+    } catch (e) {
+      if (e?.response?.status === 404) {
+        setModuleControls(false);
+        toast.error("Station module configuration isn't available on this server yet.");
+      } else toast.error(errMsg(e));
+      load();
+    }
+  };
+
+  const moveStation = async (idx, dir) => {
+    const j = idx + dir;
+    if (j < 0 || j >= stations.length) return;
+    const arr = [...stations];
+    [arr[idx], arr[j]] = [arr[j], arr[idx]];
+    setStations(arr);
+    try {
+      await Promise.all([
+        api.patch(`/events/${eventId}/stations/${arr[idx].id}`, { display_order: idx }),
+        api.patch(`/events/${eventId}/stations/${arr[j].id}`, { display_order: j }),
+      ]);
+    } catch (e) {
+      if (e?.response?.status === 404) {
+        setModuleControls(false);
+        toast.error("Station ordering isn't available on this server yet.");
+      } else toast.error(errMsg(e));
+      load();
+    }
   };
 
   const addPresets = async () => {
@@ -985,8 +1241,11 @@ const StationsTab = ({ eventId, isAdmin }) => {
       )}
       {stations.length === 0 ? <EmptyState icon={Layers} title="No stations yet" hint="Create stations like Hitting, Infield, Pitching with an evaluation template." /> : (
         <div className="grid gap-2 md:grid-cols-2">
-          {stations.map((s) => (
-            <Card key={s.id} className="rounded-2xl border-border">
+          {stations.map((s, idx) => {
+            const supportsModules = moduleControls && (s.module_state !== undefined || s.display_order !== undefined);
+            const notOffered = supportsModules && s.module_state === "not_offered";
+            return (
+            <Card key={s.id} className={cn("rounded-2xl border-border", notOffered && "opacity-60")}>
               <CardContent className="py-4">
                 <div className="flex items-start justify-between">
                   <div>
@@ -995,6 +1254,25 @@ const StationsTab = ({ eventId, isAdmin }) => {
                   </div>
                   {isAdmin && <Button variant="ghost" size="icon" onClick={() => remove(s.id)} data-testid={`station-delete-${s.id}`}><Trash2 className="h-4 w-4 text-muted-foreground" /></Button>}
                 </div>
+                {isAdmin && supportsModules && (
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    <ModuleStateControl
+                      value={s.module_state || "required"}
+                      onChange={(v) => patchStation(s.id, { module_state: v })}
+                      testid={`station-module-state-${s.id}`}
+                    />
+                    <OrderArrows
+                      testid={`station-order-${s.id}`}
+                      onUp={() => moveStation(idx, -1)}
+                      onDown={() => moveStation(idx, 1)}
+                      upDisabled={idx === 0}
+                      downDisabled={idx === stations.length - 1}
+                    />
+                  </div>
+                )}
+                {notOffered && (
+                  <p className="mt-1.5 text-[11px] text-muted-foreground">Not offered at this event — not counted toward completion.</p>
+                )}
                 <div className="mt-3 flex items-center gap-3">
                   <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
                     <div className="h-full bg-[hsl(var(--info))] rounded-full" style={{ width: `${s.completion_pct}%` }} />
@@ -1003,9 +1281,11 @@ const StationsTab = ({ eventId, isAdmin }) => {
                 </div>
               </CardContent>
             </Card>
-          ))}
+            );
+          })}
         </div>
       )}
+      <AthleticTestingCard eventId={eventId} canEdit={isAdmin} />
     </div>
   );
 };
@@ -1236,6 +1516,7 @@ const STATION_STATUS = {
   complete: { label: "Complete", cls: "bg-success/15 text-success border-success/30" },
   draft: { label: "Draft", cls: "bg-warning/15 text-warning border-warning/40" },
   missing: { label: "Missing", cls: "bg-brand/15 text-brand border-brand/30" },
+  not_offered: { label: "Not offered", cls: "bg-muted text-muted-foreground border-border" },
   "n/a": { label: "N/A", cls: "bg-muted text-muted-foreground border-border" },
 };
 
@@ -1259,6 +1540,23 @@ const PlayerProgressDialog = ({ eventId, player, open, onOpenChange }) => {
         </DialogHeader>
         {!data ? <Skeleton className="h-40 rounded-xl" /> : (
           <div className="overflow-y-auto space-y-3 pr-1">
+            {data.ready_for_submission !== undefined && (() => {
+              // Defensive: required_complete may be a count or missing on older servers.
+              const applicable = (data.stations || []).filter((s) => s.applies && s.status !== "not_offered");
+              const reqStations = applicable.filter((s) => (s.module_state ?? "required") === "required");
+              const reqDone = typeof data.required_complete === "number"
+                ? data.required_complete
+                : reqStations.filter((s) => s.status === "complete").length;
+              return data.ready_for_submission ? (
+                <Badge data-testid="module-ready-badge" className="bg-success/15 text-success border border-success/30 font-bold tracking-wide">
+                  READY FOR FINAL SUBMISSION
+                </Badge>
+              ) : (
+                <Badge data-testid="module-ready-badge" className="bg-warning/15 text-warning border border-warning/40 font-semibold">
+                  IN PROGRESS — {reqDone}/{reqStations.length} required modules
+                </Badge>
+              );
+            })()}
             <div className="flex flex-wrap items-center gap-2">
               {data.complete
                 ? <Badge className="bg-success/15 text-success border border-success/30">All evaluations complete</Badge>
@@ -1275,12 +1573,28 @@ const PlayerProgressDialog = ({ eventId, player, open, onOpenChange }) => {
             <div className="space-y-2">
               {data.stations.filter((s) => s.applies).map((s) => {
                 const meta = STATION_STATUS[s.status] || STATION_STATUS["n/a"];
+                const notOffered = s.status === "not_offered";
+                const missingCount = (s.missing_required || []).length;
                 return (
-                  <div key={s.station_id} className="rounded-xl border border-border p-3">
+                  <div key={s.station_id} className={cn("rounded-xl border border-border p-3", notOffered && "opacity-60")}>
                     <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-foreground truncate">{s.station_name}</p>
-                        <p className="text-[11px] text-muted-foreground truncate">{s.evaluator_name || "Unassigned"}</p>
+                      <div className="min-w-0 flex items-start gap-2">
+                        {s.status === "complete" ? (
+                          <CheckCircle2 className="h-4 w-4 text-success shrink-0 mt-0.5" />
+                        ) : s.status === "missing" ? (
+                          <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+                        ) : (
+                          <Circle className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                        )}
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-foreground truncate">{s.station_name}</p>
+                          <p className="text-[11px] text-muted-foreground truncate">
+                            {notOffered ? "Not offered at this event" : (s.evaluator_name || "Unassigned")}
+                          </p>
+                          {s.status === "missing" && missingCount > 0 && (
+                            <p className="text-[11px] font-semibold text-warning">⚠ {missingCount} required missing</p>
+                          )}
+                        </div>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <span className={cn("text-[11px] font-semibold rounded-full border px-2 py-0.5", meta.cls)}>{meta.label}</span>
@@ -1560,6 +1874,132 @@ const SetupProgressStrip = ({ event, onGo }) => {
   );
 };
 
+// ---------------- Staffing panel (Overview) ----------------
+// Hides itself entirely when GET /events/{id}/staffing is unavailable (older server).
+const StaffingPanel = ({ eventId }) => {
+  const [data, setData] = useState(); // undefined = loading, null = unavailable
+  const [rolesOpen, setRolesOpen] = useState(false);
+  const load = useCallback(() => {
+    api.get(`/events/${eventId}/staffing`).then((r) => setData(r.data)).catch(() => setData(null));
+  }, [eventId]);
+  useEffect(() => { load(); }, [load]); // remounts on tab return, so it refreshes after station/assignment edits
+
+  if (data === null) return null;
+  if (data === undefined) return <Skeleton className="h-28 rounded-2xl" />;
+
+  const staff = data.staff || {};
+  const assigned = data.assigned_evaluators ?? 0;
+  const hasData = (data.enrollment ?? 0) > 0 && (data.active_stations ?? 0) > 0;
+  const tier = !hasData
+    ? null
+    : staff.ideal != null && assigned >= staff.ideal
+      ? "ideal"
+      : staff.recommended != null && assigned >= staff.recommended
+        ? "recommended"
+        : staff.minimum != null && assigned >= staff.minimum
+          ? "minimum"
+          : "below";
+  const assignedTone = tier === "below" ? "text-brand" : tier === "minimum" ? "text-warning" : "text-success";
+  const tierNote =
+    tier === "below" ? " — below minimum"
+    : tier === "minimum" ? " — meets minimum, below recommended"
+    : tier === "recommended" ? " — meets recommendation"
+    : tier === "ideal" ? " — at ideal staffing" : "";
+
+  return (
+    <Card className="rounded-2xl border-border" data-testid="staffing-panel">
+      <CardContent className="py-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-semibold text-sm text-foreground">Staffing</p>
+          <div className="flex items-center gap-1">
+            <p className="text-xs text-muted-foreground">
+              <span className="font-mono-num font-semibold text-foreground">{data.enrollment ?? 0}</span> athletes —{" "}
+              <span className="font-mono-num font-semibold text-foreground">{data.active_stations ?? 0}</span> active stations —{" "}
+              <span className="font-mono-num font-semibold text-foreground">{data.groups ?? 0}</span> groups
+            </p>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={load} aria-label="Refresh staffing" data-testid="staffing-refresh">
+              <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
+            </Button>
+          </div>
+        </div>
+
+        {!hasData ? (
+          <p className="text-sm text-muted-foreground">Not enough data yet — add players and stations to see staffing guidance.</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: "minimum", label: "Minimum", value: staff.minimum },
+                { id: "recommended", label: "Recommended", value: staff.recommended },
+                { id: "ideal", label: "Ideal", value: staff.ideal },
+              ].map((c) => (
+                <div
+                  key={c.id}
+                  className={cn("rounded-xl border p-3 text-center", tier === c.id ? "border-brand ring-1 ring-brand" : "border-border")}
+                  data-testid={`staffing-${c.id}`}
+                >
+                  <p className="text-2xl font-bold font-mono-num text-foreground">{c.value ?? "—"}</p>
+                  <p className="text-[11px] text-muted-foreground">{c.label}</p>
+                </div>
+              ))}
+            </div>
+            <p className={cn("text-xs font-semibold", assignedTone)} data-testid="staffing-assigned">
+              {assigned} evaluator(s) assigned{tierNote}
+            </p>
+            {data.recommended_groups != null && data.recommended_groups !== (data.groups ?? 0) && (
+              <p className="text-[11px] text-muted-foreground">Recommended: {data.recommended_groups} group(s) for this enrollment.</p>
+            )}
+            {(data.roles || []).length > 0 && (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setRolesOpen((o) => !o)}
+                  className="inline-flex items-center gap-1 text-xs text-info hover:underline"
+                  data-testid="staffing-roles-toggle"
+                >
+                  <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", rolesOpen && "rotate-90")} /> Role breakdown
+                </button>
+                {rolesOpen && (
+                  <div className="mt-2 rounded-xl border border-border overflow-hidden">
+                    <Table data-testid="staffing-roles-table">
+                      <TableHeader>
+                        <TableRow className="bg-secondary">
+                          <TableHead>Role</TableHead>
+                          <TableHead className="text-right">Min</TableHead>
+                          <TableHead className="text-right">Rec</TableHead>
+                          <TableHead className="text-right">Ideal</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {data.roles.map((r) => (
+                          <TableRow key={r.role}>
+                            <TableCell className="font-semibold capitalize">{r.role}</TableCell>
+                            <TableCell className="text-right font-mono-num">{r.minimum ?? "—"}</TableCell>
+                            <TableCell className="text-right font-mono-num">{r.recommended ?? "—"}</TableCell>
+                            <TableCell className="text-right font-mono-num">{r.ideal ?? "—"}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {(data.warnings || []).length > 0 && (
+          <div className="rounded-xl border border-warning/40 bg-warning/10 p-3 space-y-1" data-testid="staffing-warnings">
+            {data.warnings.map((w, i) => (
+              <p key={i} className="text-xs font-semibold text-warning">⚠ {w}</p>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
+
 // ---------------- Main event page ----------------
 export default function EventDetail() {
   const { eventId } = useParams();
@@ -1655,6 +2095,7 @@ export default function EventDetail() {
 
         <TabsContent value="overview" className="mt-4">
           {isAdmin && <div className="mb-3"><SetupProgressStrip event={event} onGo={(t) => setParams({ tab: t })} /></div>}
+          {isStaffView && <div className="mb-3"><StaffingPanel eventId={eventId} /></div>}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             {[
               { label: "Players", value: event.player_count, icon: Users },
