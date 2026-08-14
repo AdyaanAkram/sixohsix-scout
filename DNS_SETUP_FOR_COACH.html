@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>60'6" ID — Email Setup (GoDaddy, ~10 minutes)</title>
+<style>
+  :root{
+    --bg:#0A0A0A; --card:#151515; --card2:#1E1E1E; --line:#2A2A2A;
+    --ink:#F5F5F5; --mut:#9CA3AF; --brand:#DC2626; --brand-soft:rgba(220,38,38,.14);
+    --ok:#22C55E; --r:16px;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#F6F6F4; --card:#FFFFFF; --card2:#F1F1EF; --line:#E3E3E1;
+           --ink:#111; --mut:#5B6472; --brand-soft:rgba(220,38,38,.08); }
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--bg);color:var(--ink);
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;padding:20px 16px 70px}
+  .wrap{max-width:640px;margin:0 auto}
+  .brand{display:flex;align-items:center;gap:10px;margin-bottom:22px}
+  .mark{width:40px;height:40px;border-radius:11px;background:var(--brand-soft);
+    border:1px solid var(--brand);display:grid;place-items:center;font-weight:800;
+    color:var(--brand);font-size:13px}
+  .brand b{font-size:18px}
+  .brand b span{color:var(--brand)}
+  .brand small{display:block;color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.12em}
+  h1{font-size:clamp(26px,6vw,34px);line-height:1.15;font-weight:800;letter-spacing:-.4px;margin-bottom:10px}
+  h1 span{color:var(--brand)}
+  .lead{color:var(--mut);margin-bottom:6px}
+  h2{font-size:20px;font-weight:800;margin:34px 0 10px}
+  .step{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:99px;
+    background:var(--brand);color:#fff;font-size:15px;margin-right:8px;vertical-align:-4px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+    padding:16px;margin-bottom:14px}
+  .rec-title{font-weight:800;margin-bottom:10px}
+  .rec-title em{color:var(--mut);font-weight:600;font-style:normal;font-size:14px}
+  table{width:100%;border-collapse:collapse;font-size:15px}
+  td{padding:7px 0;vertical-align:top;border-top:1px solid var(--line)}
+  tr:first-child td{border-top:0}
+  td.k{color:var(--mut);width:84px;font-weight:600}
+  .val{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;
+    background:var(--card2);border:1px solid var(--line);border-radius:10px;
+    padding:9px 10px;word-break:break-all;user-select:all;-webkit-user-select:all}
+  .copy{margin-top:8px;display:inline-flex;align-items:center;gap:6px;background:var(--brand);
+    color:#fff;border:0;border-radius:99px;font-weight:700;font-size:13px;
+    padding:8px 14px;cursor:pointer;font-family:inherit}
+  .copy.done{background:var(--ok)}
+  ul,ol{padding-left:22px;margin:8px 0}
+  li{margin:6px 0}
+  .callout{border-left:4px solid var(--brand);background:var(--brand-soft);
+    border-radius:0 12px 12px 0;padding:12px 14px;margin:16px 0;font-size:15px}
+  .ok-callout{border-left-color:var(--ok);background:rgba(34,197,94,.1)}
+  details{background:var(--card);border:1px solid var(--line);border-radius:12px;margin:8px 0}
+  summary{cursor:pointer;padding:12px 14px;font-weight:700;list-style:none}
+  summary::-webkit-details-marker{display:none}
+  details div{padding:0 14px 12px;color:var(--mut)}
+  footer{margin-top:40px;text-align:center;color:var(--mut);font-size:13px}
+  footer b{color:var(--brand);text-transform:uppercase;letter-spacing:.12em;font-size:11px;display:block;margin-bottom:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="brand">
+    <div class="mark">60</div>
+    <div><b>60'6" <span>ID</span></b><small>Email setup — GoDaddy</small></div>
+  </div>
+
+  <h1>Turn on real email for 60'6" ID <span>— 3 records, ~10 minutes</span></h1>
+  <p class="lead">This lets the platform send invitations, event access codes, and password
+    resets from <b>noreply@606athletics.com</b>. You'll paste three records into GoDaddy —
+    that's the whole job. It cannot break your website or any existing email.</p>
+
+  <h2><span class="step">1</span>Open your domain's DNS page</h2>
+  <div class="card">
+    <ol>
+      <li>Go to <b>godaddy.com</b> and sign in.</li>
+      <li>Click your name (top right) → <b>My Products</b>.</li>
+      <li>Find <b>606athletics.com</b> → click <b>DNS</b> (or ⋯ → <b>Manage DNS</b>).</li>
+    </ol>
+    <div class="callout"><b>Only add records.</b> Don't delete or change anything already in
+      the list — the three below are all brand-new entries.</div>
+  </div>
+
+  <h2><span class="step">2</span>Add these three records</h2>
+  <p class="lead">For each: click <b>Add New Record</b>, fill the fields, Save. GoDaddy adds
+    "606athletics.com" to the Name automatically — enter the short names exactly as shown.</p>
+
+  <div class="card">
+    <div class="rec-title">Record 1 of 3 <em>· TXT (email signature)</em></div>
+    <table>
+      <tr><td class="k">Type</td><td><b>TXT</b></td></tr>
+      <tr><td class="k">Name</td><td><span class="val" id="v1n">resend._domainkey</span></td></tr>
+      <tr><td class="k">Value</td><td><span class="val" id="v1">p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC28/aw2mVBwvxzFusMitw361af9M0xWBpbQtrZiCNzNzZq1j2E5XSIoq5UrgDfwO8TFQv5OoKjjkMKbA+3AK9L7m75NIo2P4MzuiMUE2YrIhrPwI9akC8SMbWLBAQRMECda2CDNxzlltUOvLMo0xtK3Jf47f24pPIy+xSnoKeNiwIDAQAB</span>
+      <button class="copy" data-for="v1">Copy value</button></td></tr>
+      <tr><td class="k">TTL</td><td>leave as-is</td></tr>
+    </table>
+    <div class="callout" style="margin-bottom:0">This value is one long unbroken line — use the
+      Copy button rather than typing it.</div>
+  </div>
+
+  <div class="card">
+    <div class="rec-title">Record 2 of 3 <em>· MX (bounce handling)</em></div>
+    <table>
+      <tr><td class="k">Type</td><td><b>MX</b></td></tr>
+      <tr><td class="k">Name</td><td><span class="val" id="v2n">send</span></td></tr>
+      <tr><td class="k">Value</td><td><span class="val" id="v2">feedback-smtp.us-east-1.amazonses.com</span>
+      <button class="copy" data-for="v2">Copy value</button></td></tr>
+      <tr><td class="k">Priority</td><td><b>10</b></td></tr>
+      <tr><td class="k">TTL</td><td>leave as-is</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="rec-title">Record 3 of 3 <em>· TXT (sending permission)</em></div>
+    <table>
+      <tr><td class="k">Type</td><td><b>TXT</b></td></tr>
+      <tr><td class="k">Name</td><td><span class="val" id="v3n">send</span></td></tr>
+      <tr><td class="k">Value</td><td><span class="val" id="v3">v=spf1 include:amazonses.com ~all</span>
+      <button class="copy" data-for="v3">Copy value</button></td></tr>
+      <tr><td class="k">TTL</td><td>leave as-is</td></tr>
+    </table>
+  </div>
+
+  <h2><span class="step">3</span>Reply "records added"</h2>
+  <div class="card ok-callout callout" style="border-radius:12px;border:0;border-left:4px solid var(--ok)">
+    That's it for you. Once you reply, verification gets triggered and monitored on our side,
+    and the platform is switched over. Emails usually verify within minutes (GoDaddy can
+    occasionally take up to an hour).
+  </div>
+
+  <h2>Quick answers</h2>
+  <details><summary>Will this affect my website or current email?</summary>
+    <div>No. These records live on their own corners of the domain
+    ("send." and "resend._domainkey.") that nothing else uses. Your website and any existing
+    email keep working exactly as before.</div></details>
+  <details><summary>What are these records, in plain English?</summary>
+    <div>They prove to Gmail, Outlook, etc. that 60'6" ID is genuinely allowed to send email
+    for 606athletics.com — a cryptographic signature, a return address for bounces, and a
+    sending permission note. Without them, providers would junk the messages.</div></details>
+  <details><summary>GoDaddy says changes can take 48 hours — really?</summary>
+    <div>Almost always minutes. The 48-hour warning is a worst-case boilerplate.</div></details>
+  <details><summary>GoDaddy put quotes around my TXT value</summary>
+    <div>That's normal — leave them. Just don't type extra quotes yourself.</div></details>
+
+  <footer>
+    <b>Train · Elevate · Succeed</b>
+    60'6" ID — Every Player. Every Rep. Every Season Tells the Story.
+  </footer>
+</div>
+
+<script>
+  document.querySelectorAll('.copy').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var el = document.getElementById(btn.dataset.for);
+      var text = el.textContent.trim();
+      function done(){ btn.textContent = 'Copied ✓'; btn.classList.add('done');
+        setTimeout(function(){ btn.textContent = 'Copy value'; btn.classList.remove('done'); }, 2500); }
+      function fallback(){
+        var r = document.createRange(); r.selectNodeContents(el);
+        var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+        try { document.execCommand('copy'); done(); } catch(e) { btn.textContent = 'Long-press the value to copy'; }
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, fallback);
+      } else { fallback(); }
+    });
+  });
+</script>
+</body>
+</html>
