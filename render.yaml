@@ -51,7 +51,9 @@ services:
         # Both origins stay allowed through the domain cutover; drop surge later.
         value: https://606-scout.surge.sh,https://id.606athletics.com,https://606athletics.com,https://www.606athletics.com
       - key: APP_PUBLIC_URL
-        value: https://606-scout.surge.sh
+        # Drives invitation/reset links and public story URLs. Dashboard value
+        # wins over this file, so change it there too when cutting over.
+        value: https://606athletics.com
       - key: JWT_SECRET
         generateValue: true
       - key: MONGO_URL
