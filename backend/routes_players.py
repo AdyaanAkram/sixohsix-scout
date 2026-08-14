@@ -376,6 +376,40 @@ async def athletes_overview(
     }
 
 
+@router.post("/athletes/purge-all")
+async def purge_all_athletes(confirm: str = "", user=Depends(require_roles("owner"))):
+    """OWNER ONLY. Delete every athlete in THIS organization and all data hanging
+    off them. Irreversible from the UI — requires ?confirm=DELETE ALL ATHLETES.
+
+    Removes: athletes, their evaluations, verified metrics, media rows, notes,
+    goals, seasons, milestones, awards, watchlist entries, event roster links,
+    and pending athlete invitations. Keeps: staff accounts, events, groups,
+    stations, templates, drills. Other organizations are never touched.
+    """
+    if confirm != "DELETE ALL ATHLETES":
+        raise HTTPException(
+            status_code=400,
+            detail='Confirmation required: pass confirm="DELETE ALL ATHLETES".')
+    org = user["organization_id"]
+    athlete_ids = [a["id"] for a in await db.athletes.find(
+        {"organization_id": org}, {"_id": 0, "id": 1}).to_list(10000)]
+    counts = {}
+    for coll in ("evaluations", "verified_metrics", "athlete_media", "athlete_notes",
+                 "athlete_goals", "athlete_seasons", "milestones", "awards",
+                 "scout_watchlist", "event_athletes"):
+        counts[coll] = (await db[coll].delete_many(
+            {"organization_id": org, "athlete_id": {"$in": athlete_ids}})).deleted_count
+    counts["invitations"] = (await db.invitations.delete_many(
+        {"organization_id": org, "athlete_id": {"$in": athlete_ids}})).deleted_count
+    counts["athletes"] = (await db.athletes.delete_many({"organization_id": org})).deleted_count
+    # Athlete/parent logins in this org lose their subject — remove the membership
+    # so an orphaned account cannot sign in to an empty portal.
+    counts["athlete_memberships"] = (await db.memberships.delete_many(
+        {"organization_id": org, "role": {"$in": ["athlete", "parent"]}})).deleted_count
+    await log_audit(org, user, "athletes_purged", "organization", org, counts)
+    return {"message": "All athletes removed for this organization.", "removed": counts}
+
+
 @router.post("/athletes")
 async def create_athlete(body: AthleteBody, user=Depends(require_roles(*ADMIN_ROLES))):
     doc = athlete_doc(body, user["organization_id"], user["id"])

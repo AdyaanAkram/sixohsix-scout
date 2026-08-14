@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Building2, ShieldCheck, KeyRound } from "lucide-react";
+import { Building2, ShieldCheck, KeyRound, AlertTriangle } from "lucide-react";
 
 export default function Settings() {
   const { user } = useAuth();
@@ -15,6 +15,7 @@ export default function Settings() {
   const [name, setName] = useState("");
   const [tagline, setTagline] = useState("");
   const [busy, setBusy] = useState(false);
+  const [purging, setPurging] = useState(false);
   const isOwner = user?.role === "owner";
 
   useEffect(() => {
@@ -79,6 +80,52 @@ export default function Settings() {
           <p className="text-xs text-muted-foreground">To change your password, use “Forgot password” on the sign-in page. Sessions expire automatically after 7 days.</p>
         </CardContent>
       </Card>
+
+      {isOwner && (
+        <Card className="rounded-2xl border-destructive/40" data-testid="danger-zone">
+          <CardContent className="pt-5 pb-5 space-y-3">
+            <p className="font-semibold text-destructive flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4" /> Danger Zone
+            </p>
+            <div className="space-y-1.5 text-sm text-muted-foreground">
+              <p><span className="font-semibold text-foreground">Remove all athletes</span> from{" "}
+                <span className="font-semibold text-foreground">{org?.name || "this organization"}</span>{" "}
+                — deletes every athlete plus their evaluations, measurements, media, notes, goals,
+                seasons and event roster spots.</p>
+              <p>Staff accounts, events, stations and templates are kept. Other organizations are
+                never affected.{" "}
+                <span className="text-destructive font-semibold">This cannot be undone.</span></p>
+            </div>
+            <Button
+              variant="outline"
+              className="rounded-xl border-destructive/50 text-destructive hover:bg-destructive/10"
+              disabled={purging}
+              data-testid="purge-athletes-button"
+              onClick={async () => {
+                const typed = window.prompt(
+                  `This permanently deletes EVERY athlete in ${org?.name || "this organization"} and all their evaluation history.\n\nType DELETE ALL ATHLETES to confirm:`);
+                if (typed !== "DELETE ALL ATHLETES") {
+                  if (typed !== null) toast.error("Confirmation text did not match — nothing was deleted.");
+                  return;
+                }
+                setPurging(true);
+                try {
+                  const r = await api.post("/athletes/purge-all", null,
+                    { params: { confirm: "DELETE ALL ATHLETES" } });
+                  const n = r.data?.removed?.athletes ?? 0;
+                  toast.success(`Removed ${n} athlete${n === 1 ? "" : "s"} and their records.`);
+                } catch (e) {
+                  toast.error(errMsg(e));
+                } finally {
+                  setPurging(false);
+                }
+              }}
+            >
+              {purging ? "Removing…" : "Remove all athletes"}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
