@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>60'6" ID — Live Demo Script</title>
+<style>
+  :root{--bg:#0A0A0A;--card:#151515;--card2:#1E1E1E;--line:#2A2A2A;--ink:#F5F5F5;
+    --mut:#9CA3AF;--brand:#DC2626;--brand-soft:rgba(220,38,38,.13);--ok:#22C55E;--r:16px}
+  @media (prefers-color-scheme: light){:root{--bg:#F6F6F4;--card:#FFF;--card2:#F1F1EF;
+    --line:#E3E3E1;--ink:#111;--mut:#5B6472;--brand-soft:rgba(220,38,38,.08)}}
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--bg);color:var(--ink);font:16px/1.55 -apple-system,BlinkMacSystemFont,
+    "Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:22px 16px 80px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:700px;margin:0 auto}
+  .brand{display:flex;align-items:center;gap:10px;margin-bottom:20px}
+  .mark{width:40px;height:40px;border-radius:11px;background:var(--brand-soft);
+    border:1px solid var(--brand);display:grid;place-items:center;font-weight:800;color:var(--brand);font-size:13px}
+  .brand b{font-size:18px}.brand b span{color:var(--brand)}
+  .brand small{display:block;color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.12em}
+  h1{font-size:clamp(26px,6vw,36px);font-weight:800;line-height:1.12;letter-spacing:-.4px}
+  h1 span{color:var(--brand)}
+  .lead{color:var(--mut);margin:8px 0 18px}
+  h2{font-size:19px;font-weight:800;margin:30px 0 10px}
+  .n{display:inline-grid;place-items:center;min-width:27px;height:27px;border-radius:99px;
+    background:var(--brand);color:#fff;font-size:14px;margin-right:8px;vertical-align:-4px;padding:0 4px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:15px 16px;margin-bottom:10px}
+  .card b.t{display:block;margin-bottom:6px}
+  .say{border-left:3px solid var(--brand);background:var(--brand-soft);padding:8px 12px;
+    border-radius:0 10px 10px 0;font-style:italic;margin:8px 0;font-size:15px}
+  .do{color:var(--mut);font-size:14.5px}
+  .do b{color:var(--ink)}
+  table{width:100%;border-collapse:collapse;font-size:14.5px;margin:6px 0}
+  td,th{padding:6px 8px 6px 0;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+  tr:last-child td{border-bottom:0}
+  code{font-family:ui-monospace,Menlo,monospace;font-size:13.5px;background:var(--card2);
+    border:1px solid var(--line);border-radius:6px;padding:1px 6px}
+  .warn{border-left:3px solid #F59E0B;background:rgba(245,158,11,.1);padding:9px 12px;
+    border-radius:0 10px 10px 0;font-size:14.5px;margin:8px 0}
+  .chip{display:inline-block;font-size:12px;font-weight:700;border:1px solid var(--ok);
+    color:var(--ok);border-radius:99px;padding:2px 10px;margin:2px 4px 2px 0}
+  a{color:var(--brand)}
+  footer{margin-top:40px;text-align:center;color:var(--mut);font-size:13px}
+  footer b{display:block;color:var(--brand);font-size:11px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:4px}
+</style>
+</head>
+<body><div class="wrap">
+
+<div class="brand"><div class="mark">60</div>
+  <div><b>60'6" <span>ID</span></b><small>Live demo script · ~20 minutes</small></div></div>
+
+<h1>Every camp. Every rep. <span>One platform.</span></h1>
+<p class="lead">A guided run-through for demoing 60'6" ID to coaches — what to click, what to say,
+and the moments that land. App: <a href="https://606-scout.surge.sh">606-scout.surge.sh</a></p>
+
+<h2>⏱ 15 minutes before the call</h2>
+<div class="card">
+  <ul style="padding-left:20px">
+    <li><b>Wake the server:</b> open the app and sign in once — first load after idle takes
+      30–60&nbsp;seconds; every load after is instant.</li>
+    <li><b>Sign in ahead of time on two devices:</b> laptop as <code>owner@pbgscout.com</code>,
+      phone as <code>eval1@pbgscout.com</code> (password for all demo accounts:
+      <code>Scout2025!</code>). Signing in early also avoids the 15-logins/minute safety limit
+      mid-demo.</li>
+    <li><b>Download the demo roster</b> to the laptop:
+      <a href="https://606-scout.surge.sh/demo-roster.csv">demo-roster.csv</a> — it's crafted so
+      the import wizard shows off every safeguard live.</li>
+    <li>If sharing your phone screen isn't practical, resize the browser window narrow — the
+      whole app is phone-first.</li>
+  </ul>
+</div>
+
+<h2><span class="n">1</span>Open cold — the landing page <em style="color:var(--mut);font-size:14px">(1 min)</em></h2>
+<div class="card">
+  <p class="do"><b>Do:</b> open <code>606-scout.surge.sh</code> logged out.</p>
+  <p class="say">"60'6" ID gives every athlete one permanent player profile — every evaluation,
+    verified measurement, video, and season of development, in one place, forever."</p>
+</div>
+
+<h2><span class="n">2</span>Sign in → "Where are you working today?" <em style="color:var(--mut);font-size:14px">(1 min)</em></h2>
+<div class="card">
+  <p class="do"><b>Do:</b> sign in as the owner → the workspace chooser appears (if it goes straight
+    to a dashboard, use the <b>Workspace</b> switcher in the sidebar).</p>
+  <p class="say">"Same platform, different lenses. An owner runs the organization; a coach sees
+    their athletes; an evaluator sees only today's assignment. One login, no clutter."</p>
+  <p class="do"><b>Do:</b> pick <b>Organization HQ</b>.</p>
+</div>
+
+<h2><span class="n">3</span>Organization HQ <em style="color:var(--mut);font-size:14px">(2 min)</em></h2>
+<div class="card">
+  <p class="do"><b>Do:</b> point at the KPI cards — athletes, teams, coaches, awaiting review,
+    upcoming events. Click <b>Teams</b> → open a team → back. Click a <b>Class of…</b> in the grad
+    dropdown → the roster filters instantly.</p>
+  <p class="say">"Every number is a button. Two taps from 'how many athletes do we have' to any
+    kid's complete history."</p>
+</div>
+
+<h2><span class="n">4</span>★ The centerpiece — run a camp from scratch <em style="color:var(--mut);font-size:14px">(6 min)</em></h2>
+<div class="card">
+  <b class="t">Create the event</b>
+  <p class="do"><b>Do:</b> Events → New Event → name it <code>Fall Evaluation Demo</code>, today's
+    date, any location → create. Point out the <b>setup checklist</b> on the Overview tab:
+    Roster → Groups → Stations → Evaluators → Activated.</p>
+  <b class="t" style="margin-top:10px">Import the roster (the wow moment)</b>
+  <p class="do"><b>Do:</b> Roster tab → <b>Import Roster CSV</b> → upload
+    <code>demo-roster.csv</code> → walk the preview:</p>
+  <table>
+    <tr><th>Row</th><th>What the system caught</th><th>Say</th></tr>
+    <tr><td>5 new athletes</td><td>Clean creates</td><td>"Whole team in, in seconds."</td></tr>
+    <tr><td>Miguel Reyes</td><td><b>Possible duplicate</b> — flagged against his permanent ID</td>
+      <td>"It recognized he already exists. One athlete, one permanent record — no duplicate
+      profiles, ever."</td></tr>
+    <tr><td>Carter Nguyen</td><td><b>Needs grad year</b> — asks instead of guessing</td>
+      <td>"It never silently guesses a kid's class."</td></tr>
+    <tr><td>Tommy</td><td><b>Error</b> — missing last name, auto-skipped</td>
+      <td>"Bad rows can't sneak in."</td></tr>
+  </table>
+  <p class="do"><b>Do:</b> keep "Use existing" for Miguel, type <code>2034</code> for Carter,
+    leave auto-group ON → <b>Confirm</b> → show the <b>Class of 2032 / 2033</b> groups it built.</p>
+  <b class="t" style="margin-top:10px">Stations & staff</b>
+  <p class="do"><b>Do:</b> Stations tab → <b>Add preset stations</b> → tick Athletic Movement,
+    Hitting, Infield, Pitching → add. Evaluators tab → the 1-2-3 stepper: pick an evaluator →
+    group → station → Save.</p>
+  <p class="say">"Stations come from our 60'6" evaluation standard — and the right form finds the
+    right kid automatically. A 9-year-old and a 17-year-old pitcher get different, age-appropriate
+    evaluations at the same station. Nobody builds forms at the field."</p>
+  <p class="do"><b>Do:</b> set status → <b>Evaluation Active</b>.</p>
+</div>
+
+<h2><span class="n">5</span>★ The phone — what evaluators feel <em style="color:var(--mut);font-size:14px">(4 min)</em></h2>
+<div class="card">
+  <p class="do"><b>Do:</b> switch to the phone (signed in as eval1). It opens on <b>today's
+    assignment</b>: station, group, "N remaining", one big button.</p>
+  <p class="say">"An evaluator never navigates. Sign in → my assignment → start."</p>
+  <p class="do"><b>Do:</b> open the demo camp assignment → search a <b>bib number</b> → open an
+    athlete → tap big 1–5 scores → watch the pill flip to <b>Synced</b> → show the
+    <b>#next-athlete</b> button in the footer → Submit one.</p>
+  <p class="say">"Autosave on every tap — and if the ballpark wifi dies, they keep scoring.
+    Everything syncs when it comes back. We've torture-tested exactly that."</p>
+</div>
+
+<h2><span class="n">6</span>The manager's view — Live Progress <em style="color:var(--mut);font-size:14px">(2 min)</em></h2>
+<div class="card">
+  <p class="do"><b>Do:</b> laptop → the seeded <b>PBG Midwest Spring Evaluation Camp</b> →
+    <b>Live Progress</b> tab (it has rich data). Show checked-in / in-progress / complete /
+    missing, station and evaluator completion → <b>click a player</b> → exactly which scores
+    are missing.</p>
+  <p class="say">"The site manager sees the whole camp breathing — and can find the one kid with a
+    missing score without asking anyone."</p>
+</div>
+
+<h2><span class="n">7</span>Review → Results <em style="color:var(--mut);font-size:14px">(2 min)</em></h2>
+<div class="card">
+  <p class="do"><b>Do:</b> Review queue → open a submitted evaluation → <b>Results summary</b>:
+    score, change, top strengths/improvements, radar → then Approve one.</p>
+  <p class="say">"Evaluators score, but a head scout approves — quality control before anything
+    touches a kid's permanent record."</p>
+</div>
+
+<h2><span class="n">8</span>The payoff — the athlete <em style="color:var(--mut);font-size:14px">(3 min)</em></h2>
+<div class="card">
+  <p class="do"><b>Do:</b> Players → open <b>Miguel Reyes</b> → the digital player card: photo,
+    <code>2037 | 3B | R/L</code>, permanent ID, six KPIs, verified exit velo. Show the
+    <b>Seasons</b> panel (two seasons, one profile) and the <b>Player Story</b> timeline.</p>
+  <p class="say">"This is the product parents care about: one permanent 60'6" ID that follows the
+    athlete across seasons, teams — their whole story, verified."</p>
+  <p class="do"><b>Do:</b> optionally sign in as <code>athlete.demo@pbgscout.com</code> — the
+    athlete sees "<b>+14% development this season</b>" and their top-3 priorities.</p>
+  <p class="say">"For the athlete it leads with development, not rankings — what am I working on,
+    and am I getting better."</p>
+</div>
+
+<h2><span class="n">9</span>Close <em style="color:var(--mut);font-size:14px">(1 min)</em></h2>
+<div class="card">
+  <p class="do"><b>Do:</b> flash <b>Scout Mode</b> (prospect board, ⭐ watchlist, compare) and
+    <b>Reports</b> (insight cards, PDF with charts).</p>
+  <p class="say">"Everything you saw is live today — running on phones at a real camp this month.
+    Next up on the roadmap: configurable athletic testing, equipment scheduling, and staffing
+    recommendations sized to each event."</p>
+  <p class="do">Leave them the guide: <a href="https://606-scout.surge.sh/guide.html">606-scout.surge.sh/guide.html</a></p>
+</div>
+
+<h2>Logins cheat-sheet</h2>
+<div class="card">
+  <table>
+    <tr><th>Role</th><th>Email</th></tr>
+    <tr><td>Owner (HQ + all workspaces)</td><td><code>owner@pbgscout.com</code></td></tr>
+    <tr><td>Head scout (review/results)</td><td><code>headscout@pbgscout.com</code></td></tr>
+    <tr><td>Evaluator (phone)</td><td><code>eval1@pbgscout.com</code></td></tr>
+    <tr><td>Athlete view</td><td><code>athlete.demo@pbgscout.com</code></td></tr>
+  </table>
+  <p class="do" style="margin-top:6px">Password for all: <code>Scout2025!</code></p>
+</div>
+
+<h2>If something wobbles</h2>
+<div class="card">
+  <div class="warn"><b>Slow first screen:</b> the server was asleep — it's the free hosting tier,
+    not the app. Talking point: "production hosting removes this."</div>
+  <div class="warn"><b>"Too many attempts" on login:</b> the security rate-limit. Wait 60 seconds —
+    or avoid it entirely by signing in before the call.</div>
+  <div class="warn"><b>Wrong workspace after login:</b> use the Workspace switcher in the sidebar,
+    under the organization name.</div>
+  <div class="warn"><b>Made a mess during the demo?</b> The demo event you created can be deleted
+    afterward with the trash button on the event header. Real data is untouched.</div>
+</div>
+
+<p style="margin-top:14px"><span class="chip">Verified live</span><span class="chip">Phone-first</span>
+<span class="chip">Offline-safe</span><span class="chip">Real camp Aug 22</span></p>
+
+<footer><b>Train · Elevate · Succeed</b>
+60'6" ID — Every Player. Every Rep. Every Season Tells the Story.</footer>
+</div></body>
+</html>

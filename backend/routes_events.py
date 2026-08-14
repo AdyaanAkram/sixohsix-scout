@@ -128,6 +128,43 @@ async def get_org_event(event_id: str, user):
     return ev
 
 
+@router.delete("/events/{event_id}")
+async def delete_event(event_id: str, force: bool = False,
+                       user=Depends(require_roles(*ADMIN_ROLES))):
+    """Delete an event and its operational children (roster links, groups,
+    stations, assignments, invites, draft evaluations).
+
+    Submitted/approved evaluations are permanent athlete history: their presence
+    blocks deletion (409) unless the OWNER passes force=true, which deletes them
+    with the event. Athlete profiles are never touched — only event linkage."""
+    ev = await get_org_event(event_id, user)
+    org = user["organization_id"]
+    kept = await db.evaluations.count_documents({
+        "event_id": event_id, "organization_id": org,
+        "status": {"$in": ["submitted", "approved"]}})
+    if kept and not (force and user["role"] == "owner"):
+        raise HTTPException(
+            status_code=409,
+            detail=(f"This event has {kept} submitted/approved evaluation(s) in athlete "
+                    "history. Only the organization owner can force-delete it."))
+    removed = {}
+    for coll, q in [
+        ("evaluations", {"event_id": event_id, "organization_id": org} if force
+         else {"event_id": event_id, "organization_id": org, "status": "draft"}),
+        ("event_athletes", {"event_id": event_id, "organization_id": org}),
+        ("event_groups", {"event_id": event_id, "organization_id": org}),
+        ("stations", {"event_id": event_id, "organization_id": org}),
+        ("evaluator_assignments", {"event_id": event_id, "organization_id": org}),
+        ("event_invites", {"event_id": event_id, "organization_id": org}),
+    ]:
+        res = await db[coll].delete_many(q)
+        removed[coll] = res.deleted_count
+    await db.events.delete_one({"id": event_id, "organization_id": org})
+    await log_audit(org, user, "event_deleted", "event", event_id,
+                    {"name": ev.get("name"), "force": force, **removed})
+    return {"message": "Event deleted.", "removed": removed}
+
+
 @router.get("/events/{event_id}")
 async def get_event(event_id: str, user=Depends(require_roles(*STAFF_ROLES))):
     ev = await get_org_event(event_id, user)

@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>60'6" ID — Engineering Engagement Summary · Adyaan Akram</title>
+<style>
+  :root{
+    --bg:#0A0A0A; --card:#151515; --card2:#1D1D1D; --line:#2A2A2A;
+    --ink:#F5F5F5; --mut:#9CA3AF; --brand:#DC2626; --brand-soft:rgba(220,38,38,.13);
+    --ok:#22C55E; --r:16px;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#F7F7F5; --card:#FFF; --card2:#F1F1EF; --line:#E4E4E2;
+           --ink:#111; --mut:#5B6472; --brand-soft:rgba(220,38,38,.07); }
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--bg);color:var(--ink);
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    padding:26px 18px 80px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:760px;margin:0 auto}
+  .brand{display:flex;align-items:center;gap:11px;margin-bottom:26px}
+  .mark{width:42px;height:42px;border-radius:12px;background:var(--brand-soft);
+    border:1px solid var(--brand);display:grid;place-items:center;font-weight:800;
+    color:var(--brand)}
+  .brand b{font-size:19px} .brand b span{color:var(--brand)}
+  .brand small{display:block;color:var(--mut);font-size:11px;letter-spacing:.12em;text-transform:uppercase}
+  h1{font-size:clamp(27px,5.6vw,38px);font-weight:800;line-height:1.12;letter-spacing:-.4px}
+  h1 span{color:var(--brand)}
+  .sub{color:var(--mut);margin:10px 0 4px}
+  h2{font-size:21px;font-weight:800;margin:38px 0 12px;letter-spacing:-.2px}
+  .kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:20px}
+  @media(min-width:620px){.kpis{grid-template-columns:repeat(4,1fr)}}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;text-align:center}
+  .kpi b{display:block;font-size:24px;color:var(--brand)}
+  .kpi small{color:var(--mut);font-size:12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:18px;margin-bottom:12px}
+  table{width:100%;border-collapse:collapse;font-size:15px}
+  th{text-align:left;color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.08em;
+    padding:0 10px 8px 0;border-bottom:1px solid var(--line)}
+  td{padding:9px 10px 9px 0;border-bottom:1px solid var(--line);vertical-align:top}
+  tr:last-child td{border-bottom:0}
+  td.d{white-space:nowrap;color:var(--brand);font-weight:700}
+  ul{padding-left:20px;margin:6px 0}
+  li{margin:5px 0}
+  .tag{display:inline-block;font-size:12px;font-weight:700;color:var(--ok);
+    border:1px solid var(--ok);border-radius:99px;padding:2px 10px;margin:2px 4px 2px 0}
+  .fill{background:var(--brand-soft);border:1px dashed var(--brand);border-radius:12px;
+    padding:12px 14px;margin-top:8px}
+  .note{color:var(--mut);font-size:13.5px}
+  footer{margin-top:46px;text-align:center;color:var(--mut);font-size:13px;
+    border-top:1px solid var(--line);padding-top:18px}
+  footer b{display:block;color:var(--brand);font-size:11px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="brand">
+    <div class="mark">60</div>
+    <div><b>60'6" <span>ID</span></b><small>Engineering engagement summary</small></div>
+  </div>
+
+  <h1>Concept to production: <span>the 60'6" ID platform</span></h1>
+  <p class="sub"><b>Adyaan Akram</b> · Sole engineer · July 14 – August 14, 2026</p>
+  <p class="sub">Code and delivery figures below are drawn from the git history, the automated
+    test suites, and the live production system — verifiable on request.</p>
+
+  <div class="kpis">
+    <div class="kpi"><b>56,693</b><small>lines of code shipped<br>(191 files)</small></div>
+    <div class="kpi"><b>173</b><small>API endpoints<br>in production</small></div>
+    <div class="kpi"><b>33</b><small>application pages<br>(phone-first)</small></div>
+    <div class="kpi"><b>49</b><small>automated tests<br>passing</small></div>
+  </div>
+
+  <h2>What was delivered</h2>
+  <div class="card">
+    <p>When this engagement began, 60'6" ID existed as a prototype whose feature checklist was
+    marked "complete" but whose headline features did not function — a full independent audit I
+    ran on Aug 1–4 documented this in writing before any new work started. Over the following
+    two weeks I rebuilt, extended, secured, and shipped it into a production platform that the
+    organization's own staff are now actively using: real staff accounts, real athlete rosters
+    imported, and a real event (PBG South Summer Clinic, Aug 22) being organized in it today.</p>
+  </div>
+
+  <table>
+    <tr><th>When</th><th>Shipped</th></tr>
+    <tr><td class="d">Jul 14–29</td><td>Repository and deployment foundation: version control, hosted
+      frontend (Surge) + API hosting, early iteration cycles.</td></tr>
+    <tr><td class="d">Aug 1–5</td><td><b>Platform audit + the full 25-section revision.</b> Audit proved the
+      inherited build's core features were non-functional; then delivered: 60'6" ID rebrand;
+      age- and position-aware evaluation templates (8 age bands, verified working); visual
+      evaluation results; offline-hardened field scoring (survives dead wifi, force-quits, and
+      captive portals — the historical data-loss bug, fixed and proven); permanent athlete IDs with
+      season history; verified-measurement trust tiers; security closure (expiring event access,
+      confidential-note leaks, minors' PII redaction, media consent); charts-based reporting and
+      branded PDFs; transactional email system; 64 automated tests written.</td></tr>
+    <tr><td class="d">Aug 11</td><td><b>Revision 2:</b> field evaluation mode (bib-first, sticky athlete
+      header), role-based dashboards, digital player cards, development-first athlete experience,
+      grad-year navigation, organization command center.</td></tr>
+    <tr><td class="d">Aug 12</td><td><b>Revision 3:</b> role-mode navigation, premium roster with status
+      intelligence and Quick View, Teams pages, scout watchlist, insight-card reports.</td></tr>
+    <tr><td class="d">Aug 13–14</td><td><b>Revision 4 + production infrastructure.</b> Event CSV roster import
+      with duplicate-proof permanent-ID matching; automatic grouping by graduation year; station
+      preset library; multi-workspace role switching. Migrated the entire stack onto
+      company-owned accounts with zero downtime and zero data loss: MongoDB Atlas (database),
+      Render (API), Cloudflare R2 (permanent, private media storage), Resend (email), plus
+      off-site backups. End-to-end verification of every flow on the live system, including a
+      full browser walkthrough on phone-size screens.</td></tr>
+  </table>
+
+  <h2>Beyond the code</h2>
+  <div class="card">
+    <ul>
+      <li><b>Security & compliance posture</b> for a platform holding minors' data: organization
+        isolation (30 dedicated tests), role-based redaction of guardian/medical/financial fields,
+        guardian consent enforcement on all media, expiring guest-coach access, audit logging on
+        every mutation.</li>
+      <li><b>Documentation suite:</b> pre-event test playbook, full user guide (live at
+        /guide.html), non-technical setup guides for storage, DNS, and email.</li>
+      <li><b>Operational readiness:</b> two-location database backups, restore procedures proven by
+        actual migration, deployment pipeline (GitHub → Render → Surge) documented and repeatable.</li>
+      <li><b>Verification culture:</b> every claimed feature demonstrated live before being called
+        done — the engagement began by discovering what happens when that isn't the standard.</li>
+    </ul>
+    <p style="margin-top:8px">
+      <span class="tag">In production</span><span class="tag">In active staff use</span>
+      <span class="tag">49/49 tests passing</span><span class="tag">Zero-loss migration</span>
+    </p>
+  </div>
+
+  <h2>Time & compensation basis</h2>
+  <div class="card">
+    <p>The engagement ran July 14 – August 14, with the intensive production push (Aug 1–14)
+    accounting for ~45,000 lines of shipped change across four deployed revisions. Work spanned
+    audit, architecture, implementation, security review, infrastructure migration, live
+    verification, and documentation — much of it outside what commit timestamps alone capture.</p>
+    <div class="fill"><b>Total: ≈100 hours of hands-on engineering</b>
+    <span class="note">across the one-month engagement (July 14 – August 14, 2026)</span></div>
+    <p class="note" style="margin-top:10px">Given the platform is production infrastructure the
+    organization now runs its events on — delivered end-to-end by one engineer, from audit through
+    infrastructure ownership — compensation reflecting both the time and the delivered asset
+    (cash + equity) is the conversation this document supports.</p>
+  </div>
+
+  <footer>
+    <b>Train · Elevate · Succeed</b>
+    60'6" ID — Every Player. Every Rep. Every Season Tells the Story.<br>
+    Prepared by Adyaan Akram · August 2026 · Delivery metrics verifiable from the repository and live system
+  </footer>
+</div>
+</body>
+</html>

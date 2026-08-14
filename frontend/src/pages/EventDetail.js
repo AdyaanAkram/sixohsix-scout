@@ -1619,6 +1619,25 @@ export default function EventDetail() {
                 <SelectContent>{EVENT_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
               </Select>
             )}
+            {isAdmin && (
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-10 w-10 rounded-xl border-destructive/40 text-destructive hover:bg-destructive/10"
+                title="Delete event"
+                data-testid="event-delete-button"
+                onClick={() => {
+                  const ok = window.confirm(
+                    `Delete "${event.name}"?\n\nThis removes the event, its roster links, groups, stations, and assignments. Athlete profiles are never touched. Submitted evaluations block deletion.`);
+                  if (!ok) return;
+                  api.delete(`/events/${eventId}`)
+                    .then(() => { toast.success("Event deleted."); navigate("/events"); })
+                    .catch((e) => toast.error(errMsg(e)));
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         </div>
       </div>
