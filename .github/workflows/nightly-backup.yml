@@ -1,0 +1,26 @@
+name: Nightly database backup
+
+on:
+  schedule:
+    - cron: "0 9 * * *"   # 09:00 UTC ≈ 4–5am US Central, quiet hours
+  workflow_dispatch: {}    # manual "Run workflow" button / gh workflow run
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: pip install --quiet "pymongo[srv]" boto3
+      - name: Snapshot database to R2
+        env:
+          BACKUP_MONGO_URL: ${{ secrets.BACKUP_MONGO_URL }}
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: python backend/scripts/backup_to_r2.py
