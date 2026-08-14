@@ -173,8 +173,13 @@ app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
     allow_origins=settings.cors_origins,
-    # Demo / preview hosts (Surge + Cloudflare quick tunnels)
-    allow_origin_regex=r"https://.*\.(surge\.sh|trycloudflare\.com)",
+    # Demo/preview hosts and the production domain. Cloudflare Pages mints a new
+    # hostname per deployment, so previews are matched by pattern rather than
+    # listed; the 606athletics.com arm covers the apex plus any subdomain (www, id).
+    allow_origin_regex=(
+        r"https://(.*\.(surge\.sh|trycloudflare\.com|pages\.dev)"
+        r"|([a-z0-9-]+\.)?606athletics\.com)"
+    ),
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
     expose_headers=["X-Request-ID"],
