@@ -1558,6 +1558,49 @@ async def _resolve_import_group(org: str, event_id: str, name: str,
     return g["id"]
 
 
+# Profile fields a matched CSV row may FILL IN — never overwrite. Lets an org
+# whose first import came from a names-only sheet repair its roster by
+# re-importing a richer CSV, instead of hand-editing every profile.
+_BACKFILL_FIELDS = [
+    "preferred_name", "date_of_birth", "graduation_year", "primary_position",
+    "secondary_positions", "bats", "throws", "height", "weight",
+    "jersey_number", "current_team", "school", "city", "state",
+    "guardian_name", "guardian_email", "guardian_phone", "email",
+]
+
+
+async def _backfill_matched_athlete(org: str, athlete: dict, data: dict) -> bool:
+    """Fill EMPTY profile fields on a matched athlete from the CSV row.
+    Existing values always win — a re-import can only add, never change.
+    Returns True when anything was written; mutates `athlete` in place."""
+    from routes_players import compute_age, compute_age_group
+    from positions import normalize_age_band
+    patch = {}
+    for f in _BACKFILL_FIELDS:
+        new = data.get(f)
+        if new in (None, "", []):
+            continue
+        cur = athlete.get(f)
+        if cur in (None, "", []):
+            patch[f] = new
+    # derived fields follow a newly-learned DOB / explicit band
+    if "date_of_birth" in patch:
+        patch["age"] = compute_age(patch["date_of_birth"])
+        if not athlete.get("age_group"):
+            patch["age_group"] = compute_age_group(patch["date_of_birth"])
+    if not athlete.get("age_group") and not patch.get("age_group"):
+        band = normalize_age_band(data.get("age_group_hint") or "")
+        if band:
+            patch["age_group"] = band
+    if not patch:
+        return False
+    patch["updated_at"] = now_iso()
+    await db.athletes.update_one({"id": athlete["id"], "organization_id": org},
+                                 {"$set": patch})
+    athlete.update(patch)
+    return True
+
+
 @router.post("/events/{event_id}/roster/import/confirm")
 async def roster_import_confirm(event_id: str, body: RosterImportConfirmBody,
                                 user=Depends(require_roles(*ADMIN_ROLES, "coach"))):
@@ -1569,7 +1612,7 @@ async def roster_import_confirm(event_id: str, body: RosterImportConfirmBody,
     from routes_players import AthleteBody, athlete_doc
     await get_org_event(event_id, user)
     org = user["organization_id"]
-    added = created = matched = skipped = flagged_no_grad = 0
+    added = created = matched = skipped = flagged_no_grad = backfilled = 0
     group_cache: dict = {}
 
     for r in body.rows:
@@ -1606,6 +1649,8 @@ async def roster_import_confirm(event_id: str, body: RosterImportConfirmBody,
                     {"id": athlete["id"], "organization_id": org},
                     {"$set": {"graduation_year": r.graduation_year, "updated_at": now_iso()}})
                 athlete["graduation_year"] = r.graduation_year
+            if await _backfill_matched_athlete(org, athlete, data):
+                backfilled += 1
             matched += 1
             if await _add_import_row_to_roster(org, event_id, athlete["id"], bib,
                                                group_id=await _row_group_id()):
@@ -1637,6 +1682,8 @@ async def roster_import_confirm(event_id: str, body: RosterImportConfirmBody,
                             if not c.get("date_of_birth")
                             and _grad_int(c.get("graduation_year")) == grad), None)
             if dup:
+                if await _backfill_matched_athlete(org, dup, data):
+                    backfilled += 1
                 matched += 1
                 if await _add_import_row_to_roster(org, event_id, dup["id"], bib,
                                                    group_id=await _row_group_id()):
@@ -1679,10 +1726,10 @@ async def roster_import_confirm(event_id: str, body: RosterImportConfirmBody,
     await log_audit(org, user, "roster_csv_imported", "event", event_id,
                     {"added": added, "created": created, "matched": matched,
                      "skipped": skipped, "flagged_no_grad": flagged_no_grad,
-                     "auto_group": body.auto_group})
+                     "backfilled": backfilled, "auto_group": body.auto_group})
     return {"added": added, "created": created, "matched": matched,
             "skipped": skipped, "flagged_no_grad": flagged_no_grad,
-            "groups": groups_out}
+            "backfilled": backfilled, "groups": groups_out}
 
 
 # ---------------- Auto-group by graduation year (Revision 4, Task 2) ----------------
