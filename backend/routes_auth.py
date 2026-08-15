@@ -321,17 +321,34 @@ async def accept_invitation(body: AcceptInviteBody):
     if _invitation_expired(inv):
         await db.invitations.update_one({"id": inv["id"]}, {"$set": {"status": "expired"}})
         raise HTTPException(status_code=400, detail="This invitation has expired.")
-    uid = new_id()
-    await db.users.insert_one({
-        "id": uid, "email": inv["email"], "full_name": inv["full_name"],
-        "password_hash": hash_password(body.password), "active": True,
-        "active_organization_id": inv["organization_id"],
-        "created_at": now_iso(), "updated_at": now_iso(),
-    })
-    await db.memberships.insert_one({
-        "id": new_id(), "user_id": uid, "organization_id": inv["organization_id"],
-        "role": inv["role"], "active": True, "created_at": now_iso(),
-    })
+    # One email = one account, ALWAYS. A guardian invited for a second child (or
+    # anyone re-invited) must land on their existing account, never a duplicate —
+    # duplicate user rows make email login pick one of them at random.
+    existing = await db.users.find_one({"email": inv["email"]})
+    if existing:
+        if not verify_password(body.password, existing.get("password_hash") or ""):
+            raise HTTPException(
+                status_code=409,
+                detail="An account with this email already exists. Enter that account's "
+                       "current password to claim this invitation (or reset it first).")
+        uid = existing["id"]
+        if not await db.memberships.find_one({"user_id": uid, "organization_id": inv["organization_id"]}):
+            await db.memberships.insert_one({
+                "id": new_id(), "user_id": uid, "organization_id": inv["organization_id"],
+                "role": inv["role"], "active": True, "created_at": now_iso(),
+            })
+    else:
+        uid = new_id()
+        await db.users.insert_one({
+            "id": uid, "email": inv["email"], "full_name": inv["full_name"],
+            "password_hash": hash_password(body.password), "active": True,
+            "active_organization_id": inv["organization_id"],
+            "created_at": now_iso(), "updated_at": now_iso(),
+        })
+        await db.memberships.insert_one({
+            "id": new_id(), "user_id": uid, "organization_id": inv["organization_id"],
+            "role": inv["role"], "active": True, "created_at": now_iso(),
+        })
     # Link athlete record when invitation is for athlete/parent
     if inv.get("athlete_id"):
         link = {"user_id": uid, "self_service_enabled": True, "updated_at": now_iso()}
