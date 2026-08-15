@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate, Navigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { api } from "@/lib/api";
+import { api, signedUrl } from "@/lib/api";
 import {
   LayoutDashboard, CalendarDays, Users, ClipboardList, BarChart3, TrendingUp,
   UserCog, FileSpreadsheet, Settings, LogOut, Home, ClipboardCheck,
@@ -215,14 +215,24 @@ const STAFF_ONLY_PREFIXES = [
   "/teams",
 ];
 
+/** An uploaded logo is served by the authenticated /organization/logo route and
+ *  stored as "/api/organization/logo?v=…", so it needs a signed URL. A logo set
+ *  by pasting an external https link renders as-is. Same rule as PlayerAvatar. */
+export const resolveOrgLogoSrc = (logoUrl) => {
+  if (!logoUrl) return null;
+  if (/^(https?:|data:)/i.test(logoUrl)) return logoUrl;
+  return signedUrl(logoUrl.startsWith("/api/") ? logoUrl.slice(4) : logoUrl);
+};
+
 /** Org identity mark: logo when the payload carries one, styled initial block otherwise. */
 const OrgMark = ({ name, logoUrl, className }) => {
   const [imgFailed, setImgFailed] = useState(false);
   useEffect(() => { setImgFailed(false); }, [logoUrl]);
-  if (logoUrl && !imgFailed) {
+  const src = logoUrl && !imgFailed ? resolveOrgLogoSrc(logoUrl) : null;
+  if (src) {
     return (
       <img
-        src={logoUrl}
+        src={src}
         alt=""
         onError={() => setImgFailed(true)}
         className={cn("h-8 w-8 rounded-lg object-cover ring-1 ring-border shrink-0", className)}

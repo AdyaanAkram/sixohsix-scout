@@ -1,6 +1,10 @@
+import os
+import re
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import (APIRouter, Depends, File, HTTPException, Request,
+                     UploadFile)
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
 
 from auth import (ADMIN_ROLES, create_token, get_current_user, hash_password,
@@ -8,6 +12,7 @@ from auth import (ADMIN_ROLES, create_token, get_current_user, hash_password,
 from config import settings
 from db import clean, db, log_audit, new_id, now_iso
 from mailer import safe_send, send_template
+from storage import media_object_key, storage
 
 router = APIRouter()
 
@@ -57,7 +62,10 @@ async def _user_payload(user_doc: dict, membership: dict) -> dict:
         {"user_id": user_doc["id"], "active": True}, {"_id": 0}
     ).to_list(100)
     org_ids = [m["organization_id"] for m in memberships]
-    orgs = await db.organizations.find({"id": {"$in": org_ids}}, {"_id": 0, "id": 1, "name": 1, "tagline": 1}).to_list(100)
+    orgs = await db.organizations.find(
+        {"id": {"$in": org_ids}},
+        {"_id": 0, "id": 1, "name": 1, "tagline": 1, "logo_url": 1},
+    ).to_list(100)
     omap = {o["id"]: o for o in orgs}
     return {
         "id": user_doc["id"],
@@ -67,10 +75,16 @@ async def _user_payload(user_doc: dict, membership: dict) -> dict:
         "organization_id": membership["organization_id"],
         "organization_name": (org or {}).get("name"),
         "organization_tagline": (org or {}).get("tagline"),
+        # The app shell (OrgMark) reads these straight off the auth payload, so the
+        # branding renders on first paint without a second /organization round-trip.
+        "organization_logo_url": (org or {}).get("logo_url"),
+        "organization_cover_url": (org or {}).get("cover_url"),
+        "organization_primary_color": (org or {}).get("primary_color"),
         "memberships": [
             {
                 "organization_id": m["organization_id"],
                 "organization_name": (omap.get(m["organization_id"]) or {}).get("name"),
+                "logo_url": (omap.get(m["organization_id"]) or {}).get("logo_url"),
                 "role": m["role"],
                 "active": m.get("organization_id") == membership["organization_id"],
             }
@@ -133,6 +147,7 @@ async def list_memberships(user=Depends(get_current_user)):
             "organization_id": m["organization_id"],
             "organization_name": o.get("name"),
             "tagline": o.get("tagline"),
+            "logo_url": o.get("logo_url"),
             "role": m["role"],
             "is_current": m["organization_id"] == user["organization_id"],
             "athlete_count": n_athletes,
@@ -376,24 +391,102 @@ async def update_staff(user_id: str, body: UpdateStaffBody, user=Depends(require
 
 # ---------------- Organization settings & audit ----------------
 
+# Profile keys the org payload always carries, so the frontend can render a stable
+# shape even for organizations created before these fields existed.
+ORG_PROFILE_FIELDS = (
+    "name", "full_name", "tagline", "contact_email", "contact_phone",
+    "website_url", "city", "state", "country", "about", "primary_color",
+    "logo_url", "cover_url",
+)
+
+# Free-text profile fields and their max lengths (validated after trimming).
+ORG_TEXT_LIMITS = {
+    "name": 120,
+    "full_name": 200,
+    "tagline": 200,
+    "contact_email": 254,
+    "contact_phone": 40,
+    "website_url": 2048,
+    "city": 120,
+    "state": 120,
+    "country": 120,
+    "about": 1000,
+}
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
+_HEX_COLOR_RE = re.compile(r"^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$")
+
+
+def _norm(value) -> str | None:
+    """Trim a string; whitespace-only becomes null so we never store empty strings."""
+    if value is None:
+        return None
+    trimmed = str(value).strip()
+    return trimmed or None
+
+
+async def _org_payload(organization_id: str) -> dict:
+    """The org document with every profile key present (missing ones as null)."""
+    org = await db.organizations.find_one({"id": organization_id}, {"_id": 0})
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found.")
+    # Internal object keys are an implementation detail of the upload endpoints.
+    org = {k: v for k, v in org.items() if k not in ("logo_storage_key", "cover_storage_key")}
+    return clean({**{k: None for k in ORG_PROFILE_FIELDS}, **org})
+
+
 @router.get("/organization")
 async def get_org(user=Depends(get_current_user)):
-    org = await db.organizations.find_one({"id": user["organization_id"]}, {"_id": 0})
-    return org
+    return await _org_payload(user["organization_id"])
 
 
 class OrgUpdateBody(BaseModel):
+    """Every field is tri-state: absent = leave alone, value = set, null/blank = clear."""
     name: str | None = None
+    full_name: str | None = None
     tagline: str | None = None
     contact_email: str | None = None
+    contact_phone: str | None = None
+    website_url: str | None = None
+    city: str | None = None
+    state: str | None = None
+    country: str | None = None
+    about: str | None = None
+    primary_color: str | None = None
     # logo_url is tri-state: absent = leave alone, string = set, null = clear.
     logo_url: str | None = None
 
 
 @router.patch("/organization")
 async def update_org(body: OrgUpdateBody, user=Depends(require_roles("owner"))):
-    updates = {k: v for k, v in body.model_dump(exclude={"logo_url"}).items() if v is not None}
-    if "logo_url" in body.model_fields_set:
+    sent = body.model_fields_set
+    updates: dict = {}
+    for field, limit in ORG_TEXT_LIMITS.items():
+        if field not in sent:
+            continue
+        value = _norm(getattr(body, field))
+        if value is not None and len(value) > limit:
+            raise HTTPException(status_code=422,
+                                detail=f"{field} must be {limit} characters or fewer.")
+        if field == "name" and value is None:
+            raise HTTPException(status_code=422, detail="Organization name cannot be empty.")
+        if field == "contact_email" and value is not None:
+            value = value.lower()
+            if not _EMAIL_RE.match(value):
+                raise HTTPException(status_code=422,
+                                    detail="contact_email must be a valid email address.")
+        if field == "website_url" and value is not None and not value.lower().startswith(
+                ("http://", "https://")):
+            raise HTTPException(status_code=422,
+                                detail="website_url must start with http:// or https://.")
+        updates[field] = value
+    if "primary_color" in sent:
+        color = _norm(body.primary_color)
+        if color is not None and not _HEX_COLOR_RE.match(color):
+            raise HTTPException(status_code=422,
+                                detail="primary_color must be a hex color like #DC2626.")
+        updates["primary_color"] = color.upper() if color else None
+    if "logo_url" in sent:
         logo = body.logo_url.strip() if isinstance(body.logo_url, str) else None
         if body.logo_url is not None and (
                 not logo or not logo.lower().startswith("https://") or len(logo) > 2048):
@@ -405,6 +498,142 @@ async def update_org(body: OrgUpdateBody, user=Depends(require_roles("owner"))):
         await db.organizations.update_one({"id": user["organization_id"]}, {"$set": updates})
         await log_audit(user["organization_id"], user, "organization_updated", "organization", user["organization_id"], updates)
     return {"message": "Organization updated."}
+
+
+# ---------------- Organization logo & cover photo ----------------
+# Org branding is not athlete media: no consent workflow, no athlete_media rows.
+# The image lives in the tenant-scoped bucket prefix and is served back through
+# an authenticated endpoint so the stored URL never expires.
+
+ALLOWED_IMAGE = {".jpg", ".jpeg", ".png", ".webp", ".heic"}
+MAX_ORG_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MB
+# Content type is derived from the validated extension, never from the client's
+# declared type — an attacker-chosen type could otherwise be served back inline.
+_IMAGE_CONTENT_TYPES = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".webp": "image/webp", ".heic": "image/heic",
+}
+# kind -> (public url field, internal storage key field)
+ORG_IMAGE_KINDS = {
+    "logo": ("logo_url", "logo_storage_key"),
+    "cover": ("cover_url", "cover_storage_key"),
+}
+
+
+def _forget_object(key: str | None, keep: str | None = None) -> None:
+    """Best-effort orphan cleanup — a storage hiccup must never fail the request."""
+    if not key or key == keep:
+        return
+    try:
+        storage.delete(key)
+    except Exception as e:  # pragma: no cover - depends on backend availability
+        print(f"[org-media] could not delete {key}: {e}")
+
+
+async def _store_org_image(kind: str, file: UploadFile, user: dict) -> dict:
+    url_field, key_field = ORG_IMAGE_KINDS[kind]
+    org_id = user["organization_id"]
+    # The client filename is used only to read an extension — the stored object
+    # name is server-generated, so a hostile filename can't shape the key.
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_IMAGE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {ext or '(none)'}. Use JPG, PNG, WEBP or HEIC.")
+    declared = getattr(file, "size", None)
+    if isinstance(declared, int) and declared > MAX_ORG_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image is too large (max 5 MB).")
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="The uploaded file is empty.")
+    if len(contents) > MAX_ORG_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image is too large (max 5 MB).")
+
+    org = await db.organizations.find_one({"id": org_id}, {"_id": 0})
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found.")
+
+    token = new_id()
+    key = media_object_key(org_id, f"org-{kind}-{token}{ext}")
+    content_type = _IMAGE_CONTENT_TYPES.get(ext, "application/octet-stream")
+    storage.put(key, contents, content_type=content_type)
+    # Stored as our own served path (never a presigned URL — those expire, and the
+    # logo is on screen constantly). The version tag busts the browser cache when
+    # the image is replaced behind a stable path.
+    served_url = f"/api/organization/{kind}?v={token.replace('-', '')[:8]}"
+    await db.organizations.update_one(
+        {"id": org_id},
+        {"$set": {url_field: served_url, key_field: key, "updated_at": now_iso()}},
+    )
+    _forget_object(org.get(key_field), keep=key)
+    await log_audit(org_id, user, f"organization_{kind}_uploaded", "organization", org_id,
+                    {"field": url_field, "url": served_url,
+                     "size_bytes": len(contents), "content_type": content_type})
+    return await _org_payload(org_id)
+
+
+async def _clear_org_image(kind: str, user: dict) -> dict:
+    url_field, key_field = ORG_IMAGE_KINDS[kind]
+    org_id = user["organization_id"]
+    org = await db.organizations.find_one({"id": org_id}, {"_id": 0})
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found.")
+    await db.organizations.update_one(
+        {"id": org_id},
+        {"$set": {url_field: None, key_field: None, "updated_at": now_iso()}},
+    )
+    _forget_object(org.get(key_field))
+    await log_audit(org_id, user, f"organization_{kind}_deleted", "organization", org_id,
+                    {"field": url_field})
+    return await _org_payload(org_id)
+
+
+async def _serve_org_image(kind: str, user: dict):
+    _, key_field = ORG_IMAGE_KINDS[kind]
+    org = await db.organizations.find_one({"id": user["organization_id"]}, {"_id": 0})
+    key = (org or {}).get(key_field)
+    if not key:
+        raise HTTPException(status_code=404, detail=f"No {kind} image set for this organization.")
+    url = storage.presigned_get_url(key)
+    if url:
+        return RedirectResponse(url, status_code=302)
+    path = storage.local_path(key)
+    if not path:
+        raise HTTPException(status_code=404, detail=f"Organization {kind} is missing from storage.")
+    ext = os.path.splitext(key)[1].lower()
+    return FileResponse(str(path), media_type=_IMAGE_CONTENT_TYPES.get(ext, "application/octet-stream"))
+
+
+@router.post("/organization/logo")
+async def upload_org_logo(file: UploadFile = File(...), user=Depends(require_roles("owner"))):
+    return await _store_org_image("logo", file, user)
+
+
+@router.post("/organization/cover")
+async def upload_org_cover(file: UploadFile = File(...), user=Depends(require_roles("owner"))):
+    return await _store_org_image("cover", file, user)
+
+
+@router.delete("/organization/logo")
+async def delete_org_logo(user=Depends(require_roles("owner"))):
+    return await _clear_org_image("logo", user)
+
+
+@router.delete("/organization/cover")
+async def delete_org_cover(user=Depends(require_roles("owner"))):
+    return await _clear_org_image("cover", user)
+
+
+# Readable by ANY authenticated member of the org — staff, athletes and parents
+# all see the org mark in the app shell, so this is deliberately not owner-only.
+@router.get("/organization/logo")
+async def get_org_logo(user=Depends(get_current_user)):
+    return await _serve_org_image("logo", user)
+
+
+@router.get("/organization/cover")
+async def get_org_cover(user=Depends(get_current_user)):
+    return await _serve_org_image("cover", user)
 
 
 @router.get("/audit-logs")

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/common/StatusBadge";
-import { useWorkspace, getActiveWorkspace } from "@/components/layout/AppLayout";
+import { useWorkspace, getActiveWorkspace, resolveOrgLogoSrc } from "@/components/layout/AppLayout";
 import { PlayerAvatar } from "@/components/common/PlayerAvatar";
 import { EmptyState } from "@/components/common/EmptyState";
 import {
@@ -438,7 +438,8 @@ export default function Dashboard() {
     <div className="space-y-5" data-testid="admin-dashboard">
       <div className="flex items-center gap-3.5">
         {org?.logo_url ? (
-          <img src={org.logo_url} alt={orgName} className="h-12 w-12 rounded-xl object-cover ring-1 ring-border shrink-0" data-testid="org-hq-logo" />
+          // Uploaded logos live behind the authenticated /organization/logo route.
+          <img src={resolveOrgLogoSrc(org.logo_url)} alt={orgName} className="h-12 w-12 rounded-xl object-cover ring-1 ring-border shrink-0" data-testid="org-hq-logo" />
         ) : (
           <div className="h-12 w-12 rounded-xl bg-brand-tertiary ring-1 ring-brand/40 flex items-center justify-center shrink-0" data-testid="org-hq-logo">
             <span className="font-display text-lg font-extrabold text-brand leading-none">{(orgName || "HQ").charAt(0)}</span>
