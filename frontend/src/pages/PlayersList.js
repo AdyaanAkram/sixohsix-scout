@@ -32,6 +32,16 @@ const EMPTY_FORM = {
   guardian_name: "", guardian_email: "", guardian_phone: "", emergency_contact: "",
 };
 
+// Defined at module level ON PURPOSE: an inline component inside AddPlayerDialog
+// gets a new identity every render, so React remounts the <Input> on each
+// keystroke and the field loses focus after every character typed.
+const F = ({ label, k, type = "text", placeholder, value, onChange }) => (
+  <div className="space-y-1">
+    <Label className="text-xs">{label}</Label>
+    <Input type={type} value={value} onChange={onChange} placeholder={placeholder} className="h-10 rounded-lg" data-testid={`add-player-${k.replace(/_/g, "-")}-input`} />
+  </div>
+);
+
 const AddPlayerDialog = ({ onCreated }) => {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -56,12 +66,7 @@ const AddPlayerDialog = ({ onCreated }) => {
     }
   };
 
-  const F = ({ label, k, type = "text", placeholder }) => (
-    <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
-      <Input type={type} value={form[k]} onChange={set(k)} placeholder={placeholder} className="h-10 rounded-lg" data-testid={`add-player-${k.replace(/_/g, "-")}-input`} />
-    </div>
-  );
+  const field = (props) => <F {...props} value={form[props.k]} onChange={set(props.k)} />;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -74,11 +79,11 @@ const AddPlayerDialog = ({ onCreated }) => {
         <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Add Player</DialogTitle></DialogHeader>
         <form onSubmit={submit} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
-            <F label="First name *" k="first_name" />
-            <F label="Last name *" k="last_name" />
-            <F label="Preferred name" k="preferred_name" />
-            <F label="Date of birth" k="date_of_birth" type="date" />
-            <F label="Graduation year" k="graduation_year" type="number" />
+            {field({ label: "First name *", k: "first_name" })}
+            {field({ label: "Last name *", k: "last_name" })}
+            {field({ label: "Preferred name", k: "preferred_name" })}
+            {field({ label: "Date of birth", k: "date_of_birth", type: "date" })}
+            {field({ label: "Graduation year", k: "graduation_year", type: "number" })}
             <div className="space-y-1">
               <Label className="text-xs">Primary position</Label>
               <Select value={form.primary_position || undefined} onValueChange={set("primary_position")}>
@@ -100,16 +105,16 @@ const AddPlayerDialog = ({ onCreated }) => {
                 <SelectContent><SelectItem value="R">Right</SelectItem><SelectItem value="L">Left</SelectItem></SelectContent>
               </Select>
             </div>
-            <F label="Height" k="height" placeholder='e.g. 62 in' />
-            <F label="Weight" k="weight" placeholder='e.g. 120 lb' />
-            <F label="Team" k="current_team" />
-            <F label="School" k="school" />
-            <F label="City" k="city" />
-            <F label="State" k="state" />
-            <F label="Guardian name" k="guardian_name" />
-            <F label="Guardian email" k="guardian_email" type="email" />
-            <F label="Guardian phone" k="guardian_phone" />
-            <F label="Emergency contact" k="emergency_contact" />
+            {field({ label: "Height", k: "height", placeholder: "e.g. 62 in" })}
+            {field({ label: "Weight", k: "weight", placeholder: "e.g. 120 lb" })}
+            {field({ label: "Team", k: "current_team" })}
+            {field({ label: "School", k: "school" })}
+            {field({ label: "City", k: "city" })}
+            {field({ label: "State", k: "state" })}
+            {field({ label: "Guardian name", k: "guardian_name" })}
+            {field({ label: "Guardian email", k: "guardian_email", type: "email" })}
+            {field({ label: "Guardian phone", k: "guardian_phone" })}
+            {field({ label: "Emergency contact", k: "emergency_contact" })}
           </div>
           <DialogFooter>
             <Button type="submit" disabled={busy || !form.first_name || !form.last_name} className="rounded-xl bg-primary hover:bg-brand-secondary w-full h-11" data-testid="add-player-submit-button">

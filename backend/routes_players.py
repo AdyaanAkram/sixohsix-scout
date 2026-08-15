@@ -1230,8 +1230,12 @@ CSV_COLUMNS = {
     "secondary positions": "secondary_positions", "secondary position": "secondary_positions",
     "bats": "bats", "throws": "throws",
     "height": "height", "ht": "height", "weight": "weight", "wt": "weight",
-    "team": "current_team", "current team": "current_team", "organization": "current_team",
+    "weight lbs": "weight", "weight (lbs)": "weight", "wt lbs": "weight",
+    "team": "current_team", "current team": "current_team",
     "club": "current_team", "travel team": "current_team",
+    # Weaker than an explicit team column: fills current_team only when the
+    # sheet has no team column (resolved after the row loop, never overwrites).
+    "organization": "organization_hint", "org": "organization_hint",
     "school": "school", "high school": "school", "hs": "school",
     "city": "city", "state": "state", "country": "country",
     "guardian name": "guardian_name", "parent name": "guardian_name", "parent/guardian": "guardian_name",
@@ -1240,6 +1244,8 @@ CSV_COLUMNS = {
     "guardian phone": "guardian_phone", "parent phone": "guardian_phone", "phone": "guardian_phone",
     "mobile": "guardian_phone", "cell": "guardian_phone",
     "jersey number": "jersey_number", "jersey": "jersey_number", "number": "jersey_number", "#": "jersey_number",
+    "jersey bib number": "jersey_number", "jersey/bib number": "jersey_number", "jersey/bib": "jersey_number",
+    "player email": "email", "athlete email": "email",
     # GameChanger roster / export aliases (parents dump these onto the app)
     "player": "full_name", "player name": "full_name", "athlete": "full_name", "athlete name": "full_name",
     "name": "full_name", "full name": "full_name",
@@ -1250,6 +1256,18 @@ CSV_COLUMNS = {
     "bat": "bats", "throw": "throws", "handedness": "bats",
     "team name": "current_team", "season team": "current_team",
     "age group": "age_group_hint", "agegroup": "age_group_hint", "division": "age_group_hint",
+}
+
+# Columns we recognize but deliberately do not store on the athlete profile.
+# Listing them here keeps them out of the "unmapped" warning so a clean sheet
+# previews clean. ("age" and "event group" ARE consumed by the event-roster
+# importer — see routes_events.ROSTER_IMPORT_EXTRA_COLUMNS.)
+CSV_IGNORED_COLUMNS = {
+    "index", "row", "no", "row number",
+    "event name", "event",              # the event is chosen in the app, not the sheet
+    "consent status", "consent",        # consent is recorded per media file in-app
+    "notes", "note", "comments",        # free-text roster notes have no profile field
+    "age", "event group",               # org-level import derives age from DOB; groups are per-event
 }
 
 
@@ -1299,12 +1317,15 @@ async def import_preview(file: UploadFile = File(...), user=Depends(require_role
         raise HTTPException(status_code=400, detail="CSV appears to be empty.")
     mapping = {}
     unmapped = []
+    ignored = []
     for col in reader.fieldnames:
         key = _normalize_header(col)
         if key in CSV_COLUMNS:
             mapping[col] = CSV_COLUMNS[key]
         elif key in ("b/t", "bats/throws", "bat/throw"):
             mapping[col] = "bats_throws"
+        elif key in CSV_IGNORED_COLUMNS:
+            ignored.append(col)
         else:
             unmapped.append(col)
 
@@ -1359,6 +1380,10 @@ async def import_preview(file: UploadFile = File(...), user=Depends(require_role
                 # don't overwrite a stronger explicit field with empty
                 if val or field not in record:
                     record[field] = val or None
+        # "Organization" fills the team only when the sheet had no team column.
+        org_hint = record.pop("organization_hint", None)
+        if org_hint and not record.get("current_team"):
+            record["current_team"] = org_hint
         if not record.get("first_name"):
             errors.append("First name is required")
         if not record.get("last_name"):
@@ -1374,6 +1399,7 @@ async def import_preview(file: UploadFile = File(...), user=Depends(require_role
         "duplicate_rows": sum(1 for r in rows if r["is_duplicate"]),
         "mapped_columns": mapping,
         "unmapped_columns": unmapped,
+        "ignored_columns": ignored,
         "detected_format": "gamechanger" if any("game" in (c or "").lower() or c in ("Player", "Player Name", "Jersey #") for c in (reader.fieldnames or [])) or "full_name" in mapping.values() else "standard",
         "rows": rows,
     }
@@ -1416,9 +1442,10 @@ async def import_confirm(body: ImportConfirmBody, user=Depends(require_roles(*AD
             "city": data.get("city"),
             "state": data.get("state"),
             "country": data.get("country") or "USA",
-              "guardian_name": data.get("guardian_name"),
+            "guardian_name": data.get("guardian_name"),
             "guardian_email": data.get("guardian_email"),
             "guardian_phone": data.get("guardian_phone"),
+            "email": data.get("email"),
             "emergency_contact": None,
             "status": "active",
             "photo_url": None,

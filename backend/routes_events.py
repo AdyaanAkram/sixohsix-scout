@@ -1282,6 +1282,10 @@ async def redeem_event_invite(body: RedeemBody):
 ROSTER_IMPORT_EXTRA_COLUMNS = {
     "bib": "bib_number", "bib number": "bib_number", "bib #": "bib_number",
     "bib num": "bib_number", "age": "age",
+    # Explicit group placement from the sheet. A bare year ("2032") is
+    # normalized to "Class of 2032" so it merges with auto-grouping's names.
+    "event group": "event_group_hint", "group": "event_group_hint",
+    "group name": "event_group_hint", "wave": "event_group_hint",
 }
 
 
@@ -1297,7 +1301,7 @@ def _athlete_display_name(a: dict) -> str:
 
 
 def _build_roster_column_mapping(fieldnames):
-    from routes_players import CSV_COLUMNS, _normalize_header
+    from routes_players import CSV_COLUMNS, CSV_IGNORED_COLUMNS, _normalize_header
     mapping = {}
     unmapped = []
     for col in fieldnames:
@@ -1308,6 +1312,8 @@ def _build_roster_column_mapping(fieldnames):
             mapping[col] = CSV_COLUMNS[key]
         elif key in ("b/t", "bats/throws", "bat/throw"):
             mapping[col] = "bats_throws"
+        elif key in CSV_IGNORED_COLUMNS:
+            pass  # recognized but intentionally not stored (index, notes, consent…)
         else:
             unmapped.append(col)
     return mapping, unmapped
@@ -1364,6 +1370,10 @@ def _parse_roster_row(row: dict, mapping: dict) -> tuple[dict, list[str]]:
             # don't overwrite a stronger explicit field with empty
             if val or field not in record:
                 record[field] = val or None
+    # "Organization" fills the team only when the sheet had no team column.
+    org_hint = record.pop("organization_hint", None)
+    if org_hint and not record.get("current_team"):
+        record["current_team"] = org_hint
     if not record.get("first_name"):
         errors.append("First name is required")
     if not record.get("last_name"):
@@ -1492,21 +1502,60 @@ class RosterImportConfirmBody(BaseModel):
 
 
 async def _add_import_row_to_roster(org: str, event_id: str, athlete_id: str,
-                                    bib_number: str | None) -> bool:
+                                    bib_number: str | None,
+                                    group_id: str | None = None) -> bool:
     """Add an athlete to the event roster — same doc shape as add_to_roster, plus
-    the CSV bib. Idempotent: returns False when the athlete is already rostered."""
+    the CSV bib and optional explicit group. Idempotent: when the athlete is
+    already rostered it returns False, but still fills a missing bib/group so a
+    re-import with richer columns upgrades the entry instead of being a no-op."""
     existing = await db.event_athletes.find_one({
         "event_id": event_id, "athlete_id": athlete_id, "organization_id": org})
     if existing:
+        patch = {}
+        if bib_number and not existing.get("bib_number"):
+            patch["bib_number"] = bib_number
+        if group_id and not existing.get("group_id"):
+            patch["group_id"] = group_id
+        if patch:
+            patch["updated_at"] = now_iso()
+            await db.event_athletes.update_one({"id": existing["id"]}, {"$set": patch})
         return False
     await db.event_athletes.insert_one({
         "id": new_id(), "organization_id": org,
         "event_id": event_id, "athlete_id": athlete_id, "status": "registered",
-        "bib_number": bib_number or None, "group_id": None, "late_arrival": False,
+        "bib_number": bib_number or None, "group_id": group_id, "late_arrival": False,
         "flagged_incomplete": False, "walk_up": False,
         "created_at": now_iso(), "updated_at": now_iso(),
     })
     return True
+
+
+def _normalize_group_name(raw: str | None) -> str | None:
+    """CSV group labels arrive as "2032", "Class of 2032" or free text.
+    Bare years get auto-grouping's canonical name so the two never split."""
+    name = (raw or "").strip()
+    if not name:
+        return None
+    if re.fullmatch(r"(19|20)\d{2}", name):
+        return f"Class of {name}"
+    return name
+
+
+async def _resolve_import_group(org: str, event_id: str, name: str,
+                                cache: dict) -> str:
+    """Find-or-create an event group by name (case-insensitive), memoized."""
+    key = name.lower()
+    if key in cache:
+        return cache[key]
+    g = await db.event_groups.find_one({
+        "event_id": event_id, "organization_id": org,
+        "name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}})
+    if not g:
+        g = {"id": new_id(), "organization_id": org, "event_id": event_id,
+             "name": name, "created_at": now_iso()}
+        await db.event_groups.insert_one({**g})
+    cache[key] = g["id"]
+    return g["id"]
 
 
 @router.post("/events/{event_id}/roster/import/confirm")
@@ -1521,6 +1570,7 @@ async def roster_import_confirm(event_id: str, body: RosterImportConfirmBody,
     await get_org_event(event_id, user)
     org = user["organization_id"]
     added = created = matched = skipped = flagged_no_grad = 0
+    group_cache: dict = {}
 
     for r in body.rows:
         data = dict(r.data or {})
@@ -1529,6 +1579,15 @@ async def roster_import_confirm(event_id: str, body: RosterImportConfirmBody,
         # Bib: a dedicated bib column wins; a jersey/# column doubles as the bib
         # on an event roster sheet. Jersey still lands on the athlete profile.
         bib = str(data.get("bib_number") or data.get("jersey_number") or "").strip() or None
+        # Explicit group from the sheet's event_group/group column, if any.
+        # Resolved lazily (find-or-create) only when the row actually rosters,
+        # so skipped/invalid rows can never mint empty groups.
+        group_name = _normalize_group_name(data.pop("event_group_hint", None))
+
+        async def _row_group_id():
+            if not group_name:
+                return None
+            return await _resolve_import_group(org, event_id, group_name, group_cache)
 
         if r.action == "skip":
             skipped += 1
@@ -1548,7 +1607,8 @@ async def roster_import_confirm(event_id: str, body: RosterImportConfirmBody,
                     {"$set": {"graduation_year": r.graduation_year, "updated_at": now_iso()}})
                 athlete["graduation_year"] = r.graduation_year
             matched += 1
-            if await _add_import_row_to_roster(org, event_id, athlete["id"], bib):
+            if await _add_import_row_to_roster(org, event_id, athlete["id"], bib,
+                                               group_id=await _row_group_id()):
                 added += 1
             if _grad_int(athlete.get("graduation_year")) is None:
                 flagged_no_grad += 1
@@ -1578,7 +1638,8 @@ async def roster_import_confirm(event_id: str, body: RosterImportConfirmBody,
                             and _grad_int(c.get("graduation_year")) == grad), None)
             if dup:
                 matched += 1
-                if await _add_import_row_to_roster(org, event_id, dup["id"], bib):
+                if await _add_import_row_to_roster(org, event_id, dup["id"], bib,
+                                                   group_id=await _row_group_id()):
                     added += 1
                 if _grad_int(dup.get("graduation_year")) is None:
                     flagged_no_grad += 1
@@ -1601,7 +1662,8 @@ async def roster_import_confirm(event_id: str, body: RosterImportConfirmBody,
             doc = athlete_doc(athlete_body, org, user["id"])
             await db.athletes.insert_one(doc)
             created += 1
-            if await _add_import_row_to_roster(org, event_id, doc["id"], bib):
+            if await _add_import_row_to_roster(org, event_id, doc["id"], bib,
+                                               group_id=await _row_group_id()):
                 added += 1
             if _grad_int(doc.get("graduation_year")) is None:
                 flagged_no_grad += 1

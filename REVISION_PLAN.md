@@ -516,3 +516,42 @@ the security items in Phase 6, then Phase 5 — it is the phase whose headline b
 from its claimed status. Phases 1, 2, 4 and 7 are product polish and follow.
 
 Each phase ships working UI against existing data. No big-bang rewrite.
+
+---
+
+## Client roadmap additions (15 Aug 2026) — AI assessment release + programming engagement
+
+Recorded verbatim from Coach G's "ADDITIONAL FINAL NOTE" memos. **Both are roadmap, not part of
+the current evaluation build** — the client's own instruction is that event-day dependability
+comes first.
+
+### AI assessment release workflow (non-negotiable gating)
+
+An AI assessment is generated only AFTER the full evaluation is submitted and admin-approved —
+never automatically when an evaluator finishes scoring:
+
+```
+All Required Modules Complete → Evaluation Submitted → Event Admin Review →
+Event Admin Approval → AI Assessment Generated → Final Admin Approval →
+Released to Athlete/Parent
+```
+
+- Statuses: `Evaluation In Progress → Submitted → Under Review → Approved →
+  AI Assessment Generated → Awaiting Final Approval → Published`.
+- Final publication authority: Event Admin / Owner only. Evaluators and coaches supply scores,
+  measurements, notes, tags, photos and videos, but never control publication unless granted
+  admin permission.
+- Before publishing, admin can: Review, Edit, Regenerate, Add Final Comment, Approve & Publish.
+- Published assessments are immutable history — preserved with the original event/evaluation on
+  the athlete's permanent record. New evaluations create NEW assessments, never overwrites.
+- **Hard rule: no incomplete, unsubmitted, unapproved, or draft evaluation ever generates a
+  player-facing AI assessment.**
+
+### Programming + athlete engagement (post-assessment)
+
+Once a final assessment is published, its development priorities should surface relevant 60'6"
+programming (camps, clinics, small groups, individual training, position programs,
+retest events) — driven by the athlete's actual approved development priorities, never generic
+advertising. Athletes/parents opt in to in-app + email notifications; each recommendation links
+to the applicable program/event when registration opens. Full cycle:
+`Evaluate → Assess → Develop → Recommend Programming → Train → Retest → Measure Progress`.
