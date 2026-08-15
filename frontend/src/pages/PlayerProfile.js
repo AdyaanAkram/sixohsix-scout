@@ -497,12 +497,45 @@ export default function PlayerProfile() {
       .catch(() => setInviteStatus({ status: "not_sent" }));
   }, [athleteId, canCoach]);
 
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteForm, setInviteForm] = useState({ email: "", guardian_name: "", guardian_email: "" });
+
+  const openInvite = () => {
+    const a = summary?.athlete || {};
+    setInviteForm({ email: a.email || "", guardian_name: a.guardian_name || "", guardian_email: a.guardian_email || "" });
+    setInviteOpen(true);
+  };
+
+  // PATCH /athletes replaces the whole document, so contact edits must ride on
+  // a full merged payload — a partial body would null every other field.
+  const ATHLETE_PATCH_KEYS = [
+    "first_name", "last_name", "preferred_name", "date_of_birth", "age_group", "graduation_year",
+    "primary_position", "secondary_positions", "bats", "throws", "height", "weight", "jersey_number",
+    "current_team", "school", "city", "state", "country", "guardian_name", "guardian_email",
+    "guardian_phone", "emergency_contact", "email", "status", "photo_url",
+  ];
+
   const sendInvite = async () => {
+    const a = summary?.athlete || {};
     setInviteBusy(true);
     try {
+      const contactChanged = ["email", "guardian_name", "guardian_email"]
+        .some((k) => (inviteForm[k] || "").trim() !== (a[k] || ""));
+      if (contactChanged) {
+        const payload = {};
+        ATHLETE_PATCH_KEYS.forEach((k) => { payload[k] = a[k] ?? null; });
+        payload.secondary_positions = a.secondary_positions || [];
+        payload.status = a.status || "active";
+        payload.email = inviteForm.email.trim() || null;
+        payload.guardian_name = inviteForm.guardian_name.trim() || null;
+        payload.guardian_email = inviteForm.guardian_email.trim() || null;
+        await api.patch(`/athletes/${athleteId}`, payload);
+        loadSummary();
+      }
       const r = await api.post(`/athletes/${athleteId}/invite`);
       setInviteStatus({ status: "pending", email: r.data.email, expires_at: r.data.expires_at });
       toast.success(`Invitation sent to ${r.data.email}`);
+      setInviteOpen(false);
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -735,10 +768,54 @@ export default function PlayerProfile() {
                 </div>
                 <div className="flex flex-wrap justify-center sm:justify-end gap-2 mx-auto sm:mx-0">
                   {canCoach && (
-                    <Button variant="outline" className="rounded-xl h-10" disabled={inviteBusy || inviteStatus?.status === "accepted"} onClick={sendInvite} data-testid="invite-to-platform-button">
-                      <Mail className="h-4 w-4 mr-1" />
-                      {inviteStatus?.status === "accepted" ? "On platform" : inviteStatus?.status === "pending" ? "Resend invite" : "Invite to platform"}
-                    </Button>
+                    <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+                      <Button variant="outline" className="rounded-xl h-10" disabled={inviteBusy || inviteStatus?.status === "accepted"} onClick={openInvite} data-testid="invite-to-platform-button">
+                        <Mail className="h-4 w-4 mr-1" />
+                        {inviteStatus?.status === "accepted" ? "On platform" : inviteStatus?.status === "pending" ? "Resend invite" : "Invite to platform"}
+                      </Button>
+                      <DialogContent className="max-w-md rounded-2xl">
+                        <DialogHeader>
+                          <DialogTitle className="font-display text-2xl text-foreground">Invite to platform</DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-3">
+                          <p className="text-sm text-muted-foreground">
+                            Under 13 (or no birth date on file): the invite goes to the <b>guardian</b>.
+                            Ages 13–17: it goes to the <b>athlete&apos;s email</b> with the guardian copied. 18+: athlete only.
+                          </p>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Athlete email</Label>
+                            <Input type="email" value={inviteForm.email} disabled={!isAdmin}
+                              onChange={(e) => setInviteForm((f) => ({ ...f, email: e.target.value }))}
+                              placeholder="athlete@example.com" className="h-10 rounded-lg" data-testid="invite-athlete-email-input" />
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs">Guardian name</Label>
+                              <Input value={inviteForm.guardian_name} disabled={!isAdmin}
+                                onChange={(e) => setInviteForm((f) => ({ ...f, guardian_name: e.target.value }))}
+                                className="h-10 rounded-lg" data-testid="invite-guardian-name-input" />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Guardian email</Label>
+                              <Input type="email" value={inviteForm.guardian_email} disabled={!isAdmin}
+                                onChange={(e) => setInviteForm((f) => ({ ...f, guardian_email: e.target.value }))}
+                                placeholder="parent@example.com" className="h-10 rounded-lg" data-testid="invite-guardian-email-input" />
+                            </div>
+                          </div>
+                          {!isAdmin && (
+                            <p className="text-xs text-muted-foreground">Only an owner or admin can change these contact details — ask one to fill in a missing email.</p>
+                          )}
+                          {inviteStatus?.status === "pending" && (
+                            <p className="text-xs text-muted-foreground">A previous invite to {inviteStatus.email} is still pending — sending again replaces it.</p>
+                          )}
+                        </div>
+                        <DialogFooter>
+                          <Button onClick={sendInvite} disabled={inviteBusy} className="rounded-xl bg-primary hover:bg-brand-secondary w-full h-11" data-testid="invite-send-button">
+                            {inviteBusy ? "Sending…" : "Save & send invitation"}
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
                   )}
                   {canReview && <Button variant="outline" className="rounded-xl h-10" onClick={() => window.open(signedUrl(`/reports/player/${athleteId}/pdf`), "_blank")} data-testid="profile-pdf-button"><FileDown className="h-4 w-4 mr-1" /> PDF</Button>}
                   {isAdmin && a.status === "active" && <Button variant="outline" className="rounded-xl h-10 text-muted-foreground" onClick={archive} data-testid="profile-archive-button"><Archive className="h-4 w-4 mr-1" /> Archive</Button>}
@@ -762,6 +839,12 @@ export default function PlayerProfile() {
                 <div><p className="text-[10px] uppercase text-muted-foreground">Team</p><p className="font-semibold truncate">{a.current_team || "—"}</p></div>
                 <div><p className="text-[10px] uppercase text-muted-foreground">Organization</p><p className="font-semibold truncate">{orgName || "—"}</p></div>
                 <div><p className="text-[10px] uppercase text-muted-foreground">Last evaluation</p><p className="font-semibold">{lastEvalDate ? String(lastEvalDate).slice(0, 10) : "—"}</p></div>
+                {canCoach && (
+                  <>
+                    <div><p className="text-[10px] uppercase text-muted-foreground">Athlete email</p><p className="font-semibold truncate" data-testid="profile-athlete-email">{a.email || "—"}</p></div>
+                    <div><p className="text-[10px] uppercase text-muted-foreground">Guardian</p><p className="font-semibold truncate">{a.guardian_email || a.guardian_name || "—"}</p></div>
+                  </>
+                )}
                 <div>
                   <p className="text-[10px] uppercase text-muted-foreground">Profile</p>
                   <p className="font-semibold text-brand font-mono-num">{completion.pct}% complete</p>

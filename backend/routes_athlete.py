@@ -12,7 +12,7 @@ from auth import (ADMIN_ROLES, COACH_ROLES, STAFF_ROLES, get_current_user,
                   rate_limit, require_roles)
 from config import settings
 from db import clean, db, log_audit, new_id, now_iso
-from mailer import send_template
+from mailer import safe_send, send_template
 from routes_media import ALLOWED_IMAGE
 from routes_players import restrict_guardian
 from scoring import aggregate_player_scores
@@ -146,12 +146,23 @@ async def invite_athlete(athlete_id: str, user=Depends(require_roles(*ADMIN_ROLE
         "link": link,
         "athlete_name": f"{athlete.get('first_name', '')} {athlete.get('last_name', '')}".strip(),
     }
-    # CC guardian for 13–17
-    send_result = send_template(to_email, template, ctx)
+    # A failed send must NOT surface as a 500 (the browser reads that as a dead
+    # API) and must not leave a phantom "pending" invite for an email that never
+    # went out.
+    try:
+        send_result = send_template(to_email, template, ctx)
+    except Exception as e:  # noqa: BLE001 — mail provider rejection/outage
+        await db.invitations.update_one(
+            {"id": inv["id"]}, {"$set": {"status": "failed", "error": str(e)[:300]}})
+        raise HTTPException(
+            status_code=502,
+            detail=f"The invitation email to {to_email} could not be delivered. "
+                   "Check that the address is a real, valid email and try again.")
+    # CC guardian for 13–17 — best-effort, never blocks the invite itself
     if age is not None and 13 <= age < 18 and athlete.get("guardian_email"):
         g = athlete["guardian_email"].strip().lower()
         if g and g != to_email:
-            send_template(g, "guardian_invitation", {**ctx, "name": athlete.get("guardian_name") or "Guardian"})
+            safe_send(g, "guardian_invitation", {**ctx, "name": athlete.get("guardian_name") or "Guardian"})
 
     await log_audit(
         user["organization_id"], user, "athlete_invite_sent", "invitation", inv["id"],
