@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api, errMsg } from "@/lib/api";
 import { formatPermanentId } from "@/lib/utils";
 import { IdRadarChart } from "@/components/common/IdRadarChart";
+import { AssessmentContent } from "@/components/common/AssessmentContent";
 import { PlayerAvatar } from "@/components/common/PlayerAvatar";
 import { VerificationBadge } from "@/components/common/StatusBadge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -63,6 +64,7 @@ export default function MyId() {
   const [pendingMedia, setPendingMedia] = useState([]);
   const [media, setMedia] = useState([]);
   const [goals, setGoals] = useState([]);
+  const [assessments, setAssessments] = useState([]);
 
   const reload = () => {
     Promise.all([
@@ -75,7 +77,9 @@ export default function MyId() {
       api.get("/media/pending-consent").catch(() => ({ data: [] })),
       // No athlete-facing media list ships yet; completion falls back to "no approved video".
       api.get("/me/media").catch(() => ({ data: [] })),
-    ]).then(([a, e, c, s, m, aw, pm, md]) => {
+      // Published AI assessments only — the section renders nothing when empty.
+      api.get("/me/assessments").catch(() => ({ data: [] })),
+    ]).then(([a, e, c, s, m, aw, pm, md, asmt]) => {
       setAthlete(a.data);
       setEvals(e.data || []);
       setCard(c.data);
@@ -84,6 +88,7 @@ export default function MyId() {
       setAwards(aw.data || []);
       setPendingMedia(pm.data || []);
       setMedia(Array.isArray(md.data) ? md.data : md.data?.media || []);
+      setAssessments(Array.isArray(asmt.data) ? asmt.data : []);
       // Athlete/parent sessions read their own goals via /me/goals; staff-linked
       // accounts fall back to the staff route. Priorities degrade to lowest
       // category scores when neither is readable. Never fabricate goal data.
@@ -473,6 +478,32 @@ export default function MyId() {
               ))}
             </CardContent>
           </Card>
+        </div>
+      )}
+
+      {/* 60'6" Development Assessment — published coach-approved AI assessments
+          only; the section disappears entirely when there are none. */}
+      {assessments.length > 0 && (
+        <div className="space-y-3" data-testid="my-assessments-section">
+          <p className="font-semibold text-sm text-foreground flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-brand" /> 60&apos;6&quot; Development Assessment
+          </p>
+          {assessments.map((asmt, i) => (
+            <Card key={asmt.id || i} className="rounded-2xl border-border">
+              <CardContent className="py-4 space-y-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-sm text-foreground">{asmt.event_name || "Event"}</p>
+                    <p className="text-xs text-muted-foreground">{asmt.event_date || "—"}</p>
+                  </div>
+                  {asmt.published_at && (
+                    <p className="text-xs text-muted-foreground shrink-0">Published {String(asmt.published_at).slice(0, 10)}</p>
+                  )}
+                </div>
+                <AssessmentContent content={asmt.content} finalComment={asmt.final_comment} />
+              </CardContent>
+            </Card>
+          ))}
         </div>
       )}
 

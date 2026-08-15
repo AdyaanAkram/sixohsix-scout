@@ -31,6 +31,8 @@ class Settings:
     s3_access_key: str | None
     s3_secret_key: str | None
     demo_hosting: bool = False
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-4o-mini"
 
 
 def _split_origins(raw: str) -> list[str]:
@@ -144,6 +146,8 @@ def load_settings() -> Settings:
         s3_access_key=s3_access_key,
         s3_secret_key=s3_secret_key,
         demo_hosting=demo_hosting,
+        openai_api_key=(os.environ.get("OPENAI_API_KEY") or "").strip() or None,
+        openai_model=(os.environ.get("OPENAI_MODEL") or "gpt-4o-mini").strip(),
     )
 
 

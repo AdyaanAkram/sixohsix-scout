@@ -29,6 +29,7 @@ import routes_notifications  # noqa: E402
 import routes_metrics  # noqa: E402
 import routes_awards  # noqa: E402
 import routes_drills  # noqa: E402
+import routes_assessments  # noqa: E402
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level, logging.INFO),
@@ -166,6 +167,7 @@ api_router.include_router(routes_notifications.router)
 api_router.include_router(routes_metrics.router)
 api_router.include_router(routes_awards.router)
 api_router.include_router(routes_drills.router)
+api_router.include_router(routes_assessments.router)
 
 app.include_router(api_router)
 

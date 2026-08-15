@@ -23,6 +23,18 @@ def _mask_email(email: str) -> str:
 
 
 TEMPLATES = {
+    "assessment_published": {
+        "subject": "{athlete_name}'s 60'6\" development assessment is ready",
+        "body": (
+            "Hi {name},\n\n"
+            "{athlete_name}'s development assessment from {event} has been reviewed and "
+            "released by {org}.\n"
+            "Sign in to read it:\n\n"
+            "{link}\n\n"
+            "\u2014 60'6\" Athletics\n"
+        ),
+    },
+
     "athlete_invitation": {
         "subject": "Claim your 60'6\" ID profile",
         "body": (

@@ -14,6 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { PlayerAvatar } from "@/components/common/PlayerAvatar";
+import { AssessmentContent } from "@/components/common/AssessmentContent";
 import { StatusBadge, VerificationBadge } from "@/components/common/StatusBadge";
 import { EmptyState } from "@/components/common/EmptyState";
 import { TimelineItem } from "@/components/common/TimelineItem";
@@ -435,6 +436,193 @@ const UploadPhotoDialog = ({ athleteId, onDone }) => {
   );
 };
 
+// chain_status → chip styling. Published is the only green state; Awaiting
+// Final Approval is the amber "action needed" state; everything else is muted.
+const CHAIN_CHIP_STYLES = {
+  Published: "bg-success/15 text-success border-success/40",
+  "Awaiting Final Approval": "bg-warning/15 text-warning border-warning/40",
+};
+
+// One card per event in the AI assessment chain. Read-only rendering is shared
+// with the family portal via AssessmentContent; the edit mode keeps lists as
+// one-item-per-line textareas ("area — detail" / "area — why — focus") and
+// parses them back into the full content shape the PATCH endpoint requires.
+function AiAssessmentCard({ row, athleteId, isAdmin, onChanged }) {
+  const [generating, setGenerating] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [draft, setDraft] = useState(null);
+
+  const asmt = row.assessment;
+  const content = asmt?.content || {};
+  const published = asmt?.status === "published";
+  const approved = row.approved_evaluations ?? 0;
+  const chipCls = CHAIN_CHIP_STYLES[row.chain_status] || "bg-secondary text-muted-foreground border-border";
+
+  const generate = async (isRegen) => {
+    if (isRegen && !window.confirm("Regenerate this assessment? The current draft text will be replaced with a fresh AI draft.")) return;
+    setGenerating(true);
+    try {
+      await api.post(`/athletes/${athleteId}/assessments/generate`, { event_id: row.event_id });
+      toast.success(isRegen ? "Assessment regenerated." : "Assessment generated.");
+      setEditing(false);
+      await onChanged();
+    } catch (e) { toast.error(errMsg(e)); } finally { setGenerating(false); }
+  };
+
+  const startEdit = () => {
+    setDraft({
+      summary: content.summary || "",
+      strengths: (Array.isArray(content.strengths) ? content.strengths : [])
+        .filter(Boolean)
+        .map((s) => (typeof s === "string" ? s : [s?.area, s?.detail].filter(Boolean).join(" — ")))
+        .join("\n"),
+      priorities: (Array.isArray(content.development_priorities) ? content.development_priorities : [])
+        .filter(Boolean)
+        .map((p) => (typeof p === "string" ? p : [p?.area, p?.why, p?.focus].filter(Boolean).join(" — ")))
+        .join("\n"),
+      nextSteps: (Array.isArray(content.next_steps) ? content.next_steps : []).filter(Boolean)
+        .map((s) => (typeof s === "string" ? s : JSON.stringify(s)))
+        .join("\n"),
+      finalComment: asmt?.final_comment || "",
+    });
+    setEditing(true);
+  };
+
+  const save = async () => {
+    const lines = (t) => String(t || "").split("\n").map((l) => l.trim()).filter(Boolean);
+    const strengths = lines(draft.strengths).map((l) => {
+      const parts = l.split("—").map((s) => s.trim());
+      return { area: parts[0] || "", detail: parts.slice(1).join(" — ") };
+    });
+    const priorities = lines(draft.priorities).map((l) => {
+      const parts = l.split("—").map((s) => s.trim());
+      return { area: parts[0] || "", why: parts[1] || "", focus: parts.slice(2).join(" — ") };
+    });
+    setSaving(true);
+    try {
+      // content must always carry the full shape — the API replaces it wholesale.
+      await api.patch(`/assessments/${asmt.id}`, {
+        content: {
+          summary: draft.summary,
+          strengths,
+          development_priorities: priorities,
+          next_steps: lines(draft.nextSteps),
+        },
+        final_comment: draft.finalComment,
+      });
+      toast.success("Assessment saved.");
+      setEditing(false);
+      await onChanged();
+    } catch (e) { toast.error(errMsg(e)); } finally { setSaving(false); }
+  };
+
+  const publish = async () => {
+    if (!window.confirm("Approve & publish this assessment? This is permanent — it is released to the athlete and family and can no longer be edited or regenerated.")) return;
+    setBusy(true);
+    try {
+      await api.post(`/assessments/${asmt.id}/publish`);
+      toast.success("Assessment published to the family.");
+      setEditing(false);
+      await onChanged();
+    } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
+  };
+
+  const discard = async () => {
+    if (!window.confirm("Discard this draft assessment? The generated text will be deleted.")) return;
+    setBusy(true);
+    try {
+      await api.delete(`/assessments/${asmt.id}`);
+      toast.success("Draft discarded.");
+      setEditing(false);
+      await onChanged();
+    } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
+  };
+
+  const setD = (k) => (e) => setDraft((d) => ({ ...d, [k]: e.target.value }));
+
+  return (
+    <Card className="rounded-2xl border-border" data-testid={`assessment-card-${row.event_id}`}>
+      <CardContent className="py-4 space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="font-semibold text-sm text-foreground">{row.event_name}</p>
+            <p className="text-xs text-muted-foreground">{row.event_date}</p>
+          </div>
+          <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold shrink-0 ${chipCls}`} data-testid="assessment-chain-status">
+            {row.chain_status}
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {approved} approved · {row.pending_evaluations ?? 0} in review
+        </p>
+
+        {!asmt ? (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-muted-foreground">
+              {approved === 0 ? "Waiting on evaluation approval" : "Ready to generate"}
+            </p>
+            {isAdmin && approved > 0 && (
+              <Button className="rounded-xl bg-primary hover:bg-brand-secondary h-10" disabled={generating} onClick={() => generate(false)} data-testid="assessment-generate-button">
+                <Sparkles className="h-4 w-4 mr-1" /> {generating ? "Generating… (~15s)" : "Generate AI assessment"}
+              </Button>
+            )}
+          </div>
+        ) : editing ? (
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Summary</Label>
+              <Textarea rows={4} value={draft.summary} onChange={setD("summary")} className="rounded-lg" data-testid="assessment-summary-textarea" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Strengths — one per line, &quot;area — detail&quot;</Label>
+              <Textarea rows={4} value={draft.strengths} onChange={setD("strengths")} className="rounded-lg" data-testid="assessment-strengths-textarea" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Development priorities — one per line, &quot;area — why — focus&quot;</Label>
+              <Textarea rows={4} value={draft.priorities} onChange={setD("priorities")} className="rounded-lg" data-testid="assessment-priorities-textarea" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Next steps — one per line</Label>
+              <Textarea rows={3} value={draft.nextSteps} onChange={setD("nextSteps")} className="rounded-lg" data-testid="assessment-next-steps-textarea" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Coach&apos;s note (shown to the family)</Label>
+              <Input value={draft.finalComment} onChange={setD("finalComment")} className="h-10 rounded-lg" data-testid="assessment-final-comment-input" />
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button className="rounded-xl bg-primary hover:bg-brand-secondary h-10" disabled={saving} onClick={save} data-testid="assessment-save-button">
+                {saving ? "Saving…" : "Save"}
+              </Button>
+              <Button variant="outline" className="rounded-xl h-10" disabled={saving} onClick={() => setEditing(false)}>Cancel</Button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <AssessmentContent content={content} finalComment={asmt.final_comment} />
+            {published && (
+              <p className="text-xs text-muted-foreground" data-testid="assessment-published-line">
+                Published {String(asmt.published_at || "").slice(0, 10) || "—"}
+              </p>
+            )}
+            {isAdmin && !published && (
+              <div className="flex flex-wrap gap-2 pt-1">
+                <Button variant="outline" className="rounded-xl h-10" disabled={busy || generating} onClick={startEdit} data-testid="assessment-edit-button">Edit</Button>
+                <Button variant="outline" className="rounded-xl h-10" disabled={busy || generating} onClick={() => generate(true)} data-testid="assessment-regenerate-button">
+                  {generating ? "Generating… (~15s)" : "Regenerate"}
+                </Button>
+                <Button variant="outline" className="rounded-xl h-10 text-destructive" disabled={busy || generating} onClick={discard} data-testid="assessment-discard-button">Discard draft</Button>
+                <Button className="rounded-xl bg-primary hover:bg-brand-secondary h-10" disabled={busy || generating} onClick={publish} data-testid="assessment-publish-button">Approve &amp; Publish</Button>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function PlayerProfile() {
   const { athleteId } = useParams();
   const navigate = useNavigate();
@@ -462,6 +650,7 @@ export default function PlayerProfile() {
   const [awardBusy, setAwardBusy] = useState(false);
   const [plan, setPlan] = useState(null);
   const [planBusy, setPlanBusy] = useState(false);
+  const [assessments, setAssessments] = useState(null);
 
   const role = user?.role;
   const isAdmin = ["owner", "admin"].includes(role);
@@ -578,7 +767,17 @@ export default function PlayerProfile() {
     if (tab === "awards" && !awards) {
       api.get(`/awards/athlete/${athleteId}`).then((r) => setAwards(r.data)).catch(() => setAwards([]));
     }
-  }, [tab, athleteId, evaluations, notes, goals, timeline, metrics, awards]);
+    if (tab === "assessment" && !assessments && canCoach) {
+      api.get(`/athletes/${athleteId}/assessments`).then((r) => setAssessments(r.data || [])).catch(() => setAssessments([]));
+    }
+  }, [tab, athleteId, evaluations, notes, goals, timeline, metrics, awards, assessments, canCoach]);
+
+  // Post-action refresh for the AI assessment chain (generate / save / publish /
+  // discard) — always refetch so chain_status and counts stay honest.
+  const reloadAssessments = useCallback(
+    () => api.get(`/athletes/${athleteId}/assessments`).then((r) => setAssessments(r.data || [])).catch((e) => toast.error(errMsg(e))),
+    [athleteId]
+  );
 
   // Catalog carries each metric's unit and lower_better direction, which the
   // career-best aggregation needs regardless of which tab is open.
@@ -725,11 +924,12 @@ export default function PlayerProfile() {
   const exitVeloKpi = headlineMetric(comparison, EXIT_VELO_KEYS);
   const sixtyKpi = headlineMetric(comparison, SIXTY_YARD_KEYS);
   const TAB_LABELS = {
-    overview: "Overview", evaluations: "Evaluations", progress: "Progress", verified: "Verified Metrics",
+    overview: "Overview", evaluations: "Evaluations", assessment: "60'6\" Assessment", progress: "Progress", verified: "Verified Metrics",
     story: "Player Story", media: "Videos & Photos", notes: "Coach Notes", development: "Development Goals",
     events: "Events", seasons: "Seasons", rankings: "Rankings", private: "Private", awards: "Awards", timeline: "Timeline",
   };
-  const PROFILE_TABS = ["overview", "evaluations", "progress", "verified", "story", "media", "notes", "development", "awards", "events", "seasons", "rankings", "private"];
+  // The AI assessment chain is staff-facing — the tab only exists for coaching roles.
+  const PROFILE_TABS = ["overview", "evaluations", ...(canCoach ? ["assessment"] : []), "progress", "verified", "story", "media", "notes", "development", "awards", "events", "seasons", "rankings", "private"];
 
   return (
     <div className="space-y-4">
@@ -1181,6 +1381,25 @@ export default function PlayerProfile() {
                     <StatusBadge status={ev.status} />
                   </CardContent>
                 </Card>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ---- 60'6" AI Assessment ---- */}
+        <TabsContent value="assessment" className="mt-4 space-y-3" data-testid="profile-assessment-tab">
+          {!canCoach ? null : !assessments ? (
+            <Skeleton className="h-32 rounded-2xl" />
+          ) : assessments.length === 0 ? (
+            <EmptyState
+              icon={Sparkles}
+              title="No assessments yet"
+              hint="AI player assessments appear here once event evaluations are approved."
+            />
+          ) : (
+            <div className="space-y-3">
+              {assessments.map((row) => (
+                <AiAssessmentCard key={row.event_id} row={row} athleteId={athleteId} isAdmin={isAdmin} onChanged={reloadAssessments} />
               ))}
             </div>
           )}
