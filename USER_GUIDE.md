@@ -36,7 +36,7 @@ but the event must not be able to fail on a dead phone battery or a venue with n
 This is the single most important test in this document. It simulates exactly how evaluations get
 lost at a ballpark. Do it on the same model of phone/tablet evaluators will use.
 
-1. On the phone, open **https://606-scout.surge.sh**, sign in as `eval1@pbgscout.com` /
+1. On the phone, open **https://606-scout.surge.sh**, sign in as `eval1@606athletics.com` /
    `Scout2025!`, and tap **Continue Evaluating**. Wait for "templates cached for offline."
 2. Open any player. Score 2–3 metrics. Watch the pill go **Synced**.
 3. **Turn on Airplane Mode.** Keep scoring 3–4 more metrics. The pill should show
@@ -59,7 +59,7 @@ fixable in hours. Do not discover this on the 16th.
 
 Run a miniature camp end-to-end, ideally with the real evaluators, a few days out:
 
-1. **Owner/admin** (`owner@pbgscout.com`): create a small test event (or reuse the seeded camp),
+1. **Owner/admin** (`owner@606athletics.com`): create a small test event (or reuse the seeded camp),
    set status **Evaluation Active**, check in 4–6 athletes with bib numbers and groups.
 2. **Access codes:** Evaluators tab → enter a helper's real personal email → generate a code →
    confirm the email arrives (production email must be configured) or relay the code shown
@@ -69,7 +69,7 @@ Run a miniature camp end-to-end, ideally with the real evaluators, a few days ou
 4. **Site manager**: open the event's **Live Progress** tab while scoring is happening. Verify the
    counts move — checked-in, in progress, complete, missing — and click a player to see exactly
    which metrics are missing.
-5. **Head scout** (`headscout@pbgscout.com`): Review Queue → **Return** one evaluation with a note
+5. **Head scout** (`headscout@606athletics.com`): Review Queue → **Return** one evaluation with a note
    (evaluator should see it come back), **Approve** another → open its **Results summary**.
 6. **Reports**: open Reports, confirm the insight cards populate; export the CSV; generate one
    player PDF and confirm charts + 60'6" branding.
@@ -82,7 +82,7 @@ Work through each role. Every line is a pass/fail check — the **Expected** col
 should see. Test on the live site.
 
 ### A. Evaluator — the field experience (highest priority)
-Login: `eval1@pbgscout.com` / `Scout2025!`
+Login: `eval1@606athletics.com` / `Scout2025!`
 
 | ✓ | Check | Expected |
 |---|---|---|
@@ -99,7 +99,7 @@ Login: `eval1@pbgscout.com` / `Scout2025!`
 | ☐ | Lockout | No Review Queue, no Players directory, no admin nav anywhere |
 
 ### B. Site manager / Owner — Organization HQ & event ops
-Login: `owner@pbgscout.com` / `Scout2025!`
+Login: `owner@606athletics.com` / `Scout2025!`
 
 | ✓ | Check | Expected |
 |---|---|---|
@@ -112,7 +112,7 @@ Login: `owner@pbgscout.com` / `Scout2025!`
 | ☐ | Settings | Org logo URL can be set (owner only, https required) |
 
 ### C. Head scout — quality gate
-Login: `headscout@pbgscout.com` / `Scout2025!`
+Login: `headscout@606athletics.com` / `Scout2025!`
 
 | ✓ | Check | Expected |
 |---|---|---|
@@ -124,7 +124,7 @@ Login: `headscout@pbgscout.com` / `Scout2025!`
 | ☐ | Reports | Six insight cards on top; all legacy tabs/CSV/PDF beneath |
 
 ### D. Coach — my athletes & development
-Login: `coach@pbgscout.com` / `Scout2025!`
+Login: `coach@606athletics.com` / `Scout2025!`
 
 | ✓ | Check | Expected |
 |---|---|---|
@@ -136,7 +136,7 @@ Login: `coach@pbgscout.com` / `Scout2025!`
 | ☐ | Privacy | No Review Queue; no confidential scout notes anywhere coach-visible |
 
 ### E. Athlete / Parent — My Development
-Login (live site): `athlete.demo@pbgscout.com` / `Scout2025!` (Miguel Reyes, two seasons)
+Login (live site): `athlete.demo@606athletics.com` / `Scout2025!` (Miguel Reyes, two seasons)
 Login (local seed): `demo.athlete.5a6b8b@example.com` / `Athlete2026!`
 
 | ✓ | Check | Expected |
@@ -174,20 +174,20 @@ All seeded staff passwords are **`Scout2025!`**.
 
 | Email | Role | Best for trying… |
 |---|---|---|
-| `owner@pbgscout.com` | Organization Owner | Org HQ, switcher, staff, settings, full camp ops |
-| `admin@pbgscout.com` | Administrator | Same day-to-day ops minus owner-only settings |
-| `headscout@pbgscout.com` | Head Scout | Review Desk, approve/return, results, scout board |
-| `coach@pbgscout.com` | Coach | My Athletes, check-in, metrics, goals, development |
-| `eval1@pbgscout.com` … `eval4@pbgscout.com` | Evaluator | Evaluation Mode, station scoring, autosave |
-| `athlete.demo@pbgscout.com` | Athlete (**live site**) | My Development, seasons, PBs, public story |
+| `owner@606athletics.com` | Organization Owner | Org HQ, switcher, staff, settings, full camp ops |
+| `admin@606athletics.com` | Administrator | Same day-to-day ops minus owner-only settings |
+| `headscout@606athletics.com` | Head Scout | Review Desk, approve/return, results, scout board |
+| `coach@606athletics.com` | Coach | My Athletes, check-in, metrics, goals, development |
+| `eval1@606athletics.com` … `eval4@606athletics.com` | Evaluator | Evaluation Mode, station scoring, autosave |
+| `athlete.demo@606athletics.com` | Athlete (**live site**) | My Development, seasons, PBs, public story |
 | `demo.athlete.5a6b8b@example.com` / `Athlete2026!` | Athlete (**local seed**) | Same, against local data |
 
 ### PBG South (second org — multi-org demo)
 
 | Email | Role | Notes |
 |---|---|---|
-| `owner@pbgscout.com` | Owner | Same user; **switch org** in the sidebar |
-| `coach.south@pbgscout.com` | Coach | Belongs only to PBG South |
+| `owner@606athletics.com` | Owner | Same user; **switch org** in the sidebar |
+| `coach.south@606athletics.com` | Coach | Belongs only to PBG South |
 
 **Switch orgs (owner):** sidebar **Organization** block → choose the org. Players, events, and
 programs all change with it.

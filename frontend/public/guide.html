@@ -10,13 +10,15 @@
     --bg:#0A0A0A; --card:#141414; --card2:#1D1D1D; --line:#2A2A2A;
     --ink:#F5F5F5; --mut:#9CA3AF; --brand:#DC2626; --brand-soft:rgba(220,38,38,.14);
     --ok:#22C55E; --warn:#F59E0B; --info:#3B82F6; --r:16px;
+    --hl:rgba(245,158,11,.32);
   }
   @media (prefers-color-scheme: light){
     :root{ --bg:#F6F6F4; --card:#FFFFFF; --card2:#F1F1EF; --line:#E5E5E3;
-           --ink:#111111; --mut:#5B6472; --brand-soft:rgba(220,38,38,.08); }
+           --ink:#111111; --mut:#5B6472; --brand-soft:rgba(220,38,38,.08);
+           --hl:rgba(245,158,11,.38); }
   }
   *{box-sizing:border-box; margin:0}
-  html{scroll-behavior:smooth; scroll-padding-top:84px}
+  html{scroll-behavior:smooth; scroll-padding-top:150px}
   body{background:var(--bg); color:var(--ink);
     font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     -webkit-font-smoothing:antialiased}
@@ -52,6 +54,27 @@
   .pill{display:inline-block; margin-top:14px; background:var(--brand-soft);
     border:1px solid var(--brand); color:var(--brand); font-weight:700; font-size:13px;
     padding:6px 12px; border-radius:99px}
+
+  /* ---------- Search bar ---------- */
+  .searchbar{position:sticky; top:62px; z-index:9; background:var(--bg);
+    margin:14px -18px 6px; padding:10px 18px 12px; border-bottom:1px solid var(--line)}
+  .srow{display:flex; gap:8px; align-items:center}
+  #guide-search{flex:1; min-width:0; height:44px; padding:0 14px; font-size:16px;
+    color:var(--ink); background:var(--card); border:1px solid var(--line);
+    border-radius:12px; outline:none; -webkit-appearance:none; appearance:none}
+  #guide-search:focus{border-color:var(--brand)}
+  #guide-search::placeholder{color:var(--mut)}
+  .scount{flex:none; font-size:13px; font-weight:700; color:var(--mut);
+    min-width:56px; text-align:center; white-space:nowrap}
+  .scount.none{color:var(--warn)}
+  .snav{flex:none; min-width:44px; min-height:44px; border-radius:12px;
+    border:1px solid var(--line); background:var(--card); color:var(--ink);
+    font-size:18px; font-weight:700; cursor:pointer;
+    -webkit-tap-highlight-color:transparent}
+  .snav:active{background:var(--card2)}
+  .snav:disabled{opacity:.35; cursor:default}
+  mark.hl{background:var(--hl); color:inherit; border-radius:3px; padding:0 1px}
+  mark.hl.current{background:var(--brand); color:#fff}
 
   h2{font-size:24px; font-weight:800; margin:44px 0 6px; letter-spacing:-.3px}
   .lead{color:var(--mut); margin-bottom:18px}
@@ -125,12 +148,34 @@
     <span class="pill">Train. Elevate. Succeed.</span>
     <nav aria-label="Sections">
       <a href="#start">Getting started</a>
-      <a href="#roles">Your role</a>
-      <a href="#event">Running an event</a>
-      <a href="#howto">How-to guides</a>
-      <a href="#faq">Common questions</a>
+      <a href="#roles">Roles &amp; workspaces</a>
+      <a href="#players">Adding players</a>
+      <a href="#csv">CSV import</a>
+      <a href="#events">Events</a>
+      <a href="#evaluate">Evaluating</a>
+      <a href="#review">Review</a>
+      <a href="#ai">AI assessments</a>
+      <a href="#invite">Invites</a>
+      <a href="#portal">Family portal</a>
+      <a href="#branding">Branding</a>
+      <a href="#housekeeping">Housekeeping</a>
+      <a href="#faq">FAQ</a>
     </nav>
   </section>
+
+  <!-- ============ SEARCH ============ -->
+  <div class="searchbar" id="searchbar">
+    <div class="srow">
+      <input id="guide-search" type="search" autocomplete="off" autocapitalize="off"
+        placeholder="Search the guide — try 'CSV', 'invite', 'assessment'…"
+        aria-label="Search the guide">
+      <span class="scount" id="search-count" aria-live="polite"></span>
+      <button class="snav" id="search-prev" aria-label="Previous match" title="Previous match" disabled>↑</button>
+      <button class="snav" id="search-next" aria-label="Next match" title="Next match" disabled>↓</button>
+    </div>
+  </div>
+
+  <div id="guide-content">
 
   <!-- ============ GETTING STARTED ============ -->
   <h2 id="start">Getting started</h2>
@@ -156,8 +201,8 @@
     the app before athletes arrive so it's already awake.
   </div>
 
-  <!-- ============ ROLES ============ -->
-  <h2 id="roles">What you see depends on who you are</h2>
+  <!-- ============ ROLES & WORKSPACES ============ -->
+  <h2 id="roles">Roles &amp; workspaces</h2>
   <p class="lead">Same athletes, same data — a different home screen and menu built around your job.
     Tap your role.</p>
 
@@ -170,22 +215,44 @@
       <p><b>Your menu:</b> Overview · Teams · Athletes · Development · Events — with everything
         else (Reports, Scout, Staff, Templates, Drills, Audit Log, Settings) under
         <i>Administration</i>.</p>
-      <p><b>Workspaces:</b> use the <b>Workspace</b> switcher under your organization name to drop
-        into Coach Hub, Scout Mode, or Evaluation Mode and see exactly what those roles see —
-        useful for training staff or checking a coach's view.</p>
       <p><b>You can:</b></p>
       <ul class="plain">
         <li>Run events end to end — <b>import a roster from CSV</b>, auto-group by graduation year,
           add preset stations, assign evaluators, check in with bib numbers, watch live progress</li>
         <li>Configure what each event offers: mark modules <b>Required / Optional / Not Offered</b>
           based on your facility and equipment</li>
-        <li>See a <b>staffing recommendation</b> (minimum / recommended / ideal) with warnings like
-          "5 stations but only 3 evaluators assigned"</li>
+        <li>Approve evaluations in the <b>Review Queue</b> and generate, edit and publish
+          <b>AI player assessments</b></li>
+        <li><b>Invite athletes and parents</b> to the platform from any player profile</li>
         <li>Give a guest coach temporary access that <b>expires when the event ends</b></li>
         <li>Manage staff, evaluation templates (by age band and position), and the drill catalog</li>
-        <li>Delete an event you no longer need (trash icon on the event header)</li>
-        <li>Set your organization's logo in Settings — it appears beside "Powered by 60'6" ID"</li>
+        <li>Set your organization's <b>logo, cover photo and brand color</b> in Settings</li>
       </ul>
+      <p class="muted">The only differences between Owner and Admin: the owner controls the
+        <b>Danger Zone</b> (Remove all athletes), can <b>force-delete</b> an event that already has
+        submitted evaluations, and uploads the organization logo and cover photo.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>🔭&nbsp; Head Scout — <i>Scout Mode + Review</i></summary>
+    <div class="body">
+      <p><b>You land on:</b> the Review Desk — evaluations awaiting your approval, who's improving,
+        top movers, and flagged players.</p>
+      <p><b>Your menu:</b> Overview · Review · Discover · Watchlist · Compare · Events.</p>
+      <p><b>You can:</b></p>
+      <ul class="plain">
+        <li><b>Approve or return</b> submitted evaluations (returns go back to the evaluator with
+          your note) — you share approval power with the owner and admins</li>
+        <li>Work the <b>Prospect Board</b> — filter by grad class and position, see verified
+          metrics with trust badges</li>
+        <li>⭐ <b>Star prospects</b> to your private Watchlist</li>
+        <li><b>Compare up to four players</b> side by side with charts</li>
+        <li>Open any evaluation's visual <b>results summary</b> — score, change, top strengths and
+          improvement areas</li>
+      </ul>
+      <p class="muted">Head scouts approve evaluations but do not generate or publish AI
+        assessments — that step belongs to the owner and admins.</p>
     </div>
   </details>
 
@@ -215,50 +282,17 @@
       <p><b>You land on:</b> your assignment — station, group, how many players are left, and one
         big button: <i>Continue Evaluating</i>. No admin screens, nothing to get lost in.</p>
       <p><b>Your menu:</b> Today's Event · Evaluate · Submitted.</p>
-      <p><b>The field loop:</b> pick a player (search by name or <b>bib number</b>) → tap scores
-        1–5 → add a quick note, tag, or photo if useful → it <b>saves automatically</b> → Next
-        player. The athlete's photo, name, and bib stay pinned at the top, and the app warns you
-        before you submit with required scores missing.</p>
-      <p><b>When a score doesn't apply,</b> use the one-tap buttons instead of guessing:</p>
-      <ul class="plain">
-        <li><b>N/O</b> — Not Observed (didn't get to see it)</li>
-        <li><b>N/A</b> — Not Applicable (doesn't apply to this athlete)</li>
-        <li><b>DNP</b> — Did Not Participate</li>
-        <li><b>Retest</b> — needs another look later</li>
-      </ul>
-      <p class="muted">None of these ever count as a zero, and they satisfy a required field so you
-        can finish the sheet honestly.</p>
-      <p><b>Quick tags:</b> on running and base-running metrics, tap chips like <i>Touched Front of
-        Bag</i>, <i>Proper Turn</i>, <i>Broke Down Properly</i>, <i>Wide Turn</i> instead of typing.
-        Enter the time → tap a tag or two → next athlete.</p>
-      <p><b>Weak wifi? Keep scoring.</b> Scores save on your device and sync when the connection
-        returns — the status pill tells you the truth (<i>Synced</i> vs waiting). Don't clear your
-        browser data mid-event; that's where offline work lives.</p>
+      <p><b>The field loop:</b> pick a player (search by name or <b>bib number</b>) → tap a score
+        on the <b>8–12 developmental scale</b> → add a quick note, tag, or photo if useful → it
+        <b>saves automatically</b> → Next player. The athlete's photo, name, and bib stay pinned at
+        the top, and the app warns you before you submit with required scores missing.</p>
+      <p>The full scoring workflow — the 8–12 scale, N/O / N/A / DNP / Retest, tags, and offline
+        behavior — is covered in <a href="#evaluate">Evaluating on the field</a>.</p>
     </div>
   </details>
 
   <details>
-    <summary>🔭&nbsp; Head Scout — <i>Scout Mode + Review</i></summary>
-    <div class="body">
-      <p><b>You land on:</b> the Review Desk — evaluations awaiting your approval, who's improving,
-        top movers, and flagged players.</p>
-      <p><b>Your menu:</b> Overview · Review · Discover · Watchlist · Compare · Events.</p>
-      <p><b>You can:</b></p>
-      <ul class="plain">
-        <li><b>Approve or return</b> submitted evaluations (returns go back to the evaluator with
-          your note)</li>
-        <li>Work the <b>Prospect Board</b> — filter by grad class and position, see verified
-          metrics with trust badges</li>
-        <li>⭐ <b>Star prospects</b> to your private Watchlist</li>
-        <li><b>Compare up to four players</b> side by side with charts</li>
-        <li>Open any evaluation's visual <b>results summary</b> — score, change, top strengths and
-          improvement areas</li>
-      </ul>
-    </div>
-  </details>
-
-  <details>
-    <summary>⚾&nbsp; Athlete / Parent — <i>My Development</i></summary>
+    <summary>⚾&nbsp; Athlete / Parent — <i>My 60'6" ID</i></summary>
     <div class="body">
       <p><b>You land on:</b> My Development — your development headline (e.g. <i>"↑ +14% development
         this season"</i>), your <b>top 3 current priorities</b> from your coach, personal bests
@@ -269,72 +303,303 @@
       <p><b>You can:</b></p>
       <ul class="plain">
         <li>Complete your profile (photo, height/weight) — the app shows what's missing</li>
-        <li>See every evaluation result, measurement, and milestone</li>
+        <li>See every evaluation released to you, plus <b>published AI assessments</b></li>
         <li>Turn on your <b>Public ID Story</b> — a shareable page (with QR) showing only approved
           content</li>
         <li><b>Parents:</b> approve or reject photos/videos of your child before anything is
           displayed — nothing under-13 is ever shown without your approval</li>
       </ul>
+      <p>See <a href="#portal">My 60'6" ID — the family portal</a> for the full picture.</p>
     </div>
   </details>
 
-  <!-- ============ RUNNING AN EVENT ============ -->
-  <h2 id="event">Running an event, start to finish</h2>
-  <p class="lead">The core workflow. Configure once, assign automatically where possible, evaluate
-    with minimum taps.</p>
+  <details>
+    <summary>🔀&nbsp; "Where are you working today?" — switching workspaces</summary>
+    <div class="body">
+      <p>Many people wear more than one hat: an owner who also coaches, a coach who evaluates on
+        camp day. If your account has more than one role, signing in lands you on the
+        <b>"Where are you working today?"</b> chooser — a card per workspace (Organization HQ,
+        Coach Hub, Scout Mode, Evaluation Mode, My Development), each describing what you'll see
+        inside.</p>
+      <ol class="steps">
+        <li>Pick the workspace that matches today's job. That's your home screen for the session.</li>
+        <li>Need to change mid-day? Open the <b>Workspace</b> switcher in the sidebar (or the
+          "More" menu on a phone), just under your organization name — <b>no signing out
+          required</b>.</li>
+        <li>Owners and admins can drop into Coach Hub, Scout Mode, or Evaluation Mode to see
+          exactly what those roles see — useful for training staff or checking a coach's view.</li>
+      </ol>
+      <p class="muted">Switching workspaces changes the view, never your permissions. What you're
+        allowed to do stays exactly the same.</p>
+    </div>
+  </details>
+
+  <!-- ============ ADDING PLAYERS ============ -->
+  <h2 id="players">Adding players</h2>
+  <p class="lead">Two ways in: one at a time through a dialog, or a whole roster at once from a
+    spreadsheet.</p>
+
+  <details>
+    <summary>Add a single player (the Add Player dialog)</summary>
+    <div class="body">
+      <p>Perfect for walk-ins, late registrations, or a brand-new athlete who isn't in any
+        spreadsheet yet.</p>
+      <ol class="steps">
+        <li>Go to <b>Athletes</b> (or an event's <b>Roster</b> tab) → tap <b>Add Player</b>.</li>
+        <li>Enter the basics: <b>first and last name</b>, and ideally a <b>date of birth</b> or
+          <b>graduation year</b> — that's how the app matches this athlete to their permanent
+          60'6" ID at future events and avoids duplicates.</li>
+        <li>Add whatever else you know: primary/secondary position, bats/throws, height, weight,
+          team, jersey number, city and state.</li>
+        <li>Add contact details if you have them — <b>player email</b> (for athletes old enough to
+          have their own account) and <b>guardian name, email, and phone</b>. These power the
+          <a href="#invite">platform invites</a> later, so the more you enter now, the less typing
+          on invite day.</li>
+        <li>Save. The athlete gets a permanent 60'6" ID immediately and appears in your athlete
+          list and any event roster you added them from.</li>
+      </ol>
+      <p class="muted">Adding a player never sends any email by itself — invitations are a
+        separate, deliberate step.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Add many players at once (CSV import)</summary>
+    <div class="body">
+      <p>If your club already keeps a roster in Excel, Google Sheets, or a registration platform,
+        don't retype it. Export it as a <b>CSV</b> and import it in one pass — the importer
+        matches existing athletes to their permanent IDs, creates new profiles for the rest, and
+        can even drop athletes straight into event groups and assign bib numbers.</p>
+      <p>It's the fastest way to load 20, 50, or 200 athletes, and it's safe to run more than
+        once. Everything about it — the template, every column, matching, the preview, and
+        re-importing — is in the next section: <a href="#csv">Roster CSV import</a>.</p>
+    </div>
+  </details>
+
+  <!-- ============ CSV IMPORT ============ -->
+  <h2 id="csv">Roster CSV import, in depth</h2>
+  <p class="lead">One spreadsheet in, a clean roster out — no duplicates, no lost data.</p>
+
+  <details>
+    <summary>Start from the template (and every column it supports)</summary>
+    <div class="body">
+      <p>Download the official template at
+        <a href="https://606athletics.com/roster-template.csv">606athletics.com/roster-template.csv</a>
+        — it has every column the importer understands, in the right order, with example rows you
+        replace with your own athletes. You can also export from your own system as long as the
+        column headers match.</p>
+      <p><b>Identity &amp; matching</b> (fill in as many as you can):</p>
+      <p>
+        <span class="chip">first_name</span>
+        <span class="chip">last_name</span>
+        <span class="chip">date_of_birth</span>
+        <span class="chip">age</span>
+        <span class="chip">graduation_year</span>
+        <span class="chip">age_group</span>
+      </p>
+      <p><b>Baseball profile:</b></p>
+      <p>
+        <span class="chip">primary_position</span>
+        <span class="chip">secondary_position</span>
+        <span class="chip">bats</span>
+        <span class="chip">throws</span>
+        <span class="chip">height</span>
+        <span class="chip">weight_lbs</span>
+      </p>
+      <p><b>Team &amp; event:</b></p>
+      <p>
+        <span class="chip">team</span>
+        <span class="chip">jersey_bib_number</span>
+        <span class="chip">organization</span>
+        <span class="chip">event_group</span>
+      </p>
+      <p><b>Contact &amp; location</b> (powers invites later):</p>
+      <p>
+        <span class="chip">player_email</span>
+        <span class="chip">guardian_name</span>
+        <span class="chip">guardian_email</span>
+        <span class="chip">guardian_phone</span>
+        <span class="chip">city</span>
+        <span class="chip">state</span>
+      </p>
+      <p><b>Ignored columns</b> — safe to leave in your file, the importer skips them:</p>
+      <p>
+        <span class="chip warn">index</span>
+        <span class="chip warn">event_name</span>
+        <span class="chip warn">consent_status</span>
+        <span class="chip warn">notes</span>
+      </p>
+      <p class="muted">Only first and last name are truly required per row — but a
+        <b>date_of_birth</b> or <b>graduation_year</b> is what lets the app match the athlete at
+        every future event, so treat one of those as required too.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>How matching against permanent IDs works</summary>
+    <div class="body">
+      <p>Every athlete has one permanent 60'6" ID. The importer's first job is to figure out
+        whether each CSV row is an athlete you already have, or a new one:</p>
+      <ol class="steps">
+        <li><b>Name + date of birth</b> — the strongest match. Same first name, last name, and DOB
+          as an existing athlete → the row links to that athlete's permanent ID.</li>
+        <li><b>Name + graduation year</b> — if the row has no DOB, the importer tries first name +
+          last name + graduation year.</li>
+        <li><b>No match</b> → a brand-new profile is created with a fresh permanent ID.</li>
+        <li><b>Ambiguous</b> — same name but the DOB or grad year doesn't line up with what's on
+          file → the row is flagged <span class="chip warn">Possible duplicate</span> and the
+          preview asks <i>you</i> to choose: link to the existing athlete or create a new one.</li>
+      </ol>
+      <p class="muted">The system never silently creates a duplicate athlete, and never guesses a
+        graduation year it wasn't given.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Reading the import preview (row by row)</summary>
+    <div class="body">
+      <p>Nothing is written until you confirm. After you pick your file, every row appears in a
+        preview sorted into statuses:</p>
+      <ul class="plain">
+        <li><span class="chip ok">Matched</span> — links to an existing athlete's permanent ID.
+          The event roster gets the existing athlete; blank fields on their profile are filled in
+          from your CSV (see re-importing below).</li>
+        <li><span class="chip">New</span> — no existing athlete found; a new profile will be
+          created.</li>
+        <li><span class="chip warn">Possible duplicate</span> — looks like someone you already
+          have, but not certainly. Tap the row and choose: use the existing athlete, or create a
+          separate new one.</li>
+        <li><span class="chip warn">Needs grad year</span> — the row has neither a usable DOB nor
+          a graduation year, so the app can't place the athlete in a class group. Type the grad
+          year right there in the preview.</li>
+        <li><span class="chip">Error</span> — the row can't be imported (for example, no name).
+          It's skipped with a reason shown; everything else still imports.</li>
+      </ul>
+      <p>Leave <b>Auto-group by graduation year</b> on (when importing into an event), then
+        <b>Confirm Import</b>. Groups appear immediately with counts.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Re-importing a richer CSV — backfill without overwriting</summary>
+    <div class="body">
+      <p>This is the importer's most useful trick, and the one to remember when a profile looks
+        half-empty. When a row is <span class="chip ok">Matched</span> to an existing athlete:</p>
+      <ul class="plain">
+        <li><b>Blank fields get filled in.</b> If the athlete's profile has no height, no guardian
+          email, no positions — and your CSV has them — the import fills them in.</li>
+        <li><b>Existing values are never overwritten.</b> If the profile already says the athlete
+          bats left and your CSV says right, the profile keeps what it had. An import can only
+          add, never replace.</li>
+      </ul>
+      <p>So if your first import was a bare-bones list (names only) and profiles look thin: add
+        the missing columns to your spreadsheet — emails, guardians, positions, heights — and
+        <b>import the same file again</b>. Matched athletes soak up the new data; nothing you've
+        entered by hand since is touched, and no duplicates are created.</p>
+      <p class="muted">Need to <i>change</i> a value that's already set (a typo'd guardian email,
+        a wrong DOB)? Edit the athlete's profile directly — that's deliberate, so a stray
+        spreadsheet can never trample corrections your staff made in the app.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>event_group and bib numbers — pre-building your camp day</summary>
+    <div class="body">
+      <p>Two columns do extra work when you import into an event:</p>
+      <ul class="plain">
+        <li><b>event_group</b> — places each athlete straight into a group on import. Write
+          <i>"2032"</i> and the athlete lands in a group named <b>"Class of 2032"</b> (created if
+          it doesn't exist yet). You can also write any custom group name — <i>"Morning Session"</i>,
+          <i>"Pitchers Only"</i> — and athletes with the same value end up together.</li>
+        <li><b>jersey_bib_number</b> — becomes the athlete's <b>bib number</b> for the event, so
+          evaluators can find players by bib from the first pitch without a check-in scramble.</li>
+      </ul>
+      <p class="muted">Rows without an event_group still get placed by
+        <b>Auto-group by graduation year</b> if you leave it on.</p>
+    </div>
+  </details>
+
+  <!-- ============ EVENTS ============ -->
+  <h2 id="events">Events — setup to teardown</h2>
+  <p class="lead">Configure once, assign automatically where possible, evaluate with minimum taps.</p>
 
   <div class="card">
-    <span class="kicker">The seven steps</span>
+    <span class="kicker">The setup checklist</span>
     <ol class="steps">
-      <li><b>Create the event</b> — name, date, location. The Overview tab shows a setup checklist:
-        Roster → Groups → Stations → Evaluators → Activated.</li>
-      <li><b>Import the roster</b> — Roster tab → <b>Import Roster CSV</b>. Existing athletes are
-        matched to their permanent 60'6" ID instead of being duplicated.</li>
-      <li><b>Groups build themselves</b> — athletes are auto-grouped into "Class of 2033", "Class
-        of 2034"… You can rename, merge, move athletes, or add walk-ins by hand.</li>
-      <li><b>Add stations</b> — pick from the preset library (Athletic Movement, Hitting, Infield,
-        Outfield, Throwing/Arm, Pitching, Catching, Base Running, Baseball IQ, Character) and set
-        each one <b>Required / Optional / Not Offered</b> for this event.</li>
-      <li><b>Check the staffing panel</b> — it tells you minimum, recommended and ideal staff for
-        your enrollment and station count, and warns about bottlenecks before the day.</li>
-      <li><b>Assign evaluators</b> — Evaluator → Group → Station → Save. They'll see only that.</li>
-      <li><b>Set status to Evaluation Active</b> and run the day from the <b>Live Progress</b> tab.</li>
+      <li><b>Create the event</b> — Events → New Event → name, date, location. The Overview tab
+        then shows a setup checklist that tracks itself:
+        <b>Roster → Groups → Stations → Evaluators → Activate</b>. Each step lights up as you
+        complete it, so you always know what's left.</li>
+      <li><b>Roster</b> — <a href="#csv">import a CSV</a> or add players by hand. Existing
+        athletes match to their permanent 60'6" ID instead of being duplicated.</li>
+      <li><b>Groups</b> — build themselves from graduation years, or come straight from your CSV's
+        event_group column. Adjust as needed (below).</li>
+      <li><b>Stations</b> — pick from the preset library and set each module Required, Optional,
+        or Not Offered (below).</li>
+      <li><b>Evaluators</b> — assign Evaluator → Group → Station → Save. Each evaluator sees only
+        their assignment. Check the staffing calculator while you're here.</li>
+      <li><b>Activate</b> — set status to <b>Evaluation Active</b> and run the day from the
+        <b>Live Progress</b> tab.</li>
     </ol>
   </div>
 
-  <div class="callout ok">
-    <b>Not Offered never counts against you.</b>
-    If your facility has no mound or no radar gun that day, mark those modules <i>Not Offered</i> —
-    they disappear from completion math instead of showing up as missing data.
-  </div>
-
-  <!-- ============ HOW-TO ============ -->
-  <h2 id="howto">How-to guides</h2>
-  <p class="lead">The most common jobs, step by step.</p>
+  <details>
+    <summary>Groups — auto-grouping, renaming, merging</summary>
+    <div class="body">
+      <p>With <b>Auto-group by graduation year</b> on, importing a roster builds groups like
+        "Class of 2033", "Class of 2034"… automatically, with live counts.</p>
+      <ul class="plain">
+        <li><b>Rename a group</b> — open the group and edit its name. "Class of 2033" can become
+          "13U Gold" without moving anyone.</li>
+        <li><b>Merge groups</b> — two small classes can run as one station rotation: merge them
+          and every athlete, assignment and count moves to the surviving group.</li>
+        <li><b>Move athletes</b> between groups by hand, and <b>add walk-ins</b> directly into a
+          group on the day — no second import needed.</li>
+      </ul>
+    </div>
+  </details>
 
   <details>
-    <summary>Import an event roster from a spreadsheet</summary>
+    <summary>Stations — presets and Required / Optional / Not Offered</summary>
     <div class="body">
-      <ol class="steps">
-        <li>Export your roster from wherever you keep it as a <b>CSV</b> — or start from the
-          <a href="https://606athletics.com/roster-template.csv">60'6" roster template</a>.
-          Every column in the template maps automatically: name, DOB, age, grad year, age group,
-          positions, B/T, height, weight, team, jersey/bib #, player &amp; guardian contact info,
-          city/state, and an <b>event_group</b> column that places each athlete straight into
-          their group on import.</li>
-        <li>Event → <b>Roster</b> tab → <b>Import Roster CSV</b> → choose the file.</li>
-        <li><b>Review the preview.</b> Every row is sorted for you:
-          <span class="chip ok">Matched</span> links to an existing athlete's permanent ID ·
-          <span class="chip">New</span> creates a profile ·
-          <span class="chip warn">Possible duplicate</span> asks you to choose ·
-          <span class="chip warn">Needs grad year</span> lets you type it in ·
-          <span class="chip">Error</span> is skipped with a reason.</li>
-        <li>Leave <b>Auto-group by graduation year</b> on, then <b>Confirm Import</b>.</li>
-        <li>Groups appear immediately with counts. Add walk-ins individually later — no second
-          import needed.</li>
-      </ol>
-      <p class="muted" style="margin-top:10px">The system will never silently create a duplicate
-        athlete, and never guesses a graduation year it wasn't given.</p>
+      <p>Add stations from the preset library:</p>
+      <p>
+        <span class="chip">Athletic Movement</span>
+        <span class="chip">Hitting</span>
+        <span class="chip">Infield</span>
+        <span class="chip">Outfield</span>
+        <span class="chip">Throwing/Arm</span>
+        <span class="chip">Pitching</span>
+        <span class="chip">Catching</span>
+        <span class="chip">Base Running</span>
+        <span class="chip">Baseball IQ</span>
+        <span class="chip">Character</span>
+      </p>
+      <p>Each module at your event is in one of three states:</p>
+      <ul class="plain">
+        <li><span class="chip ok">Required</span> — counts toward completion; evaluators are
+          warned if it's missing at submit time.</li>
+        <li><span class="chip info">Optional</span> — scored if there's time; never blocks
+          completion.</li>
+        <li><span class="chip warn">Not Offered</span> — removed from completion math entirely.
+          No mound? Mark Pitching <i>Not Offered</i> and nobody shows "missing data".</li>
+      </ul>
+      <p>There's also an <b>athletic testing library</b> for measurable tests — 60-yard dash,
+        broad jump, exit velocity and friends — so timed and measured numbers live alongside
+        scored modules and feed the athlete's verified-measurement history.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>The staffing calculator</summary>
+    <div class="body">
+      <p>On the Evaluators tab, the staffing panel does the math you'd otherwise do on a napkin:
+        given your <b>enrollment</b> and <b>station count</b>, it shows three numbers —
+        <b>minimum</b> (the day works, barely), <b>recommended</b> (comfortable rotations), and
+        <b>ideal</b> (no waiting, full coverage).</p>
+      <p>It also warns about specific bottlenecks before the day — e.g. <i>"5 stations but only 3
+        evaluators assigned"</i> — so you can recruit or trim stations while it's still cheap to
+        fix.</p>
     </div>
   </details>
 
@@ -350,7 +615,8 @@
         <li>Watch the <b>Live Progress</b> tab: checked-in, in progress, complete, missing scores,
           videos awaiting approval. Tap any player to see exactly which metrics are missing and
           whether they're <b>ready for final submission</b>.</li>
-        <li>After the event: Review Queue → approve → Reports for rankings, CSV, and player PDFs.</li>
+        <li>After the event: Review Queue → approve → Reports for rankings, CSV, and player PDFs —
+          then <a href="#ai">generate AI assessments</a>.</li>
       </ol>
       <p class="muted" style="margin-top:10px">Print blank paper score sheets as backup. Dead
         battery beats no plan.</p>
@@ -375,63 +641,391 @@
   </details>
 
   <details>
-    <summary>Score players at the field (evaluator)</summary>
+    <summary>Deleting an event</summary>
+    <div class="body">
+      <p>Open the event and use the <b>trash icon</b> on the header (admins and owners only).
+        Deleting removes the event, its roster links, groups, stations and evaluator assignments —
+        <b>athlete profiles are never touched</b>; they keep their permanent IDs and all history
+        from other events.</p>
+      <p><b>Protection:</b> an event that already has <b>submitted evaluations</b> is blocked from
+        deletion — those are permanent athlete records. Only the <b>organization owner</b> can
+        force-delete such an event, and the confirmation makes clear what will be lost. Use force
+        deletion for genuine test data only.</p>
+    </div>
+  </details>
+
+  <!-- ============ EVALUATING ============ -->
+  <h2 id="evaluate">Evaluating on the field</h2>
+  <p class="lead">Fast to tap, honest by design, and safe on stadium wifi.</p>
+
+  <details>
+    <summary>The 8–12 developmental scale</summary>
+    <div class="body">
+      <p>Every scored metric uses a five-point <b>8 to 12</b> scale — deliberately echoing how
+        scouts talk, but tuned for development rather than draft grades:</p>
+      <ul class="plain">
+        <li><b>8 — Emerging.</b> The skill is just appearing; fundamentals are still forming.</li>
+        <li><b>9 — Developing.</b> Flashes of the skill; inconsistent rep to rep.</li>
+        <li><b>10 — Established.</b> Solid, repeatable execution for the athlete's age group.</li>
+        <li><b>11 — Advanced.</b> Consistently above age-group standard; stands out at the
+          station.</li>
+        <li><b>12 — Exceptional.</b> Advanced well beyond age group; a genuine separator.</li>
+      </ul>
+      <p class="muted">There's no failing grade on purpose. An 8 isn't an insult — it says
+        "here's where the development starts," which is exactly what the goal-setting and AI
+        assessment tools build on. Score what you saw today, not potential.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>When a score doesn't apply: N/O, N/A, DNP, Retest</summary>
+    <div class="body">
+      <p>Never invent a number. Each metric has one-tap alternatives:</p>
+      <ul class="plain">
+        <li><b>N/O — Not Observed.</b> You didn't get to see it (rotation ran short, athlete was
+          at another station).</li>
+        <li><b>N/A — Not Applicable.</b> Doesn't apply to this athlete (catcher-only metric for a
+          middle infielder).</li>
+        <li><b>DNP — Did Not Participate.</b> The athlete sat out this drill (minor injury,
+          arrived late).</li>
+        <li><b>Retest.</b> You saw it but want another look — flags the athlete for a follow-up
+          without blocking submission.</li>
+      </ul>
+      <p><b>None of these ever count as a zero.</b> They're excluded from the athlete's score
+        entirely — averages are computed only over metrics that were actually scored. They also
+        satisfy a required field, so you can finish the sheet honestly.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Observation tags — describe without typing</summary>
+    <div class="body">
+      <p>On the clock at a station, typing is the enemy. Tags let you record <i>what you saw</i>
+        in two taps:</p>
+      <ul class="plain">
+        <li><b>Base running tags</b> — on running and base-running metrics, tap chips like
+          <i>Touched Front of Bag</i>, <i>Proper Turn</i>, <i>Broke Down Properly</i>,
+          <i>Wide Turn</i>. Enter the time → tap a tag or two → next athlete.</li>
+        <li><b>General observation tags</b> — quick descriptors available on any metric (effort,
+          body control, coachability moments) so patterns show up across evaluators without
+          anyone writing an essay.</li>
+      </ul>
+      <p class="muted">Tags ride along with the evaluation into review, reports, and the AI
+        assessment — they're often where the best assessment sentences come from.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Autosave &amp; offline — keep scoring when the wifi dies</summary>
+    <div class="body">
+      <p>Every tap saves automatically — there is no Save button to forget. And the app is built
+        for fields with no signal:</p>
+      <ul class="plain">
+        <li><b>Connection drops?</b> Keep evaluating. Scores save to your device instantly and the
+          status pill tells you the truth: <b>Synced</b> means the server has confirmed it;
+          anything else means it's safely queued on the device.</li>
+        <li><b>Back in range?</b> Everything queued syncs automatically — no button to press.</li>
+        <li>Even closing the browser and reopening it offline keeps your work.</li>
+        <li>The one thing to never do mid-event: <b>clear the browser's site data</b> — that's
+          where offline work lives.</li>
+      </ul>
+    </div>
+  </details>
+
+  <details>
+    <summary>Submitting — and why submitted evaluations lock</summary>
     <div class="body">
       <ol class="steps">
         <li>Sign in → tap <b>Continue Evaluating</b> on your assignment.</li>
-        <li>Find the player — type their <b>bib number</b> (fastest) or name.</li>
-        <li>Tap scores <b>1–5</b>. Only categories relevant to that player's age and position
-          appear; use <i>Show all</i> if you need the rest.</li>
-        <li>If something doesn't apply, tap <b>N/O</b>, <b>N/A</b>, <b>DNP</b> or <b>Retest</b>
-          rather than guessing a number.</li>
-        <li>Add a tag, a quick note, or a photo/video if useful.</li>
-        <li>Watch the pill say <b>Synced</b>. If you're offline it says so — keep going, it syncs
-          later.</li>
-        <li>Fix anything the <b>missing-scores warning</b> flags, then <b>Submit</b> and tap
-          <b>Next</b> (it shows the next player's bib and name).</li>
+        <li>Find the player — type their <b>bib number</b> (fastest) or name. Only categories
+          relevant to that player's age and position appear; use <i>Show all</i> if you need the
+          rest.</li>
+        <li>Tap scores on the <b>8–12</b> scale, or N/O / N/A / DNP / Retest where honest. Add
+          tags, a note, or a photo/video if useful.</li>
+        <li>Fix anything the <b>missing-scores warning</b> flags, then <b>Submit</b>.</li>
+        <li>Tap <b>Next</b> — it shows the next player's bib and name.</li>
+      </ol>
+      <p style="margin-top:10px"><b>Submitting locks the evaluation.</b> It moves into the
+        <a href="#review">Review Queue</a> and you can no longer edit it — that's what makes an
+        approved evaluation a trustworthy, permanent record. Spot a mistake after submitting?
+        Tell your head scout or admin: they can <b>return</b> it to you, which unlocks it for
+        fixes and resubmission.</p>
+    </div>
+  </details>
+
+  <!-- ============ REVIEW ============ -->
+  <h2 id="review">Review &amp; approval</h2>
+  <p class="lead">Nothing becomes part of an athlete's permanent record — and nothing feeds an AI
+    assessment — until a leader has looked at it.</p>
+
+  <details>
+    <summary>The Review Queue</summary>
+    <div class="body">
+      <p>Every submitted evaluation lands in the <b>Review Queue</b>, visible from Organization HQ
+        (<i>Awaiting Review</i>) and the head scout's Review Desk. Only three roles can approve:
+        <b>owner</b>, <b>admin</b>, and <b>head scout</b>. Coaches and evaluators submit; leaders
+        approve.</p>
+      <ol class="steps">
+        <li>Open a submitted evaluation from the queue.</li>
+        <li>Tap <b>Results summary</b> for the visual version — score, change since last event,
+          radar, top strengths and improvement areas — or review metric by metric.</li>
+        <li><b>Approve</b> — it becomes part of the athlete's permanent record, feeds reports and
+          rankings, and becomes eligible for AI assessment.</li>
+        <li>Or <b>Return</b> it with a note.</li>
       </ol>
     </div>
   </details>
 
   <details>
-    <summary>Approve or return evaluations (head scout)</summary>
+    <summary>Returned evaluations — the fix-it loop</summary>
     <div class="body">
+      <p>Returning an evaluation sends it back to the evaluator <b>with your note</b> ("Bib 24's
+        arm scores look swapped with bib 42 — can you check?"). On their side:</p>
+      <ul class="plain">
+        <li>The evaluation reappears in their list, unlocked, with your note on top.</li>
+        <li>They fix it and <b>resubmit</b> — it returns to the queue for a fresh look.</li>
+        <li>Nothing reaches the athlete's record, reports, or AI assessment until it's approved.</li>
+      </ul>
+      <p class="muted">Returns aren't a punishment — they're how a second set of eyes keeps the
+        permanent record clean.</p>
+    </div>
+  </details>
+
+  <!-- ============ AI ASSESSMENTS ============ -->
+  <h2 id="ai">AI player assessments</h2>
+  <p class="lead">Approved evaluations become a written, coach-reviewed development report for each
+    athlete — generated by AI, edited and signed off by a human, then published to the family.</p>
+
+  <details>
+    <summary>The pipeline — from field to family, step by step</summary>
+    <div class="body">
+      <p>Every assessment moves through a fixed chain. You can always see where an athlete is:</p>
       <ol class="steps">
-        <li>Review → open a submitted evaluation.</li>
-        <li>Tap <b>Results summary</b> for the visual version — score, change, radar, top
-          strengths and improvement areas.</li>
-        <li><b>Approve</b> — it becomes part of the athlete's permanent record and feeds reports.</li>
-        <li>Or <b>Return</b> with a note — the evaluator sees it, fixes it, and resubmits.</li>
+        <li><span class="chip">Evaluation In Progress</span> — evaluators are still scoring at the
+          event.</li>
+        <li><span class="chip">Submitted</span> — the evaluator finished and submitted; the
+          evaluation is locked.</li>
+        <li><span class="chip info">Under Review</span> — it's in the Review Queue awaiting an
+          owner, admin, or head scout.</li>
+        <li><span class="chip ok">Approved</span> — a leader signed off. <b>Only now</b> does the
+          athlete become eligible for an AI assessment.</li>
+        <li><span class="chip brand">AI Assessment Generated</span> — an owner or admin generated
+          the draft from the approved evaluations.</li>
+        <li><span class="chip warn">Awaiting Final Approval</span> — the draft is being read,
+          edited, and finished by a human.</li>
+        <li><span class="chip ok">Published</span> — released to the athlete and family, with an
+          email notification.</li>
       </ol>
+      <p class="muted" style="margin-top:10px"><b>Nothing is generated until evaluations are
+        approved.</b> The AI never sees unreviewed scores — garbage in, garbage out is designed
+        out of the system.</p>
     </div>
   </details>
 
   <details>
-    <summary>Track development &amp; set goals (coach)</summary>
+    <summary>Generating, editing, and regenerating (owner / admin only)</summary>
     <div class="body">
+      <p>Only <b>owners and admins</b> can work this stage — head scouts approve evaluations but
+        don't generate or publish assessments.</p>
       <ol class="steps">
-        <li>My Athletes → open the athlete → <b>Development Goals</b>.</li>
-        <li>Create a goal: what needs improvement, the recommended action, target date, and a
-          follow-up evaluation date.</li>
-        <li>Update progress as they work — athletes see their <b>top 3 priorities</b> on their own
-          screen (never a wall of weaknesses).</li>
-        <li>Log <b>verified measurements</b> on the Verified tab — the athlete's charts compare
-          each number against their previous, their personal best, and age/position benchmarks.</li>
+        <li>After approving an event's evaluations, open the athlete (or the event's assessments
+          view) and tap <b>Generate AI Assessment</b>. The AI writes a draft from the approved
+          scores, observation tags, and notes — strengths, development areas, and next steps in
+          plain coach language.</li>
+        <li><b>Read the whole draft.</b> You are the editor: fix anything that doesn't match what
+          your staff saw, soften or sharpen wording, cut anything that doesn't belong.</li>
+        <li><b>Edit</b> directly in the draft — your edits are kept.</li>
+        <li>Not close enough? <b>Regenerate</b> for a fresh draft. (Regenerating replaces the
+          current draft, so copy out anything you want to keep first.)</li>
+        <li>Add a <b>final comment</b> — a personal note from your organization that appears with
+          the assessment. Families consistently say this is the part they read first.</li>
       </ol>
+      <p class="muted">If the Generate button says the AI isn't configured, the server's AI key
+        isn't set up — see the <a href="#faq">FAQ</a>.</p>
     </div>
   </details>
 
   <details>
-    <summary>Complete a profile &amp; share a Public Story (athlete / parent)</summary>
+    <summary>Approve &amp; Publish — permanent, and released to the family</summary>
+    <div class="body">
+      <p>When the draft reads right, tap <b>Approve &amp; Publish</b>. Three things happen:</p>
+      <ul class="plain">
+        <li>The assessment becomes <b>permanent</b> — published assessments are never edited or
+          deleted. That's what makes them a trustworthy record a family can rely on.</li>
+        <li>It's <b>released to the athlete/parent portal</b> — it appears in
+          <a href="#portal">My 60'6" ID</a> for the athlete and their guardians.</li>
+        <li>An <b>email notification</b> goes out telling the family a new assessment is ready.</li>
+      </ul>
+      <p><b>So publish deliberately.</b> Read it end to end, check the athlete's name and details,
+        add your final comment — then publish. There is no unpublish.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Future events — new assessments, never overwrites</summary>
+    <div class="body">
+      <p>Run another camp in October and generate again: the athlete gets a <b>new</b> assessment
+        alongside the old one. Published assessments are never overwritten or replaced — each one
+        is a timestamped snapshot, and the family sees the full series. Over seasons, that stack
+        of assessments <i>is</i> the development story: August said "emerging bat speed," October
+        says "established" — and everyone can see the line connecting them.</p>
+    </div>
+  </details>
+
+  <!-- ============ INVITES ============ -->
+  <h2 id="invite">Inviting athletes &amp; parents</h2>
+  <p class="lead">Profiles work fine without accounts — invite families when you're ready to share
+    results with them.</p>
+
+  <details>
+    <summary>The "Invite to platform" dialog</summary>
     <div class="body">
       <ol class="steps">
-        <li>My Development → <b>Edit</b> → add a photo and bio. Under-18 photos wait for approval
-          before they're shown anywhere.</li>
-        <li>The profile meter shows exactly what's missing (photo, height, weight, recent
-          evaluation, approved video).</li>
-        <li>Toggle <b>Public ID Story</b> to get a shareable link + QR. It shows only approved
-          evaluations, verified measurements, and approved media — nothing private, ever.</li>
+        <li>Open the player's profile → tap <b>Invite to platform</b>.</li>
+        <li>The dialog shows the contact details on file: the <b>athlete's email</b> and the
+          <b>guardian's name, email, and phone</b>. Owners and admins can <b>add or fix these
+          right in the dialog</b> — no detour to an edit screen. Fixes are saved to the profile.</li>
+        <li>The dialog tells you exactly who will be invited (based on age — see routing below)
+          and flags what's missing: no guardian email for a young athlete, no DOB on file, and so
+          on.</li>
+        <li>Tap <b>Send</b>. The invite email comes from <b>noreply@606athletics.com</b> with a
+          link to set a password and land in <a href="#portal">My 60'6" ID</a>.</li>
       </ol>
+      <p class="muted">Example: for athlete Jordan Diaz with guardian
+        <b>guardian@606athletics.com</b> on file, the dialog shows both contacts, tells you the
+        guardian will receive the invite, and lets an admin correct a typo in that address before
+        sending.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Age routing — who actually gets the email</summary>
+    <div class="body">
+      <p>The app decides who to invite from the athlete's date of birth, automatically:</p>
+      <ul class="plain">
+        <li><b>Under 13 — or no DOB on file:</b> the <b>guardian only</b> is invited. Young
+          athletes never get their own login, and when the app can't verify age it plays it safe
+          and treats the athlete as under 13. A guardian email is required in this case.</li>
+        <li><b>13–17:</b> the <b>athlete</b> is invited to their own account, with the
+          <b>guardian CC'd</b> so parents always know what their teen was sent.</li>
+        <li><b>18 and over:</b> the <b>athlete</b> is invited directly.</li>
+      </ul>
+      <p class="muted">If the dialog insists on a guardian email you think it shouldn't need,
+        check the athlete's DOB — no DOB means guardian-only routing. Add the date of birth and
+        the routing updates instantly.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Expiry &amp; resending</summary>
+    <div class="body">
+      <ul class="plain">
+        <li>Invites <b>expire after 14 days</b>. An expired link politely says so and tells the
+          family to ask for a new one.</li>
+        <li><b>Resending replaces the pending invite</b> — the old link stops working the moment
+          the new one is sent, so there's never a pile of live links floating around inboxes.</li>
+        <li>Once the invite is accepted and the account exists, the invite is done — future
+          sign-ins are just email + password at 606athletics.com.</li>
+      </ul>
+    </div>
+  </details>
+
+  <!-- ============ FAMILY PORTAL ============ -->
+  <h2 id="portal">My 60'6" ID — the family portal</h2>
+  <p class="lead">What athletes and parents see once they accept an invite.</p>
+
+  <div class="card">
+    <span class="kicker">Inside the portal</span>
+    <ul class="plain">
+      <li><b>The athlete's profile</b> — photo, positions, height/weight, teams, and their
+        permanent 60'6" ID (like <span class="chip brand">606-A337F768</span>) that follows them
+        across seasons and organizations. The app shows what's missing so profiles complete
+        themselves over time.</li>
+      <li><b>Published AI assessments</b> — every assessment your organization has published for
+        this athlete, newest first, each with the staff's final comment. Families are emailed when
+        a new one arrives.</li>
+      <li><b>Evaluations released to them</b> — approved evaluation results the organization has
+        shared, with the visual results summary: scores, change since last event, top strengths
+        and development priorities.</li>
+      <li><b>Verified measurements &amp; personal bests</b> — with badges showing who verified
+        each number.</li>
+      <li><b>Parents of athletes 13–17</b> see the same portal via their own guardian access;
+        under-13 athletes are represented entirely by the guardian's account.</li>
+    </ul>
+    <p class="muted" style="margin-top:10px">The portal only ever shows what's been approved and
+      released. Drafts, internal notes, and unapproved evaluations are never visible to
+      families.</p>
+  </div>
+
+  <!-- ============ BRANDING ============ -->
+  <h2 id="branding">Organization profile &amp; branding</h2>
+  <p class="lead">Make the app look like <i>your</i> program — for staff and for families.</p>
+
+  <details>
+    <summary>Logo, cover photo, brand color, and org details</summary>
+    <div class="body">
+      <ol class="steps">
+        <li>Go to <b>Settings</b> (under Administration). Branding uploads are an
+          <b>owner</b> action.</li>
+        <li><b>Upload your logo</b> — it appears in the <b>sidebar</b> for everyone in your
+          organization and on <b>Organization HQ</b>, beside "Powered by 60'6" ID". Square images
+          on a transparent background look best.</li>
+        <li><b>Upload a cover photo</b> — the wide banner image across the top of Organization
+          HQ. A good team or facility photo makes the HQ feel like home.</li>
+        <li>Fill in <b>organization details</b> — name, city/state, contact info — which appear on
+          reports and the family-facing pages.</li>
+        <li>Pick your <b>brand color</b> — accents around the app take on your program's color.</li>
+      </ol>
+      <p class="muted">Change any of it any time — updates apply immediately for everyone.</p>
+    </div>
+  </details>
+
+  <!-- ============ HOUSEKEEPING ============ -->
+  <h2 id="housekeeping">Housekeeping &amp; safety nets</h2>
+  <p class="lead">Keeping the roster tidy — and what protects you when things go wrong.</p>
+
+  <details>
+    <summary>Archiving a player</summary>
+    <div class="body">
+      <p>An athlete who aged out or moved on doesn't need deleting — <b>archive</b> them from
+        their profile. Archived athletes:</p>
+      <ul class="plain">
+        <li>Disappear from active rosters, pickers, and day-to-day lists</li>
+        <li><b>Keep every record</b> — evaluations, measurements, assessments, media — under their
+          permanent ID</li>
+        <li>Can be <b>restored</b> at any time if they come back; a future CSV import that matches
+          them can also bring them back to active</li>
+      </ul>
+      <p class="muted">Archive is the right tool basically every time you're tempted to delete a
+        real athlete.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Danger Zone — Remove all athletes (owner only)</summary>
+    <div class="body">
+      <p>For cleaning up after testing — not routine housekeeping. Organization <b>owners</b> have
+        <b>Settings → Danger Zone → Remove all athletes</b>:</p>
+      <ul class="plain">
+        <li>It requires <b>typing a confirmation phrase</b> exactly — no accidental taps.</li>
+        <li>It clears athletes and their records <b>for your organization only</b>, keeping staff,
+          events, stations and templates.</li>
+        <li>It <b>cannot be undone</b> from inside the app.</li>
+      </ul>
+      <p>Typical use: you loaded practice athletes while learning the app, and now it's time to
+        import the real roster clean.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Backups</summary>
+    <div class="body">
+      <p>The database is <b>backed up automatically every night</b>. Combined with the rules
+        you've read elsewhere in this guide — submitted evaluations lock, published assessments
+        are permanent, imports never overwrite, deletes are role-gated and confirmed — the system
+        is built so that one bad tap can't erase a season. If something ever does go seriously
+        wrong, tell your organization owner right away; the nightly backup is the safety net
+        behind everything.</p>
     </div>
   </details>
 
@@ -442,8 +1036,8 @@
   <details>
     <summary>The app is stuck loading / the first login is slow</summary>
     <div class="body">
-      <p>The server sleeps after ~15 quiet minutes and takes 30–60 seconds to wake. Wait once —
-        everything after that is fast. On event days, open the app before athletes arrive.</p>
+      <p>The server sleeps after ~15 quiet minutes and takes <b>30–60 seconds</b> to wake. Wait
+        once — everything after that is fast. On event days, open the app before athletes arrive.</p>
     </div>
   </details>
 
@@ -452,6 +1046,46 @@
     <div class="body">
       <p>A safety limit: about 15 sign-ins per minute from one network. At an event, have people
         sign in as they arrive rather than everyone at once. Waiting 60 seconds clears it.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>I imported my CSV but my players' info didn't fill in</summary>
+    <div class="body">
+      <p>Most likely your first CSV only had names, or your column headers didn't match the
+        template. The fix is a <b>re-import</b>:</p>
+      <ol class="steps">
+        <li>Download the <a href="https://606athletics.com/roster-template.csv">template</a> and
+          make sure your headers match it exactly (e.g. <b>guardian_email</b>, not "Parent
+          Email").</li>
+        <li>Add the missing columns — emails, guardians, positions, heights, DOBs.</li>
+        <li>Import the file again. Matched athletes <b>backfill their blank fields</b> from the
+          new data — and nothing already set is overwritten, so it's completely safe to re-run.</li>
+      </ol>
+      <p class="muted" style="margin-top:10px">See <a href="#csv">Roster CSV import</a> for the
+        full column list and matching rules.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>The invite dialog says a guardian email is required — why?</summary>
+    <div class="body">
+      <p>The athlete has <b>no date of birth on file</b> (or is under 13). Without a DOB the app
+        can't verify age, so it plays it safe and routes the invite to a guardian only. Add the
+        athlete's date of birth on their profile — or right in the invite dialog if you're an
+        owner or admin — and the routing updates instantly: 13–17 invites the athlete with the
+        guardian CC'd, 18+ invites the athlete directly.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>The AI assessment button says the AI isn't configured</summary>
+    <div class="body">
+      <p>The server's AI key hasn't been set up — this is a server-side setting, not something on
+        your device or account. Ask your organization's admin (or whoever manages your deployment)
+        to configure it. Everything else — evaluations, review, approval — works normally in the
+        meantime, and once the key is set you can generate assessments for any already-approved
+        evaluations.</p>
     </div>
   </details>
 
@@ -517,7 +1151,9 @@
     <div class="body">
       <p><b>No — never.</b> That's the whole point of the permanent 60'6" ID. Each season stacks
         under the same profile with its own team, measurements, and evaluations, and the Career
-        Overview shows the multi-year story. Old evaluations are never erased or overwritten.</p>
+        Overview shows the multi-year story. Old evaluations are never erased or overwritten —
+        and each new event's AI assessment is added alongside the previous ones, never replacing
+        them.</p>
     </div>
   </details>
 
@@ -538,7 +1174,7 @@
       <p>If your account is authorized for more than one, use the <b>Workspace</b> switcher in the
         sidebar (or the "More" menu on a phone), just under your organization name. Owners can drop
         into Coach Hub, Scout Mode, or Evaluation Mode and back. Your permissions never change —
-        only the view.</p>
+        only the view. See <a href="#roles">Roles &amp; workspaces</a>.</p>
     </div>
   </details>
 
@@ -547,7 +1183,8 @@
     <div class="body">
       <p><b>Event:</b> open it and use the trash icon on the header (admins only). It removes the
         event, its roster links, groups, stations and assignments — athlete profiles are never
-        touched. An event with submitted evaluations is protected from deletion.</p>
+        touched. An event with submitted evaluations is protected from deletion; only the owner
+        can force it.</p>
       <p><b>All athletes:</b> organization owners have <b>Settings → Danger Zone → Remove all
         athletes</b>, which requires typing a confirmation phrase. It clears athletes and their
         records for that organization only, keeping staff, events, stations and templates. It
@@ -568,9 +1205,10 @@
     <summary>I didn't get my invitation email</summary>
     <div class="body">
       <p>Check spam first — it comes from <b>noreply@606athletics.com</b>. Ask your organization
-        admin to re-send the invite (Players → your athlete → Invite, or Staff → Invite for
-        coaches). For event access codes, the site manager can also read the code off their screen
-        and text it to you.</p>
+        admin to re-send the invite (open the player's profile → <b>Invite to platform</b> →
+        Send again — resending replaces the old link). Remember invites expire after 14 days. For
+        event access codes, the site manager can also read the code off their screen and text it
+        to you.</p>
     </div>
   </details>
 
@@ -593,11 +1231,201 @@
     </div>
   </details>
 
+  </div><!-- /guide-content -->
+
   <footer>
     <div class="motto">Train · Elevate · Succeed</div>
     <div>60'6" ID — Every Player. Every Rep. Every Season Tells the Story.</div>
   </footer>
 
 </div>
+
+<script>
+(function(){
+  "use strict";
+  var input   = document.getElementById("guide-search");
+  var counter = document.getElementById("search-count");
+  var prevBtn = document.getElementById("search-prev");
+  var nextBtn = document.getElementById("search-next");
+  var content = document.getElementById("guide-content");
+  if(!input || !content) return;
+
+  var marks = [];          // all <mark> elements, document order
+  var current = -1;        // index into marks
+  var savedOpen = null;    // Map<details, bool> — accordion state before search began
+  var debounceTimer = null;
+
+  // Pin the search bar exactly below the sticky header, whatever its real height.
+  (function(){
+    var bar = document.getElementById("searchbar");
+    var header = document.querySelector("header");
+    if(!bar || !header) return;
+    function pin(){ bar.style.top = (header.offsetHeight - 1) + "px"; }
+    pin();
+    window.addEventListener("resize", pin);
+  })();
+
+  function saveAccordionState(){
+    if(savedOpen) return;
+    savedOpen = new Map();
+    content.querySelectorAll("details").forEach(function(d){
+      savedOpen.set(d, d.open);
+    });
+  }
+  function restoreAccordionState(){
+    if(!savedOpen) return;
+    savedOpen.forEach(function(wasOpen, d){ d.open = wasOpen; });
+  }
+  function forgetAccordionState(){ savedOpen = null; }
+
+  function clearMarks(){
+    var old = content.querySelectorAll("mark.hl");
+    for(var i=0; i<old.length; i++){
+      var m = old[i];
+      var parent = m.parentNode;
+      parent.replaceChild(document.createTextNode(m.textContent), m);
+      parent.normalize();
+    }
+    marks = [];
+    current = -1;
+  }
+
+  function collectTextNodes(){
+    var nodes = [];
+    var walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, {
+      acceptNode: function(node){
+        if(!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+        var p = node.parentNode;
+        while(p && p !== content){
+          var tag = p.nodeName;
+          if(tag === "SCRIPT" || tag === "STYLE") return NodeFilter.FILTER_REJECT;
+          p = p.parentNode;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    var n;
+    while((n = walker.nextNode())) nodes.push(n);
+    return nodes;
+  }
+
+  function highlightAll(query){
+    var q = query.toLowerCase();
+    var nodes = collectTextNodes();
+    nodes.forEach(function(node){
+      var text = node.nodeValue;
+      var lower = text.toLowerCase();
+      var idx = lower.indexOf(q);
+      if(idx === -1) return;
+      var frag = document.createDocumentFragment();
+      var pos = 0;
+      while(idx !== -1){
+        if(idx > pos) frag.appendChild(document.createTextNode(text.slice(pos, idx)));
+        var mark = document.createElement("mark");
+        mark.className = "hl";
+        mark.textContent = text.slice(idx, idx + q.length);
+        frag.appendChild(mark);
+        marks.push(mark);
+        pos = idx + q.length;
+        idx = lower.indexOf(q, pos);
+      }
+      if(pos < text.length) frag.appendChild(document.createTextNode(text.slice(pos)));
+      node.parentNode.replaceChild(frag, node);
+    });
+  }
+
+  function openContainingDetails(){
+    marks.forEach(function(m){
+      var p = m.parentNode;
+      while(p && p !== content){
+        if(p.nodeName === "DETAILS") p.open = true;
+        p = p.parentNode;
+      }
+    });
+  }
+
+  function updateCounter(){
+    if(!input.value.trim()){
+      counter.textContent = "";
+      counter.classList.remove("none");
+    } else if(marks.length === 0){
+      counter.textContent = "No matches";
+      counter.classList.add("none");
+    } else {
+      counter.textContent = (current + 1) + " of " + marks.length;
+      counter.classList.remove("none");
+    }
+    prevBtn.disabled = marks.length < 2;
+    nextBtn.disabled = marks.length < 2;
+  }
+
+  function setCurrent(i, scroll){
+    if(marks.length === 0){ current = -1; updateCounter(); return; }
+    if(current >= 0 && marks[current]) marks[current].classList.remove("current");
+    current = ((i % marks.length) + marks.length) % marks.length;
+    var m = marks[current];
+    m.classList.add("current");
+    updateCounter();
+    if(scroll){
+      // ensure ancestors are open before scrolling
+      var p = m.parentNode;
+      while(p && p !== content){
+        if(p.nodeName === "DETAILS") p.open = true;
+        p = p.parentNode;
+      }
+      m.scrollIntoView({block:"center", behavior:"smooth"});
+    }
+  }
+
+  function runSearch(){
+    var query = input.value.trim();
+    clearMarks();
+    if(!query){
+      restoreAccordionState();
+      forgetAccordionState();
+      updateCounter();
+      return;
+    }
+    saveAccordionState();
+    restoreAccordionState();   // reset opens from any previous query first
+    highlightAll(query);
+    openContainingDetails();
+    if(marks.length > 0) setCurrent(0, true); else updateCounter();
+  }
+
+  input.addEventListener("input", function(){
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(runSearch, 200);
+  });
+
+  // iOS "clear" (x) button fires search event
+  input.addEventListener("search", function(){
+    clearTimeout(debounceTimer);
+    runSearch();
+  });
+
+  input.addEventListener("keydown", function(e){
+    if(e.key === "Enter"){
+      e.preventDefault();
+      clearTimeout(debounceTimer);
+      if(input.value.trim() && marks.length === 0 && !content.querySelector("mark.hl")){
+        runSearch();
+        return;
+      }
+      if(e.shiftKey) setCurrent(current - 1, true);
+      else setCurrent(current + 1, true);
+    }
+    if(e.key === "Escape"){
+      input.value = "";
+      clearTimeout(debounceTimer);
+      runSearch();
+    }
+  });
+
+  nextBtn.addEventListener("click", function(){ setCurrent(current + 1, true); });
+  prevBtn.addEventListener("click", function(){ setCurrent(current - 1, true); });
+})();
+</script>
+
 </body>
 </html>

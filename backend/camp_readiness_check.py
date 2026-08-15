@@ -42,7 +42,7 @@ def H(token: str) -> dict:
 
 def main() -> int:
     print("══ OWNER / EVENT ══")
-    otok, _ = login("owner@pbgscout.com")
+    otok, _ = login("owner@606athletics.com")
     events = requests.get(f"{BASE}/events", headers=H(otok), timeout=15).json()
     main_ev = next((e for e in events if "Midwest" in (e.get("name") or "")), events[0] if events else None)
     ok("event exists", bool(main_ev))
@@ -60,7 +60,7 @@ def main() -> int:
     ok("assignments", len(asgs) >= 1, f"n={len(asgs)}")
 
     print("\n══ COACH CHECK-IN ══")
-    ctok, _ = login("coach@pbgscout.com")
+    ctok, _ = login("coach@606athletics.com")
     aid = roster[0]["athlete_id"]
     r = requests.patch(
         f"{BASE}/events/{eid}/roster/{aid}",
@@ -73,7 +73,7 @@ def main() -> int:
     ok("programs list", r.status_code == 200)
 
     print("\n══ EVALUATOR ══")
-    etok, _ = login("eval1@pbgscout.com")
+    etok, _ = login("eval1@606athletics.com")
     my = requests.get(f"{BASE}/my-assignments", headers=H(etok), timeout=15).json()
     ok("assignments", len(my) >= 1, f"n={len(my)}")
     asg = my[0]
@@ -133,7 +133,7 @@ def main() -> int:
         ok("submit", True, "skipped — already locked")
 
     print("\n══ HEAD SCOUT REVIEW ══")
-    htok, _ = login("headscout@pbgscout.com")
+    htok, _ = login("headscout@606athletics.com")
     q = requests.get(f"{BASE}/review/queue", headers=H(htok), timeout=15).json()
     ok("review queue", isinstance(q, list) and len(q) >= 1, f"n={len(q) if isinstance(q, list) else 0}")
     submitted = next((x for x in q if x.get("status") == "submitted"), None)

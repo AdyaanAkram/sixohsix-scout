@@ -35,12 +35,12 @@ PASSWORD = "Scout2025!"
 
 # Seeded logins (backend/seed.py). All share PASSWORD.
 STAFF_EMAILS = {
-    "owner": "owner@pbgscout.com",
-    "admin": "admin@pbgscout.com",
-    "head_scout": "headscout@pbgscout.com",
-    "coach": "coach@pbgscout.com",
-    "evaluator": "eval1@pbgscout.com",
-    "south_coach": "coach.south@pbgscout.com",  # single-org PBG South coach
+    "owner": "owner@606athletics.com",
+    "admin": "admin@606athletics.com",
+    "head_scout": "headscout@606athletics.com",
+    "coach": "coach@606athletics.com",
+    "evaluator": "eval1@606athletics.com",
+    "south_coach": "coach.south@606athletics.com",  # single-org PBG South coach
 }
 
 MIDWEST_ORG = "org-pbg-midwest"

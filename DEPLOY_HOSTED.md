@@ -93,7 +93,7 @@ flyctl ssh console -a sixohsix-scout-api -C \
   "ALLOW_PROD_SEED=I_UNDERSTAND_WIPE APP_ENV=production python seed.py"
 ```
 
-Then use the usual `*@pbgscout.com` / `Scout2025!` logins from `USER_GUIDE.md`.
+Then use the usual `*@606athletics.com` / `Scout2025!` logins from `USER_GUIDE.md`.
 
 ---
 

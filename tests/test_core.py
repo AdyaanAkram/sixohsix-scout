@@ -31,15 +31,15 @@ def login(email):
 
 def main():
     # ---------- 1. Auth ----------
-    admin_h, admin = login("admin@pbgscout.com")
-    eval1_h, eval1 = login("eval1@pbgscout.com")
-    eval3_h, eval3 = login("eval3@pbgscout.com")
-    scout_h, scout = login("headscout@pbgscout.com")
-    coach_h, coach = login("coach@pbgscout.com")
-    owner_h, owner = login("owner@pbgscout.com")
+    admin_h, admin = login("admin@606athletics.com")
+    eval1_h, eval1 = login("eval1@606athletics.com")
+    eval3_h, eval3 = login("eval3@606athletics.com")
+    scout_h, scout = login("headscout@606athletics.com")
+    coach_h, coach = login("coach@606athletics.com")
+    owner_h, owner = login("owner@606athletics.com")
     check("Login works for all active roles", True)
 
-    r = requests.post(f"{BASE}/auth/login", json={"email": "admin@pbgscout.com", "password": "wrong"})
+    r = requests.post(f"{BASE}/auth/login", json={"email": "admin@606athletics.com", "password": "wrong"})
     check("Wrong password rejected (401)", r.status_code == 401)
 
     r = requests.get(f"{BASE}/auth/me")

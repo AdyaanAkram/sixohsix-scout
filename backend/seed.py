@@ -20,14 +20,14 @@ ORG_ID = "org-pbg-midwest"
 ORG_SOUTH_ID = "org-pbg-south"
 
 STAFF = [
-    {"email": "owner@pbgscout.com", "name": "Marco Villanueva", "role": "owner"},
-    {"email": "admin@pbgscout.com", "name": "Liza Santos", "role": "admin"},
-    {"email": "headscout@pbgscout.com", "name": "Ramon Dela Cruz", "role": "head_scout"},
-    {"email": "coach@pbgscout.com", "name": "Jun Mercado", "role": "coach"},
-    {"email": "eval1@pbgscout.com", "name": "Andres Reyes", "role": "evaluator"},
-    {"email": "eval2@pbgscout.com", "name": "Kiko Bautista", "role": "evaluator"},
-    {"email": "eval3@pbgscout.com", "name": "Paolo Garcia", "role": "evaluator"},
-    {"email": "eval4@pbgscout.com", "name": "Danilo Ramos", "role": "evaluator"},
+    {"email": "owner@606athletics.com", "name": "Marco Villanueva", "role": "owner"},
+    {"email": "admin@606athletics.com", "name": "Liza Santos", "role": "admin"},
+    {"email": "headscout@606athletics.com", "name": "Ramon Dela Cruz", "role": "head_scout"},
+    {"email": "coach@606athletics.com", "name": "Jun Mercado", "role": "coach"},
+    {"email": "eval1@606athletics.com", "name": "Andres Reyes", "role": "evaluator"},
+    {"email": "eval2@606athletics.com", "name": "Kiko Bautista", "role": "evaluator"},
+    {"email": "eval3@606athletics.com", "name": "Paolo Garcia", "role": "evaluator"},
+    {"email": "eval4@606athletics.com", "name": "Danilo Ramos", "role": "evaluator"},
 ]
 PASSWORD = "Scout2025!"
 
@@ -91,7 +91,7 @@ async def main():
         "id": ORG_ID, "name": "PBG Midwest",
         "full_name": "Philippines Baseball Group Midwest",
         "tagline": "Identify. Evaluate. Develop. Connect.",
-        "contact_email": "info@pbgscout.com",
+        "contact_email": "info@606athletics.com",
         "feature_flags": {"athlete_portal": False, "parent_portal": False, "ai_features": False},
         "created_at": now_iso(), "updated_at": now_iso(),
     })
@@ -142,7 +142,7 @@ async def main():
             "guardian_phone": f"(312) 555-{random.randint(1000, 9999)}",
             "emergency_contact": f"{random.choice(['Maria', 'Jose', 'Ana'])} {last} (312) 555-{random.randint(1000, 9999)}",
             "status": "active", "photo_url": None, "flagged_follow_up": False,
-            "created_by": user_ids["admin@pbgscout.com"],
+            "created_by": user_ids["admin@606athletics.com"],
             "created_at": iso(now - timedelta(days=random.randint(10, 200))),
             "updated_at": now_iso(),
         }
@@ -357,7 +357,7 @@ async def main():
                 "is_default": is_default,
                 "template_version": 1,
                 "event_type": "Evaluation", "categories": cats, "metrics": ms,
-                "created_by": user_ids["admin@pbgscout.com"],
+                "created_by": user_ids["admin@606athletics.com"],
                 "created_at": now_iso(), "updated_at": now_iso()}
 
     # Every age band gets its own general form, and every band below Professional gets
@@ -537,7 +537,7 @@ async def main():
         "location": "Diamond Fields Complex, Skokie IL",
         "description": "Spring player evaluation and development camp spanning 7U through College.",
         "age_groups": list(AGE_BANDS[:-1]), "status": "Evaluation Active",
-        "created_by": user_ids["admin@pbgscout.com"],
+        "created_by": user_ids["admin@606athletics.com"],
         "created_at": iso(now - timedelta(days=21)), "updated_at": now_iso(),
     })
 
@@ -603,7 +603,7 @@ async def main():
         })
 
     # ---- Evaluator assignments ----
-    eval_emails = ["eval1@pbgscout.com", "eval2@pbgscout.com", "eval3@pbgscout.com", "eval4@pbgscout.com"]
+    eval_emails = ["eval1@606athletics.com", "eval2@606athletics.com", "eval3@606athletics.com", "eval4@606athletics.com"]
     assign_defs = [
         (eval_emails[0], "Athletic Testing", glist),
         (eval_emails[0], "Hitting", glist),
@@ -621,7 +621,7 @@ async def main():
         await db.evaluator_assignments.insert_one({
             "id": aid, "organization_id": ORG_ID, "event_id": event_id,
             "station_id": station_ids[station], "evaluator_id": user_ids[email],
-            "group_ids": gids, "created_by": user_ids["admin@pbgscout.com"],
+            "group_ids": gids, "created_by": user_ids["admin@606athletics.com"],
             "created_at": now_iso(), "updated_at": now_iso(),
         })
 
@@ -698,7 +698,7 @@ async def main():
                 "reviewed_by": None, "review_note": None,
             }
             if doc["status"] == "approved":
-                doc["reviewed_by"] = user_ids["headscout@pbgscout.com"]
+                doc["reviewed_by"] = user_ids["headscout@606athletics.com"]
                 doc["reviewed_by_name"] = "Ramon Dela Cruz"
                 doc["reviewed_at"] = ts
             existing = await db.evaluations.find_one({"event_id": event_id, "station_id": sid, "evaluator_id": uid, "athlete_id": athlete["id"]})
@@ -712,8 +712,8 @@ async def main():
         evaluators_cycle += 1
 
     # ---- Coach assessments + goals + scout notes ----
-    coach_id = user_ids["coach@pbgscout.com"]
-    scout_id = user_ids["headscout@pbgscout.com"]
+    coach_id = user_ids["coach@606athletics.com"]
+    scout_id = user_ids["headscout@606athletics.com"]
     for a in athletes[:8]:
         await db.athlete_notes.insert_one({
             "id": new_id(), "organization_id": ORG_ID, "athlete_id": a["id"],
@@ -815,11 +815,11 @@ async def main():
         "id": ORG_SOUTH_ID, "name": "PBG South",
         "full_name": "Philippines Baseball Group South Texas",
         "tagline": "Identify. Evaluate. Develop. Connect.",
-        "contact_email": "south@pbgscout.com",
+        "contact_email": "south@606athletics.com",
         "feature_flags": {"athlete_portal": True, "parent_portal": True, "ai_features": False},
         "created_at": now_iso(), "updated_at": now_iso(),
     })
-    owner_uid = user_ids["owner@pbgscout.com"]
+    owner_uid = user_ids["owner@606athletics.com"]
     await db.memberships.insert_one({
         "id": new_id(), "user_id": owner_uid, "organization_id": ORG_SOUTH_ID,
         "role": "owner", "active": True, "created_at": now_iso(),
@@ -827,7 +827,7 @@ async def main():
     # Dedicated south coach (single-org) so lists stay distinct
     south_coach = new_id()
     await db.users.insert_one({
-        "id": south_coach, "email": "coach.south@pbgscout.com", "full_name": "Luis Navarro",
+        "id": south_coach, "email": "coach.south@606athletics.com", "full_name": "Luis Navarro",
         "password_hash": pw, "active": True, "active_organization_id": ORG_SOUTH_ID,
         "created_at": now_iso(), "updated_at": now_iso(),
     })
@@ -873,7 +873,7 @@ async def main():
     print(f"  Drills seeded: {drill_n}")
     print(f"  Org: PBG Midwest ({ORG_ID})")
     print(f"  Org: PBG South ({ORG_SOUTH_ID}) — owner can switch")
-    print(f"  Staff: {len(STAFF)} + coach.south@pbgscout.com (password: {PASSWORD})")
+    print(f"  Staff: {len(STAFF)} + coach.south@606athletics.com (password: {PASSWORD})")
     print(f"  Athletes: {len(athletes)} Midwest + {len(south_athletes)} South")
     print(f"  Event: PBG Midwest Spring Evaluation Camp ({event_id})")
     print(f"  Stations: {len(station_defs)}, Groups: {len(GROUP_BANDS)}, Templates: {len(all_templates)}")

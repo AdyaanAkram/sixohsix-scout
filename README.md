@@ -17,7 +17,7 @@ cd backend
 cp ../.env.example .env   # adjust if needed
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.local.txt
-python seed.py            # demo users *@pbgscout.com / Scout2025!
+python seed.py            # demo users *@606athletics.com / Scout2025!
 uvicorn server:app --reload --port 8000
 
 # Frontend (other terminal)
@@ -70,11 +70,11 @@ CI runs the isolation suite on every push (`.github/workflows/ci.yml`).
 
 | Email | Password | Role |
 |---|---|---|
-| `owner@pbgscout.com` | `Scout2025!` | Owner |
-| `admin@pbgscout.com` | `Scout2025!` | Admin |
-| `headscout@pbgscout.com` | `Scout2025!` | Head Scout |
-| `coach@pbgscout.com` | `Scout2025!` | Coach |
-| `eval1@pbgscout.com` … `eval4@` | `Scout2025!` | Evaluator |
+| `owner@606athletics.com` | `Scout2025!` | Owner |
+| `admin@606athletics.com` | `Scout2025!` | Admin |
+| `headscout@606athletics.com` | `Scout2025!` | Head Scout |
+| `coach@606athletics.com` | `Scout2025!` | Coach |
+| `eval1@606athletics.com` … `eval4@` | `Scout2025!` | Evaluator |
 | `demo.athlete.5a6b8b@example.com` | `Athlete2026!` | Athlete (My ID) |
 
 ## Camp day runbook
@@ -88,7 +88,7 @@ CI runs the isolation suite on every push (`.github/workflows/ci.yml`).
 4. Coaches can run Programs attendance in parallel; it does not replace event check-in.
 
 ### Evaluators (phones / tablets)
-1. Sign in as `evalN@pbgscout.com` → **Dashboard** → **Start / Continue Evaluating**.
+1. Sign in as `evalN@606athletics.com` → **Dashboard** → **Start / Continue Evaluating**.
 2. Wait for “templates cached for offline” on the station list (stay on wifi once at the start of the day).
 3. Score → autosave pill should hit Saved. Submit & Lock when the player finishes the station.
 4. **Full roster** hand-off: search any checked-in player if they arrive out of group order (audited).

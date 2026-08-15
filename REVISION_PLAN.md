@@ -178,7 +178,7 @@ evaluations, data, working pages and user accounts.
 **Branding is 60'6" Athletics only.** The product is **60'6" ID**. "Scout" is a feature and a staff
 role inside the platform — never the product name. The feature may be called **60'6" Scout Mode**.
 Do not display Velo City or PBG Scout product branding anywhere in the UI. The demo tenants
-`PBG Midwest` / `PBG South` and the `*@pbgscout.com` seed accounts are **tenant data and stay** —
+`PBG Midwest` / `PBG South` and the `*@606athletics.com` seed accounts are **tenant data and stay** —
 they are not product branding.
 
 - **Product name:** 60'6" ID
