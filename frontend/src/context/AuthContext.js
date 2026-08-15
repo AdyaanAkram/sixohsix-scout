@@ -45,6 +45,27 @@ export const AuthProvider = ({ children }) => {
     return r.data.user;
   };
 
+  // Open self-signup (parent/guardian or 13+ athlete). Stores auth exactly like
+  // login/acceptInvite; returns the full payload so callers can surface `joined`.
+  const signup = async (payload) => {
+    const r = await api.post("/auth/signup", payload);
+    setToken(r.data.token);
+    persistUser(r.data.user);
+    return r.data;
+  };
+
+  // Google Identity Services credential exchange. Returns either an
+  // authenticated payload ({token, user} — stored here) or
+  // {needs_signup, email, name} for the caller to route to /signup.
+  const googleAuth = async (credential) => {
+    const r = await api.post("/auth/google", { credential });
+    if (r.data?.token) {
+      setToken(r.data.token);
+      persistUser(r.data.user);
+    }
+    return r.data;
+  };
+
   const acceptInvite = async (token, password) => {
     const r = await api.post("/auth/accept-invitation", { token, password });
     setToken(r.data.token);
@@ -70,7 +91,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, acceptInvite, switchOrganization }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, signup, googleAuth, acceptInvite, switchOrganization }}>
       {children}
     </AuthContext.Provider>
   );

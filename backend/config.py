@@ -33,6 +33,7 @@ class Settings:
     demo_hosting: bool = False
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
+    google_client_id: str | None = None
 
 
 def _split_origins(raw: str) -> list[str]:
@@ -148,6 +149,7 @@ def load_settings() -> Settings:
         demo_hosting=demo_hosting,
         openai_api_key=(os.environ.get("OPENAI_API_KEY") or "").strip() or None,
         openai_model=(os.environ.get("OPENAI_MODEL") or "gpt-4o-mini").strip(),
+        google_client_id=(os.environ.get("GOOGLE_CLIENT_ID") or "").strip() or None,
     )
 
 

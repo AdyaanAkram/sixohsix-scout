@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, errMsg } from "@/lib/api";
+import { api, errMsg, setToken } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { formatPermanentId } from "@/lib/utils";
 import { IdRadarChart } from "@/components/common/IdRadarChart";
 import { AssessmentContent } from "@/components/common/AssessmentContent";
@@ -12,8 +13,9 @@ import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Pencil, TrendingUp, TrendingDown, Minus, Share2, Trophy, Sparkles, Target, CalendarClock } from "lucide-react";
+import { Pencil, TrendingUp, TrendingDown, Minus, Share2, Trophy, Sparkles, Target, CalendarClock, Shield } from "lucide-react";
 
 /** Same five checks the staff PlayerProfile uses — athlete and staff must not disagree. */
 function computeProfileCompletion(athlete, summary, mediaList) {
@@ -54,7 +56,91 @@ const goalStatusTone = (status) =>
     : status === "Improving" ? "text-success border-success/40"
     : "text-muted-foreground border-border";
 
+/* Families who self-signed up without a code live in the shared 60'6" Player
+   Registry org until they join a real club. POST /auth/join returns a NEW token
+   scoped to the joined org — store it and hard-reload so every query refetches. */
+const JoinClubCard = ({ prominent }) => {
+  const [code, setCode] = useState("");
+  const [open, setOpen] = useState(prominent);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!code.trim()) return;
+    setBusy(true);
+    try {
+      const r = await api.post("/auth/join", { join_code: code.trim() });
+      setToken(r.data.token); // switches this session into the joined org
+      toast.success(`Joined ${r.data.organization_name} — pending coach approval`);
+      window.location.reload();
+    } catch (e2) {
+      toast.error(errMsg(e2));
+      setBusy(false);
+    }
+  };
+
+  if (!prominent && !open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="text-sm text-info hover:underline"
+        data-testid="join-code-open"
+      >
+        Have another club code?
+      </button>
+    );
+  }
+
+  const form = (
+    <form onSubmit={submit} className="flex flex-wrap gap-2">
+      <Input
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+        placeholder="Enter club join code"
+        className="h-11 rounded-xl font-mono flex-1 min-w-[180px]"
+        data-testid="join-code-input"
+      />
+      <Button
+        type="submit"
+        disabled={busy || !code.trim()}
+        className="h-11 rounded-xl bg-primary hover:bg-brand-secondary"
+        data-testid="join-code-submit"
+      >
+        {busy ? "Joining…" : "Join"}
+      </Button>
+    </form>
+  );
+
+  if (!prominent) {
+    return (
+      <div className="rounded-xl border border-border bg-card px-4 py-3 space-y-2">
+        <p className="text-sm font-semibold">Join another club</p>
+        {form}
+      </div>
+    );
+  }
+
+  return (
+    <Card className="rounded-2xl border-brand/50 bg-brand-tertiary/40" data-testid="join-club-card">
+      <CardContent className="py-5 space-y-3">
+        <div className="flex items-start gap-3">
+          <Shield className="h-6 w-6 text-brand shrink-0 mt-0.5" />
+          <div>
+            <p className="font-display text-2xl text-foreground">Join your club</p>
+            <p className="text-sm text-muted-foreground">
+              Got a join code from your coach? Enter it here to connect this ID to your club&apos;s roster.
+            </p>
+          </div>
+        </div>
+        {form}
+      </CardContent>
+    </Card>
+  );
+};
+
 export default function MyId() {
+  const { user } = useAuth();
   const [athlete, setAthlete] = useState(null);
   const [summary, setSummary] = useState(null);
   const [evals, setEvals] = useState([]);
@@ -202,8 +288,15 @@ export default function MyId() {
   const trendTone = change > 0 ? "text-success" : change < 0 ? "text-destructive" : "text-muted-foreground";
   const trendLabel = change == null ? "Not enough history" : change > 0 ? "Improving" : change < 0 ? "Slipping" : "Holding steady";
 
+  // Still in the shared registry org → joining a real club is the headline action.
+  const inRegistry =
+    user?.organization_id === "org-606-registry" ||
+    user?.organization_name === "60'6\" Player Registry";
+
   return (
     <div className="space-y-5 max-w-3xl" data-testid="my-id-page">
+      {inRegistry && <JoinClubCard prominent />}
+
       {/* Hero — who you are, score, trend, last evaluated (§25) */}
       <Card className="rounded-2xl border-border overflow-hidden" data-testid="my-id-hero">
         <div className="hero-sweep px-5 py-6">
@@ -615,6 +708,9 @@ export default function MyId() {
           </div>
         )}
       </div>
+
+      {/* Already in a real org — quieter path to switch/join another club. */}
+      {!inRegistry && <JoinClubCard prominent={false} />}
     </div>
   );
 }

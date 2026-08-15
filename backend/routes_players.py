@@ -460,6 +460,18 @@ async def update_athlete(athlete_id: str, body: AthleteBody, user=Depends(requir
     return {**a, **updates, "_id": None} and clean({**a, **updates})
 
 
+@router.post("/athletes/{athlete_id}/approve")
+async def approve_athlete(athlete_id: str, user=Depends(require_roles(*ADMIN_ROLES))):
+    """Approve a pending self-signup into the active roster."""
+    res = await db.athletes.update_one(
+        {"id": athlete_id, "organization_id": user["organization_id"], "status": "pending"},
+        {"$set": {"status": "active", "updated_at": now_iso()}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="No pending player with that id.")
+    await log_audit(user["organization_id"], user, "athlete_approved", "athlete", athlete_id)
+    return {"message": "Player approved."}
+
+
 @router.post("/athletes/{athlete_id}/archive")
 async def archive_athlete(athlete_id: str, user=Depends(require_roles(*ADMIN_ROLES))):
     res = await db.athletes.update_one(
@@ -1303,22 +1315,12 @@ def parse_dob(value):
 
 @router.post("/athletes/import/preview")
 async def import_preview(file: UploadFile = File(...), user=Depends(require_roles(*ADMIN_ROLES))):
-    if not (file.filename or "").lower().endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Please upload a .csv file.")
-    raw = await file.read()
-    if len(raw) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="CSV file is too large (max 5 MB).")
-    try:
-        text = raw.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        text = raw.decode("latin-1")
-    reader = csv.DictReader(io.StringIO(text))
-    if not reader.fieldnames:
-        raise HTTPException(status_code=400, detail="CSV appears to be empty.")
+    from roster_files import rows_from_upload
+    fieldnames, file_rows = await rows_from_upload(file)
     mapping = {}
     unmapped = []
     ignored = []
-    for col in reader.fieldnames:
+    for col in fieldnames:
         key = _normalize_header(col)
         if key in CSV_COLUMNS:
             mapping[col] = CSV_COLUMNS[key]
@@ -1333,7 +1335,7 @@ async def import_preview(file: UploadFile = File(...), user=Depends(require_role
     existing_keys = {(e.get("first_name", "").lower(), e.get("last_name", "").lower(), e.get("date_of_birth")) for e in existing}
 
     rows = []
-    for idx, row in enumerate(reader):
+    for idx, row in enumerate(file_rows):
         if idx >= 500:
             break
         record = {}
@@ -1400,7 +1402,7 @@ async def import_preview(file: UploadFile = File(...), user=Depends(require_role
         "mapped_columns": mapping,
         "unmapped_columns": unmapped,
         "ignored_columns": ignored,
-        "detected_format": "gamechanger" if any("game" in (c or "").lower() or c in ("Player", "Player Name", "Jersey #") for c in (reader.fieldnames or [])) or "full_name" in mapping.values() else "standard",
+        "detected_format": "gamechanger" if any("game" in (c or "").lower() or c in ("Player", "Player Name", "Jersey #") for c in (fieldnames or [])) or "full_name" in mapping.values() else "standard",
         "rows": rows,
     }
 

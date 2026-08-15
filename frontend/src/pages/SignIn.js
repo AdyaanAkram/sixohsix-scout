@@ -1,15 +1,17 @@
 import { useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
+import GoogleButton, { googleEnabled } from "@/components/common/GoogleButton";
 import { toast } from "sonner";
 import { errMsg } from "@/lib/api";
 
 export default function SignIn() {
-  const { user, login, loading } = useAuth();
+  const { user, login, googleAuth, loading } = useAuth();
+  const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -31,6 +33,22 @@ export default function SignIn() {
       toast.error(errMsg(err, "Sign in failed."));
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Google: an existing account gets a token straight away; a brand-new email
+  // is routed to /signup with the credential + profile prefilled.
+  const onGoogleCredential = async (credential) => {
+    try {
+      const data = await googleAuth(credential);
+      if (data?.needs_signup) {
+        navigate("/signup", { state: { google: { credential, email: data.email, name: data.name } } });
+        return;
+      }
+      const home = (data.user?.role === "athlete" || data.user?.role === "parent") ? "/my-id" : "/dashboard";
+      window.location.href = home;
+    } catch (err) {
+      toast.error(errMsg(err, "Google sign-in failed."));
     }
   };
 
@@ -90,7 +108,20 @@ export default function SignIn() {
                   {busy ? "Signing in…" : "Sign In"}
                 </Button>
               </form>
+              {googleEnabled && (
+                <div className="mt-4 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="h-px flex-1 bg-[hsl(var(--border))]" />
+                    <span className="text-xs text-muted-foreground">or continue with Google</span>
+                    <div className="h-px flex-1 bg-[hsl(var(--border))]" />
+                  </div>
+                  <GoogleButton onCredential={onGoogleCredential} />
+                </div>
+              )}
               <div className="mt-4 text-center space-y-2">
+                <Link to="/signup" className="block text-sm text-info hover:underline" data-testid="signin-signup-link">
+                  New here? Create your athlete&apos;s ID
+                </Link>
                 <Link to="/forgot-password" className="block text-sm text-info hover:underline" data-testid="forgot-password-link">
                   Forgot password?
                 </Link>

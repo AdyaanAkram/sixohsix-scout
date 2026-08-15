@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Building2, ShieldCheck, KeyRound, AlertTriangle, Upload, Trash2, Image as ImageIcon } from "lucide-react";
+import { Building2, ShieldCheck, KeyRound, AlertTriangle, Upload, Trash2, Image as ImageIcon, Users, Copy, RefreshCw } from "lucide-react";
 
 // Every text field the profile editor owns. PATCH sends only the changed subset,
 // so an older backend that ignores the newer keys keeps working unchanged.
@@ -58,7 +58,10 @@ export default function Settings() {
   const [coverFailed, setCoverFailed] = useState(false);
   const logoInput = useRef(null);
   const coverInput = useRef(null);
+  const [joinCode, setJoinCode] = useState(null); // null → unavailable/hidden
+  const [regenBusy, setRegenBusy] = useState(false);
   const isOwner = user?.role === "owner";
+  const isAdmin = ["owner", "admin"].includes(user?.role);
 
   const adoptOrg = (doc) => {
     setOrg(doc);
@@ -73,6 +76,33 @@ export default function Settings() {
       .then((r) => adoptOrg(r.data || {}))
       .catch((e) => { setOrg({}); toast.error(errMsg(e)); });
   }, []);
+
+  // Family self-signup join code — admins only; a 404/403 simply hides the card.
+  useEffect(() => {
+    if (!isAdmin) return;
+    api.get("/organization/join-code")
+      .then((r) => setJoinCode(r.data?.join_code || null))
+      .catch(() => setJoinCode(null));
+  }, [isAdmin]);
+
+  const copyJoinCode = async () => {
+    try {
+      await navigator.clipboard.writeText(joinCode);
+      toast.success("Join code copied.");
+    } catch {
+      toast.error("Couldn't copy — select the code and copy it manually.");
+    }
+  };
+
+  const regenerateJoinCode = async () => {
+    if (!window.confirm("Regenerate the join code? The old code stops working immediately.")) return;
+    setRegenBusy(true);
+    try {
+      const r = await api.post("/organization/join-code/regenerate");
+      setJoinCode(r.data?.join_code || null);
+      toast.success("New join code generated — the old one no longer works.");
+    } catch (e) { toast.error(errMsg(e)); } finally { setRegenBusy(false); }
+  };
 
   // Capability probe: a bare (unauthenticated) request answers 401 when the photo
   // routes exist and 404 when they don't. Raw axios so the app's 401 interceptor
@@ -365,6 +395,34 @@ export default function Settings() {
           {!isOwner && <p className="text-xs text-muted-foreground">Only the organization owner can edit these settings.</p>}
         </CardContent>
       </Card>
+
+      {isAdmin && joinCode && (
+        <Card className="rounded-2xl border-border" data-testid="org-join-code">
+          <CardContent className="pt-5 pb-5 space-y-3">
+            <p className="font-semibold text-foreground flex items-center gap-2"><Users className="h-4 w-4" /> Family signup & join code</p>
+            <p className="text-sm text-muted-foreground">
+              Share this code with families so their self-signup lands in your Pending list for approval.
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="font-mono text-2xl font-bold tracking-[0.2em] text-brand rounded-xl border border-border bg-secondary px-4 py-2" data-testid="org-join-code-value">
+                {joinCode}
+              </span>
+              <Button variant="outline" className="rounded-xl h-11" onClick={copyJoinCode} data-testid="org-join-code-copy">
+                <Copy className="h-4 w-4 mr-1.5" /> Copy
+              </Button>
+              <Button
+                variant="outline"
+                className="rounded-xl h-11 text-muted-foreground"
+                disabled={regenBusy}
+                onClick={regenerateJoinCode}
+                data-testid="org-join-code-regenerate"
+              >
+                <RefreshCw className="h-4 w-4 mr-1.5" /> {regenBusy ? "Regenerating…" : "Regenerate"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="rounded-2xl border-border">
         <CardContent className="pt-5 pb-5 space-y-2">

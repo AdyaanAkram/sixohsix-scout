@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import {
   Search, Plus, Upload, FileDown, Users, ChevronRight, LayoutGrid, List,
   SlidersHorizontal, Eye, TrendingUp, TrendingDown, Minus, ArrowRight,
+  UserSearch, UserCheck,
 } from "lucide-react";
 
 const AGE_GROUPS = ["8U", "9U", "10U", "11U", "12U", "13U", "14U", "15U", "16U", "17U", "18U"];
@@ -122,6 +123,115 @@ const AddPlayerDialog = ({ onCreated }) => {
             </Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+/* Search the shared 60'6" Player Registry (families who self-signed up) and pull
+   an athlete into this organization. The backend links to an existing roster
+   athlete when it finds a match instead of creating a duplicate. */
+const RegistrySearchDialog = ({ onAdded }) => {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [addingId, setAddingId] = useState(null);
+
+  // Debounced search — under 2 chars the endpoint returns nothing, so skip it.
+  useEffect(() => {
+    if (!open) return undefined;
+    const term = q.trim();
+    if (term.length < 2) { setResults([]); return undefined; }
+    const t = setTimeout(() => {
+      setSearching(true);
+      api.get("/registry/search", { params: { q: term } })
+        .then((r) => setResults(Array.isArray(r.data) ? r.data : []))
+        .catch((e) => toast.error(errMsg(e)))
+        .finally(() => setSearching(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q, open]);
+
+  const add = async (row) => {
+    setAddingId(row.registry_athlete_id);
+    try {
+      const r = await api.post("/registry/add", { registry_athlete_id: row.registry_athlete_id });
+      const a = r.data?.athlete;
+      toast.success(
+        r.data?.linked_existing
+          ? `Linked to your existing athlete ${[a?.first_name, a?.last_name].filter(Boolean).join(" ") || `${row.first_name} ${row.last_name}`}`
+          : "Added"
+      );
+      onAdded();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setAddingId(null);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setQ(""); setResults([]); } }}>
+      <DialogTrigger asChild>
+        <Button variant="outline" className="rounded-xl h-11" data-testid="registry-search-button">
+          <UserSearch className="h-4 w-4 mr-1" /> Find registered players
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-lg max-h-[85vh] flex flex-col rounded-2xl" data-testid="registry-search-dialog">
+        <DialogHeader>
+          <DialogTitle className="font-display text-2xl text-foreground">Find registered players</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 flex-1 min-h-0 flex flex-col">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search the 60'6&quot; Player Registry by name…"
+              className="pl-9 h-11 rounded-xl"
+              autoFocus
+              data-testid="registry-search-input"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Families who created their own 60&apos;6&quot; ID show up here. Adding a player links their existing profile to your roster.
+          </p>
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
+            {searching && <p className="text-sm text-muted-foreground text-center py-4">Searching…</p>}
+            {!searching && q.trim().length >= 2 && results.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">No registered players match “{q.trim()}”.</p>
+            )}
+            {!searching && results.map((r) => (
+              <div key={r.registry_athlete_id} className="rounded-xl border border-border bg-card px-4 py-3 flex flex-wrap items-center gap-3" data-testid={`registry-result-${r.registry_athlete_id}`}>
+                <div className="flex-1 min-w-[160px]">
+                  <p className="font-semibold text-foreground">{r.first_name} {r.last_name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {[
+                      r.graduation_year ? `Class of ${r.graduation_year}` : null,
+                      r.age_group || null,
+                      r.primary_position || null,
+                      r.city ? `${r.city}${r.state ? `, ${r.state}` : ""}` : r.state || null,
+                    ].filter(Boolean).join(" · ") || "—"}
+                  </p>
+                  <p className="text-xs text-muted-foreground font-mono">
+                    {[r.athlete_email_masked, r.guardian_email_masked].filter(Boolean).join(" · ")}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  className="rounded-lg h-9 bg-primary hover:bg-brand-secondary"
+                  disabled={addingId === r.registry_athlete_id}
+                  onClick={() => add(r)}
+                  data-testid={`registry-add-${r.registry_athlete_id}`}
+                >
+                  <UserCheck className="h-4 w-4 mr-1" />
+                  {addingId === r.registry_athlete_id ? "Adding…" : "Add to organization"}
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -244,6 +354,8 @@ export default function PlayersList() {
       return stored === "list" || stored === "card" ? stored : "card";
     } catch { return "card"; }
   });
+  const [pending, setPending] = useState([]); // self-signup athletes awaiting approval
+  const [pendingBusyId, setPendingBusyId] = useState(null);
   const isAdmin = ["owner", "admin"].includes(user?.role);
 
   const setView = (v) => {
@@ -259,6 +371,15 @@ export default function PlayersList() {
     else next.set("graduation_year", String(year));
     setSearchParams(next, { replace: true });
   };
+
+  // Pending self-signups live outside the roster filters — always fetched flat.
+  const loadPending = useCallback(() => {
+    api.get("/athletes", { params: { status: "pending" } })
+      .then((r) => setPending(Array.isArray(r.data) ? r.data : r.data?.athletes || []))
+      .catch(() => setPending([]));
+  }, []);
+
+  useEffect(loadPending, [loadPending]);
 
   useEffect(() => {
     api.get("/athletes/grad-years")
@@ -340,6 +461,27 @@ export default function PlayersList() {
 
   const quickViewOpen = (p) => setQuickView(p);
 
+  const approvePending = async (p) => {
+    setPendingBusyId(p.id);
+    try {
+      await api.post(`/athletes/${p.id}/approve`);
+      toast.success(`${p.first_name} ${p.last_name} approved and added to the roster.`);
+      loadPending();
+      load();
+    } catch (e) { toast.error(errMsg(e)); } finally { setPendingBusyId(null); }
+  };
+
+  const rejectPending = async (p) => {
+    if (!window.confirm(`Reject ${p.first_name} ${p.last_name}? Their signup is archived and won't appear on your roster.`)) return;
+    setPendingBusyId(p.id);
+    try {
+      await api.post(`/athletes/${p.id}/archive`);
+      toast.success(`${p.first_name} ${p.last_name} rejected.`);
+      loadPending();
+      load();
+    } catch (e) { toast.error(errMsg(e)); } finally { setPendingBusyId(null); }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -348,10 +490,11 @@ export default function PlayersList() {
           <p className="text-sm text-muted-foreground">{visible.length} player{visible.length === 1 ? "" : "s"} in the roster</p>
         </div>
         {isAdmin && (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button variant="outline" className="rounded-xl h-11" onClick={() => navigate("/players/import")} data-testid="import-players-button">
-              <Upload className="h-4 w-4 mr-1" /> Import CSV
+              <Upload className="h-4 w-4 mr-1" /> Import Roster (CSV · Excel · Word)
             </Button>
+            <RegistrySearchDialog onAdded={() => { load(); loadPending(); }} />
             <Button variant="outline" className="rounded-xl h-11" onClick={() => window.open(signedUrl("/athletes-export/csv"), "_blank")} data-testid="export-players-button">
               <FileDown className="h-4 w-4 mr-1" /> Export
             </Button>
@@ -359,6 +502,44 @@ export default function PlayersList() {
           </div>
         )}
       </div>
+
+      {/* Self-signup approvals — surfaced above everything so no family waits unseen. */}
+      {pending.length > 0 && (
+        <Card className="rounded-2xl border-warning/40 bg-warning/10" data-testid="pending-approvals-card">
+          <CardContent className="py-4 space-y-2">
+            <p className="text-sm font-semibold text-warning">Pending approval ({pending.length})</p>
+            {pending.map((p) => (
+              <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 text-sm border-b border-warning/20 pb-2 last:border-0 last:pb-0">
+                <div className="min-w-0">
+                  <span className="font-semibold text-foreground">{p.first_name} {p.last_name}</span>
+                  <span className="text-muted-foreground">{p.graduation_year ? ` · Class of ${p.graduation_year}` : ""}</span>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    className="rounded-lg h-8 bg-primary hover:bg-brand-secondary"
+                    disabled={pendingBusyId === p.id}
+                    onClick={() => approvePending(p)}
+                    data-testid={`pending-approve-${p.id}`}
+                  >
+                    Approve
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="rounded-lg h-8 text-muted-foreground"
+                    disabled={pendingBusyId === p.id}
+                    onClick={() => rejectPending(p)}
+                    data-testid={`pending-reject-${p.id}`}
+                  >
+                    Reject
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Class snapshot — development at a glance, reflecting current filters.
           Improving / Needs Follow-Up tiles toggle a quick filter. */}

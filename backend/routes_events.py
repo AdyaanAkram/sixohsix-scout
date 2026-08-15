@@ -1438,19 +1438,9 @@ async def roster_import_preview(event_id: str, file: UploadFile = File(...),
     Read-only: nothing is written until /confirm."""
     await get_org_event(event_id, user)
     org = user["organization_id"]
-    if not (file.filename or "").lower().endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Please upload a .csv file.")
-    raw = await file.read()
-    if len(raw) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="CSV file is too large (max 5 MB).")
-    try:
-        text = raw.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        text = raw.decode("latin-1")
-    reader = csv.DictReader(io.StringIO(text))
-    if not reader.fieldnames:
-        raise HTTPException(status_code=400, detail="CSV appears to be empty.")
-    mapping, _unmapped = _build_roster_column_mapping(reader.fieldnames)
+    from roster_files import rows_from_upload
+    fieldnames, file_rows = await rows_from_upload(file)
+    mapping, _unmapped = _build_roster_column_mapping(fieldnames)
 
     existing = await db.athletes.find(
         {"organization_id": org, "status": {"$ne": "merged"}},
@@ -1466,7 +1456,7 @@ async def roster_import_preview(event_id: str, file: UploadFile = File(...),
         {"_id": 0, "athlete_id": 1}).to_list(2000)}
 
     rows = []
-    for idx, row in enumerate(reader):
+    for idx, row in enumerate(file_rows):
         if idx >= 500:
             break
         record, errors = _parse_roster_row(row, mapping)

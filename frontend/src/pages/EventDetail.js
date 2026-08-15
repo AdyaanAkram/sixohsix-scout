@@ -145,13 +145,13 @@ const ImportRosterWizard = ({ eventId, onDone, onUnavailable }) => {
     <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
       <DialogTrigger asChild>
         <Button className="rounded-xl bg-primary hover:bg-brand-secondary h-10" data-testid="event-import-button">
-          <FileUp className="h-4 w-4 mr-1" /> Import Roster CSV
+          <FileUp className="h-4 w-4 mr-1" /> Import Roster (CSV · Excel · Word)
         </Button>
       </DialogTrigger>
       <DialogContent className="rounded-2xl max-w-lg max-h-[85vh] flex flex-col" data-testid="event-import-dialog">
         <DialogHeader>
           <DialogTitle className="font-display text-2xl text-foreground">
-            {step === "upload" && "Import Roster — Upload CSV"}
+            {step === "upload" && "Import Roster — Upload File"}
             {step === "preview" && "Import Roster — Review Rows"}
             {step === "confirm" && "Import Roster — Confirm"}
             {step === "done" && "Import Complete"}
@@ -162,11 +162,11 @@ const ImportRosterWizard = ({ eventId, onDone, onUnavailable }) => {
           <div className="space-y-3">
             <label className="flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border bg-card px-4 py-8 cursor-pointer hover:bg-secondary">
               <FileUp className="h-6 w-6 text-muted-foreground" />
-              <span className="text-sm font-semibold text-foreground">{file ? file.name : "Choose a .csv file"}</span>
+              <span className="text-sm font-semibold text-foreground">{file ? file.name : "Choose a file (CSV · Excel · Word)"}</span>
               <span className="text-[11px] text-muted-foreground">Tap to browse</span>
               <input
                 type="file"
-                accept=".csv,text/csv"
+                accept=".csv,.xlsx,.docx"
                 className="hidden"
                 onChange={(e) => setFile(e.target.files?.[0] || null)}
                 data-testid="event-import-file-input"
@@ -175,6 +175,7 @@ const ImportRosterWizard = ({ eventId, onDone, onUnavailable }) => {
             <p className="text-[11px] text-muted-foreground">
               Supported columns: First/Last Name, DOB or Age, Grad Year, Positions, B/T, Team, Organization, Bib&nbsp;#.
               Matching rows link to each player's existing 60'6" ID — no duplicate profiles.
+              Google Docs/Sheets: File → Download → Word (.docx) / Excel (.xlsx).
             </p>
             <DialogFooter>
               <Button className="w-full rounded-xl bg-primary h-11" disabled={!file || busy} onClick={runPreview} data-testid="event-import-preview-button">

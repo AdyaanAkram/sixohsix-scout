@@ -58,7 +58,7 @@ export default function ImportPlayers() {
           <ArrowLeft className="h-3.5 w-3.5" /> Back to Players
         </button>
         <h1 className="font-display text-4xl text-foreground">Import Players</h1>
-        <p className="text-sm text-muted-foreground">Upload a CSV roster. Invalid rows are never imported silently.</p>
+        <p className="text-sm text-muted-foreground">Upload a roster as CSV, Excel or Word. Invalid rows are never imported silently.</p>
       </div>
 
       {/* Stepper */}
@@ -80,7 +80,7 @@ export default function ImportPlayers() {
             <div className="h-14 w-14 rounded-2xl bg-secondary flex items-center justify-center mb-4">
               <Upload className="h-7 w-7 text-foreground" />
             </div>
-            <p className="font-semibold text-foreground">Upload a roster CSV</p>
+            <p className="font-semibold text-foreground">Upload a roster (CSV · Excel · Word)</p>
             <p className="text-sm text-muted-foreground mt-1 max-w-md">
               Works with standard rosters and GameChanger exports. Parents or athletes can dump a team CSV here —
               we map Player / Jersey # / B/T / Team automatically. First + last name (or a single Player Name column) required.
@@ -88,10 +88,13 @@ export default function ImportPlayers() {
             <p className="text-xs text-muted-foreground mt-2 max-w-lg">
               Also maps: DOB, Grad Year, Position, Height, Weight, School, City, State, Guardian / Parent contact fields.
             </p>
+            <p className="text-xs text-muted-foreground mt-2 max-w-lg">
+              Google Docs/Sheets: File → Download → Word (.docx) / Excel (.xlsx).
+            </p>
             <label className="mt-5">
-              <input type="file" accept=".csv" className="hidden" onChange={onFile} data-testid="csv-upload-input" />
+              <input type="file" accept=".csv,.xlsx,.docx" className="hidden" onChange={onFile} data-testid="csv-upload-input" />
               <span className="inline-flex items-center gap-2 rounded-xl bg-primary hover:bg-brand-secondary text-white px-5 h-12 font-semibold cursor-pointer active:scale-[0.98] transition">
-                <Upload className="h-4 w-4" /> {busy ? "Analyzing…" : "Choose CSV File"}
+                <Upload className="h-4 w-4" /> {busy ? "Analyzing…" : "Choose File (CSV · Excel · Word)"}
               </span>
             </label>
           </CardContent>
