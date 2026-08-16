@@ -99,7 +99,9 @@ def effective_public_profile(age: int | None, requested: bool, acting_role: str)
     """Minors (or unknown age) default to NO public profile; only a
     parent/guardian account may explicitly grant it. Adults choose freely."""
     if age is None or age < 18:
-        return bool(requested) and acting_role == "parent"
+        # Any adult account doing the registering (parent, or staff registering
+        # their own child) may grant; an athlete-run account may not.
+        return bool(requested) and acting_role != "athlete"
     return bool(requested)
 
 
@@ -226,10 +228,8 @@ async def _optional_family_user(request: Request) -> dict | None:
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid authentication token.")
     user = await _load_user(user_id, payload.get("org"))
-    if user.get("role") not in ("parent", "athlete"):
-        raise HTTPException(
-            status_code=403,
-            detail="Event registration uses a parent or athlete account.")
+    # Any signed-in account may register kids it will guard — coaches and other
+    # staff are parents too; the athlete links to THEIR user id as guardian.
     return user
 
 
@@ -265,7 +265,9 @@ async def _resolve_registering_user(body: RegistrationBody,
             return existing["id"], "parent", False
         raise HTTPException(
             status_code=409,
-            detail="An account with this email already exists — sign in instead.")
+            detail="An account with this email already exists. Sign in to the app first "
+                   "and then open this registration link, or enter that account's "
+                   "current password here.")
     if not password_hash:
         raise HTTPException(
             status_code=422,
@@ -538,8 +540,7 @@ async def register_for_event(event_id: str, body: RegistrationBody, request: Req
 async def my_athletes(user=Depends(get_current_user)):
     """Every athlete (in ANY org) owned by the caller — lets a returning family
     pick an existing athlete instead of re-entering the profile."""
-    if user.get("role") not in ("parent", "athlete"):
-        raise HTTPException(status_code=403, detail="This endpoint is for parent and athlete accounts.")
+
     rows = await db.athletes.find(
         {"status": {"$ne": "merged"},
          "$or": [{"user_id": user["id"]}, {"guardian_user_id": user["id"]}]},

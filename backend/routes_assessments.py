@@ -538,21 +538,19 @@ async def list_assessments(athlete_id: str, user=Depends(require_roles(*COACH_RO
 @router.get("/me/assessments")
 async def my_assessments(user=Depends(get_current_user)):
     """Athlete/parent view: PUBLISHED assessments only, for their own athlete."""
-    org = user["organization_id"]
-    role = user.get("role")
-    if role == "athlete":
-        athlete = await db.athletes.find_one({"user_id": user["id"], "organization_id": org}, {"_id": 0, "id": 1})
-    elif role in ("parent", "guardian"):
-        athlete = await db.athletes.find_one({"guardian_user_id": user["id"], "organization_id": org}, {"_id": 0, "id": 1})
-    else:
-        raise HTTPException(status_code=403, detail="Athlete or guardian role required.")
-    if not athlete:
+    # Ownership is by linkage (user_id / guardian_user_id), not by role — a
+    # coach who registered their own kids sees them here too. Cross-org.
+    athletes = await db.athletes.find(
+        {"status": {"$ne": "merged"},
+         "$or": [{"user_id": user["id"]}, {"guardian_user_id": user["id"]}]},
+        {"_id": 0, "id": 1}).to_list(50)
+    if not athletes:
         raise HTTPException(status_code=404, detail="No athlete profile linked to this account.")
     docs = await db.assessments.find(
-        {"organization_id": org, "athlete_id": athlete["id"], "status": "published"},
+        {"athlete_id": {"$in": [a["id"] for a in athletes]}, "status": "published"},
         {"_id": 0}).to_list(100)
     event_ids = [d["event_id"] for d in docs]
-    events = await db.events.find({"id": {"$in": event_ids}, "organization_id": org},
+    events = await db.events.find({"id": {"$in": event_ids}},
                                   {"_id": 0, "id": 1, "name": 1, "date": 1}).to_list(100)
     emap = {e["id"]: e for e in events}
     for d in docs:
