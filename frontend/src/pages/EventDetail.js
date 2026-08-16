@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Badge } from "@/components/ui/badge";
 import { PlayerAvatar } from "@/components/common/PlayerAvatar";
@@ -1424,7 +1425,7 @@ const EvaluatorsTab = ({ eventId, isAdmin }) => {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ evaluator_id: "", station_ids: [], group_ids: [] });
   const [invites, setInvites] = useState([]);
-  const [inviteForm, setInviteForm] = useState({ role: "evaluator", email: "", station_id: "", access: "24h" });
+  const [inviteForm, setInviteForm] = useState({ role: "evaluator", email: "", station_ids: [], access: "24h" });
   const [inviteBusy, setInviteBusy] = useState(false);
 
   const load = useCallback(() => {
@@ -1473,7 +1474,7 @@ const EvaluatorsTab = ({ eventId, isAdmin }) => {
       const r = await api.post(`/events/${eventId}/invites`, {
         role: inviteForm.role,
         email: inviteForm.email || undefined,
-        station_id: inviteForm.station_id || undefined,
+        station_ids: inviteForm.station_ids,
         ttl_hours: inviteTtlHours(inviteForm.access),
       });
       toast.success(`Code ${r.data.code} created — share /redeem`);
@@ -1514,13 +1515,31 @@ const EvaluatorsTab = ({ eventId, isAdmin }) => {
                 </SelectContent>
               </Select>
               <Input placeholder="Email (optional)" value={inviteForm.email} onChange={(e) => setInviteForm((f) => ({ ...f, email: e.target.value }))} className="h-10 rounded-lg" />
-              <Select value={inviteForm.station_id || "__none__"} onValueChange={(v) => setInviteForm((f) => ({ ...f, station_id: v === "__none__" ? "" : v }))}>
-                <SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="Station (optional)" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">No station</SelectItem>
-                  {stations.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="h-10 rounded-lg font-normal justify-between min-w-[170px]" data-testid="invite-stations-trigger">
+                    {inviteForm.station_ids.length === 0
+                      ? "Stations (optional)"
+                      : `${inviteForm.station_ids.length} station${inviteForm.station_ids.length > 1 ? "s" : ""}`}
+                    <ChevronDown className="h-4 w-4 ml-2 opacity-60" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-60 rounded-xl p-2 space-y-1" align="start">
+                  {stations.map((st) => (
+                    <label key={st.id} className="flex items-center gap-2 text-sm min-h-[34px] px-1 cursor-pointer rounded-lg hover:bg-secondary">
+                      <Checkbox
+                        checked={inviteForm.station_ids.includes(st.id)}
+                        onCheckedChange={(v) => setInviteForm((f) => ({
+                          ...f,
+                          station_ids: v ? [...f.station_ids, st.id] : f.station_ids.filter((x) => x !== st.id),
+                        }))}
+                      />
+                      {st.name}
+                    </label>
+                  ))}
+                  {stations.length === 0 && <p className="text-xs text-muted-foreground px-1 py-2">No stations on this event yet.</p>}
+                </PopoverContent>
+              </Popover>
               <Select value={inviteForm.access} onValueChange={(v) => setInviteForm((f) => ({ ...f, access: v }))}>
                 <SelectTrigger className="h-10 rounded-lg" data-testid="invite-access-select" aria-label="Access length">
                   <SelectValue />

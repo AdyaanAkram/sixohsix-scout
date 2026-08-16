@@ -1218,7 +1218,8 @@ import secrets as _secrets
 class EventInviteBody(BaseModel):
     email: str | None = None
     role: str = "evaluator"  # evaluator | coach
-    station_id: str | None = None
+    station_id: str | None = None          # legacy single-station callers
+    station_ids: list[str] = []            # preferred: one code, many stations
     ttl_hours: int = 48
 
 
@@ -1243,6 +1244,7 @@ async def create_event_invite(event_id: str, body: EventInviteBody, user=Depends
         "email": (body.email or "").lower() or None,
         "role": body.role,
         "station_id": body.station_id,
+        "station_ids": list(dict.fromkeys(([body.station_id] if body.station_id else []) + (body.station_ids or []))),
         "code": code,
         "invited_by": user["id"],
         "invited_at": now_iso(),
@@ -1401,15 +1403,17 @@ async def redeem_event_invite(body: RedeemBody):
             "id": new_id(), "user_id": uid, "organization_id": org_id,
             "created_at": now_iso(), **membership_fields,
         })
-    # Both invited roles work a station, so both get an expiring assignment.
-    if inv.get("station_id"):
+    # Both invited roles work stations, so each granted station gets an
+    # expiring assignment (legacy invites carry a single station_id).
+    grant_stations = inv.get("station_ids") or ([inv["station_id"]] if inv.get("station_id") else [])
+    for sid in grant_stations:
         existing_a = await db.evaluator_assignments.find_one({
-            "event_id": inv["event_id"], "station_id": inv["station_id"],
+            "event_id": inv["event_id"], "station_id": sid,
             "evaluator_id": uid, "organization_id": org_id})
         if not existing_a:
             await db.evaluator_assignments.insert_one({
                 "id": new_id(), "organization_id": org_id, "event_id": inv["event_id"],
-                "station_id": inv["station_id"], "evaluator_id": uid, "group_ids": [],
+                "station_id": sid, "evaluator_id": uid, "group_ids": [],
                 "expires_at": access_expires, "active": True,
                 "created_by": inv.get("invited_by"), "created_at": now_iso(), "updated_at": now_iso(),
             })
