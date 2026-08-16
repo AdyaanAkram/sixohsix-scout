@@ -460,7 +460,7 @@ const RosterTab = ({ eventId, isAdmin, eventName }) => {
               New sign-ups &amp; approvals ({newToday.length})
               {eventAgeRange(eventName) && (
                 <span className="text-xs text-muted-foreground font-normal ml-2">
-                  showing ages {eventAgeRange(eventName)[0]}\u2013{eventAgeRange(eventName)[1]} \u00b7 matched to this event
+                  showing ages {eventAgeRange(eventName)[0]}–{eventAgeRange(eventName)[1]} · matched to this event
                 </span>
               )}
             </p>
