@@ -298,10 +298,17 @@ async def _age_group_for_event(org: str, event_id: str, age: int | None) -> str 
         return None
     groups = await db.event_groups.find(
         {"event_id": event_id, "organization_id": org}, {"_id": 0, "id": 1, "name": 1}).to_list(100)
+    parsed = []
     for g in groups:
         m = re.match(r"^\s*ages?\s+(\d{1,2})\s*[-–]\s*(\d{1,2})\s*$", g.get("name") or "", re.I)
-        if m and int(m.group(1)) <= age <= int(m.group(2)):
-            return g["id"]
+        if m:
+            parsed.append((int(m.group(1)), int(m.group(2)), g["id"]))
+    # Overlapping brackets ("8-10", "10-12"): the YOUNGER bracket wins the
+    # boundary age, so sorting by lower bound and taking the first match is
+    # deterministic (a 10-year-old lands in 8-10, a 14-year-old in 13-14).
+    for lo, hi, gid in sorted(parsed):
+        if lo <= age <= hi:
+            return gid
     return None
 
 
