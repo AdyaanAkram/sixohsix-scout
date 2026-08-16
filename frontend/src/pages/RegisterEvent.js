@@ -177,10 +177,10 @@ export default function RegisterEvent() {
 
   useEffect(() => {
     if (!signedIn) return;
-    api.get("/me/athletes")
+    api.get("/me/athletes", { params: { event_id: eventId } })
       .then((r) => setMyAthletes(Array.isArray(r.data) ? r.data : []))
       .catch(() => setMyAthletes([])); // endpoint may not be deployed yet
-  }, [signedIn]);
+  }, [signedIn, eventId]);
 
   const steps = useMemo(
     () => (signedIn ? STEP_DEFS.filter((s) => s.key !== "parent") : STEP_DEFS),
@@ -520,6 +520,13 @@ export default function RegisterEvent() {
 
   const parentStep = (
     <div className="space-y-4">
+      <div className="rounded-xl border border-info/40 bg-info/10 px-3.5 py-2.5 text-sm">
+        Registered a child before, or already have a 60&apos;6&quot; account?{" "}
+        <Link to={`/signin?next=/register/${eventId}`} className="font-semibold text-info underline" data-testid="register-signin-link">
+          Sign in
+        </Link>{" "}
+        — then add another athlete without retyping your info.
+      </div>
       {googleEnabled && !google && (
         <div className="space-y-3">
           <GoogleButton onCredential={onGoogleCredential} text="continue_with" />
@@ -628,14 +635,19 @@ export default function RegisterEvent() {
             <button
               key={a.id}
               type="button"
+              disabled={a.on_event}
               onClick={() => setAthleteId(a.id)}
               data-testid={`register-existing-athlete-${a.id}`}
               className={cn(
                 "w-full text-left rounded-xl border px-4 py-3 transition-colors",
-                athleteId === a.id ? "border-brand bg-brand-tertiary/30" : "border-border bg-card hover:border-brand/50"
+                a.on_event ? "border-border bg-secondary opacity-70 cursor-default"
+                  : athleteId === a.id ? "border-brand bg-brand-tertiary/30" : "border-border bg-card hover:border-brand/50"
               )}
             >
-              <p className="font-semibold text-sm">{a.first_name} {a.last_name}</p>
+              <p className="font-semibold text-sm">
+                {a.first_name} {a.last_name}
+                {a.on_event && <span className="text-xs font-normal text-success ml-2">✓ already registered for this event</span>}
+              </p>
               <p className="text-xs text-muted-foreground font-mono-num">
                 {a.date_of_birth || "DOB —"} · Grad {a.graduation_year || "—"}
               </p>

@@ -12,12 +12,18 @@ import { errMsg } from "@/lib/api";
 export default function SignIn() {
   const { user, login, googleAuth, loading } = useAuth();
   const navigate = useNavigate();
+  // ?next=/register/<id> — internal-only redirect after sign-in (used by the
+  // registration wizard's "sign in to add another athlete" path).
+  const nextPath = (() => {
+    const n = new URLSearchParams(window.location.search).get("next") || "";
+    return n.startsWith("/") && !n.startsWith("//") ? n : null;
+  })();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
 
   if (!loading && user) {
-    const home = (user.role === "athlete" || user.role === "parent") ? "/my-id" : "/dashboard";
+    const home = nextPath || ((user.role === "athlete" || user.role === "parent") ? "/my-id" : "/dashboard");
     return <Navigate to={home} replace />;
   }
 
@@ -27,7 +33,7 @@ export default function SignIn() {
     try {
       const u = await login(email.trim(), password);
       // AuthProvider sets user; Navigate above / location replace via hard nav keeps SPA clean
-      const home = (u?.role === "athlete" || u?.role === "parent") ? "/my-id" : "/dashboard";
+      const home = nextPath || ((u?.role === "athlete" || u?.role === "parent") ? "/my-id" : "/dashboard");
       window.location.href = home;
     } catch (err) {
       toast.error(errMsg(err, "Sign in failed."));

@@ -537,14 +537,21 @@ async def register_for_event(event_id: str, body: RegistrationBody, request: Req
 # ---------------- Returning families: my athletes across orgs ----------------
 
 @router.get("/me/athletes")
-async def my_athletes(user=Depends(get_current_user)):
+async def my_athletes(event_id: str | None = None, user=Depends(get_current_user)):
     """Every athlete (in ANY org) owned by the caller — lets a returning family
-    pick an existing athlete instead of re-entering the profile."""
+    pick an existing athlete instead of re-entering the profile. Pass event_id
+    to learn which of them are already registered for that event."""
 
     rows = await db.athletes.find(
         {"status": {"$ne": "merged"},
          "$or": [{"user_id": user["id"]}, {"guardian_user_id": user["id"]}]},
         {"_id": 0}).to_list(100)
+    on_event_ids = set()
+    if event_id and rows:
+        entries = await db.event_athletes.find(
+            {"event_id": event_id, "athlete_id": {"$in": [r["id"] for r in rows]}},
+            {"_id": 0, "athlete_id": 1}).to_list(200)
+        on_event_ids = {e["athlete_id"] for e in entries}
     org_ids = sorted({r.get("organization_id") for r in rows if r.get("organization_id")})
     org_names = {}
     if org_ids:
@@ -563,6 +570,7 @@ async def my_athletes(user=Depends(get_current_user)):
         "secondary_positions": r.get("secondary_positions") or [],
         "bats": r.get("bats"),
         "throws": r.get("throws"),
+        "on_event": r["id"] in on_event_ids,
     } for r in rows]
 
 
