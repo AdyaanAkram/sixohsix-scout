@@ -2140,6 +2140,7 @@ async def create_preset_stations(event_id: str, body: StationPresetsBody,
         doc = {"id": new_id(), "organization_id": org, "event_id": event_id,
                "name": preset["name"], "template_id": tid, "group_ids": [],
                "start_time": None, "end_time": None, "preset_key": key,
+               "station_kind": {"athletic_movement": "athletic", "throwing_arm": "throwing"}.get(key, key),
                "created_at": now_iso(), "updated_at": now_iso()}
         await db.stations.insert_one(doc)
         existing_names.add(preset["name"].strip().lower())

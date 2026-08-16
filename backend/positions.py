@@ -212,21 +212,55 @@ def _age_hits(candidates: list[dict], age_group: str | None) -> list[dict]:
     return sorted(hits, key=_age_specificity)
 
 
+# Station kinds: what a station TESTS. When templates carry station_kind, the
+# station decides WHAT is evaluated and the age band decides WHICH VARIANT —
+# fixing "a shortstop gets the same form at every station".
+STATION_KIND_KEYWORDS = {
+    "infield": "infield", "outfield": "outfield", "hitting": "hitting",
+    "catching": "catching", "catcher": "catching", "pitching": "pitching",
+    "bullpen": "pitching", "base running": "base_running", "baserunning": "base_running",
+    "athletic": "athletic", "movement": "athletic", "speed": "athletic",
+    "throwing": "throwing", "arm": "throwing",
+    "iq": "baseball_iq", "instinct": "baseball_iq",
+    "character": "character", "coachability": "character",
+}
+
+
+def infer_station_kind(name: str | None) -> str | None:
+    n = (name or "").lower()
+    for kw, kind in STATION_KIND_KEYWORDS.items():
+        if kw in n:
+            return kind
+    return None
+
+
 def resolve_template(
     templates: list[dict],
     *,
     position: str | None,
     station_template_id: str | None,
     age_group: str | None = None,
+    station_kind: str | None = None,
 ):
     """Pick a template from an org-scoped list. Returns (template, reason) or (None, None).
 
-    Age is part of the lookup, not a tiebreaker: an age+position template outranks a
-    position-only one. When a position template exists but none matches the athlete's
-    age the reason says so ("*_no_age") instead of passing off the mismatch as a hit.
+    Station-kind templates come first: the station defines WHAT is tested, the
+    age band picks the variant. Orgs without kind-tagged templates fall through
+    to the legacy position/age chain unchanged. Age is part of the lookup, not a
+    tiebreaker: an age+position template outranks a position-only one.
     """
     position = normalize_position(position)
     by_id = {t["id"]: t for t in templates if t.get("id")}
+
+    # 0. Station kind + age band (then nearest band of the same kind).
+    if station_kind:
+        kind_hits = [t for t in templates if t.get("station_kind") == station_kind]
+        aged_kind = _age_hits(kind_hits, age_group)
+        if aged_kind:
+            return aged_kind[0], "station_kind_age"
+        if kind_hits:
+            picked = min(kind_hits, key=lambda t: _age_distance(t, age_group))
+            return picked, "station_kind_nearest_age"
 
     exact = []
     group_hits = []

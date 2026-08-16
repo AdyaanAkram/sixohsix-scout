@@ -162,6 +162,9 @@ class TemplateBody(BaseModel):
     metrics: list[MetricBody] = []
     applies_to_positions: list[str] = Field(default_factory=list)
     is_default: bool = False
+    # What a station tests (infield/hitting/base_running/...). Templates with a
+    # kind resolve station-first; untagged templates keep legacy behavior.
+    station_kind: str | None = None
 
 
 def validate_age_group(age_group: str | None) -> str | None:
@@ -376,11 +379,13 @@ async def _assert_station_assignment(user, station_id: str, event_id: str):
 async def _resolve_for_athlete(*, org_id: str, athlete: dict, station: dict, position_override: str | None = None):
     position = normalize_position(position_override) or normalize_position(athlete.get("primary_position"))
     templates = await db.evaluation_templates.find({"organization_id": org_id}, {"_id": 0}).to_list(200)
+    from positions import infer_station_kind
     template, reason = resolve_template(
         templates,
         position=position,
         station_template_id=station.get("template_id"),
         age_group=athlete.get("age_group"),
+        station_kind=station.get("station_kind") or infer_station_kind(station.get("name")),
     )
     if not template:
         name = f"{athlete.get('first_name', '')} {athlete.get('last_name', '')}".strip() or athlete.get("id")
