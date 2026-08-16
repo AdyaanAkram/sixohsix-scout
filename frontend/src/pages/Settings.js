@@ -407,6 +407,12 @@ export default function Settings() {
               <span className="font-mono text-2xl font-bold tracking-[0.2em] text-brand rounded-xl border border-border bg-secondary px-4 py-2" data-testid="org-join-code-value">
                 {joinCode}
               </span>
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(`${window.location.origin}/signup?join=${joinCode}`)}`}
+                alt="Join QR"
+                className="rounded-xl border border-border bg-white p-1.5 w-24 h-24"
+                data-testid="org-join-code-qr"
+              />
               <Button variant="outline" className="rounded-xl h-11" onClick={copyJoinCode} data-testid="org-join-code-copy">
                 <Copy className="h-4 w-4 mr-1.5" /> Copy
               </Button>

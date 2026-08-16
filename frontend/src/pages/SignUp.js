@@ -33,7 +33,7 @@ export default function SignUp() {
     first_name: "", last_name: "", date_of_birth: "", graduation_year: "",
     primary_position: "", city: "", state: "",
   });
-  const [joinCode, setJoinCode] = useState("");
+  const [joinCode, setJoinCode] = useState(() => new URLSearchParams(window.location.search).get("join") || "");
   const [busy, setBusy] = useState(false);
 
   if (!loading && user) {

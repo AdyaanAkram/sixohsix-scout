@@ -2319,6 +2319,37 @@ export default function EventDetail() {
 
         <TabsContent value="overview" className="mt-4">
           {isAdmin && <div className="mb-3"><SetupProgressStrip event={event} onGo={(t) => setParams({ tab: t })} /></div>}
+          {isAdmin && (
+            <Card className="rounded-2xl border-border mb-3" data-testid="event-registration-share">
+              <CardContent className="py-4 flex flex-wrap items-center gap-4">
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(`${window.location.origin}/register/${eventId}`)}`}
+                  alt="Registration QR"
+                  className="rounded-xl border border-border bg-white p-1.5 w-32 h-32"
+                  data-testid="event-registration-qr"
+                />
+                <div className="flex-1 min-w-[200px] space-y-1.5">
+                  <p className="font-semibold text-foreground">Family registration</p>
+                  <p className="text-xs text-muted-foreground">
+                    Parents scan (or tap the link) to register — the athlete lands on this
+                    roster grouped by age, evaluation-ready. Print the QR for the check-in table.
+                  </p>
+                  <p className="text-xs font-mono break-all text-info">{`${window.location.origin}/register/${eventId}`}</p>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" className="h-8 rounded-lg text-xs"
+                      onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/register/${eventId}`); toast.success("Registration link copied."); }}
+                      data-testid="event-registration-copy">
+                      Copy link
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-8 rounded-lg text-xs"
+                      onClick={() => window.open(`https://api.qrserver.com/v1/create-qr-code/?size=800x800&data=${encodeURIComponent(`${window.location.origin}/register/${eventId}`)}`, "_blank")}>
+                      Open big QR (print)
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
           {isStaffView && <div className="mb-3"><StaffingPanel eventId={eventId} /></div>}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             {[
