@@ -1263,48 +1263,54 @@ const StationsTab = ({ eventId, isAdmin }) => {
     <div className="space-y-3">
       {isAdmin && (
         <div className="flex flex-wrap gap-2">
-        {presets && presets.length > 0 && (
-          <Dialog open={presetOpen} onOpenChange={(o) => { setPresetOpen(o); if (!o) setPresetSel({}); }}>
-            <DialogTrigger asChild>
-              <Button variant="outline" className="rounded-xl h-10" data-testid="stations-presets">
-                <ListChecks className="h-4 w-4 mr-1" /> Add preset stations
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="rounded-2xl max-w-sm max-h-[80vh] flex flex-col" data-testid="stations-presets-dialog">
-              <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Preset Stations</DialogTitle></DialogHeader>
-              <div className="flex-1 overflow-y-auto space-y-1.5 min-h-[120px]">
-                {presets.map((p) => {
-                  const exists = existingNames.has((p.name || "").trim().toLowerCase());
-                  return (
-                    <label key={p.key} className={cn("flex items-start gap-3 rounded-xl border border-border px-3 py-2.5", exists ? "opacity-60" : "cursor-pointer hover:bg-secondary")}>
-                      <Checkbox
-                        checked={exists || !!presetSel[p.key]}
-                        disabled={exists}
-                        onCheckedChange={(v) => setPresetSel((s) => ({ ...s, [p.key]: !!v }))}
-                        data-testid={`stations-preset-${p.key}`}
-                        className="mt-0.5"
-                      />
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-foreground">
-                          {p.name} {exists && <span className="text-[11px] font-normal text-muted-foreground">— already added</span>}
-                        </p>
-                        {p.description && <p className="text-[11px] text-muted-foreground">{p.description}</p>}
-                      </div>
-                    </label>
-                  );
-                })}
-              </div>
-              <DialogFooter>
-                <Button className="w-full rounded-xl bg-primary h-11" disabled={presetBusy || !Object.values(presetSel).some(Boolean)} onClick={addPresets} data-testid="stations-presets-submit">
-                  {presetBusy ? "Adding…" : `Add ${Object.values(presetSel).filter(Boolean).length} Station(s)`}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        )}
+        </div>
+      )}
+      {isAdmin && presets && presets.length > 0 && (
+        <Card className="rounded-2xl border-border" data-testid="stations-presets">
+          <CardContent className="py-3.5 space-y-2">
+            <p className="text-sm font-semibold text-foreground">Add stations — tap to add</p>
+            <p className="text-xs text-muted-foreground">
+              No naming or setup needed: every station automatically loads the age-correct
+              form for each athlete (a 13-18 event serves the 13U-18U versions by itself).
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {presets.map((p) => {
+                const exists = existingNames.has((p.name || "").trim().toLowerCase());
+                return (
+                  <button
+                    key={p.key}
+                    type="button"
+                    disabled={exists || presetBusy}
+                    onClick={async () => {
+                      setPresetBusy(true);
+                      try {
+                        await api.post(`/events/${eventId}/stations/presets`, { keys: [p.key] });
+                        toast.success(`${p.name} station added.`);
+                        load();
+                      } catch (e) { toast.error(errMsg(e)); }
+                      finally { setPresetBusy(false); }
+                    }}
+                    className={cn(
+                      "rounded-xl border px-4 h-11 text-sm font-semibold transition inline-flex items-center gap-1.5",
+                      exists
+                        ? "bg-secondary text-muted-foreground border-border cursor-default"
+                        : "bg-card text-foreground border-border hover:border-brand/60 hover:bg-brand-tertiary/20"
+                    )}
+                    data-testid={`stations-preset-${p.key}`}
+                  >
+                    {exists ? "\u2713 " : "+ "}{p.name}
+                  </button>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {isAdmin && (
+        <div className="flex flex-wrap gap-2">
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
-            <Button className="rounded-xl bg-primary h-10" data-testid="station-add-button"><Plus className="h-4 w-4 mr-1" /> Add Station</Button>
+            <Button variant="outline" className="rounded-xl h-10 text-muted-foreground" data-testid="station-add-button"><Plus className="h-4 w-4 mr-1" /> Custom station</Button>
           </DialogTrigger>
           <DialogContent className="rounded-2xl max-w-sm">
             <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">New Station</DialogTitle></DialogHeader>
