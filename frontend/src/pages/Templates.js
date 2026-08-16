@@ -58,15 +58,24 @@ export default function Templates() {
     api.get("/age-bands").then((r) => setAgeBands(r.data?.age_bands || [])).catch(() => setAgeBands([]));
   }, []);
 
+  // TRUE ambiguity only. Under station-aware resolution, many templates
+  // legitimately share a position (different age bands, different station
+  // kinds). A conflict is: two templates with the SAME station kind and SAME
+  // age band, or (legacy untagged) the same position claim in the same band.
   const positionConflicts = useMemo(() => {
-    const claimed = {};
+    const seen = {};
     for (const t of templates || []) {
-      for (const p of t.applies_to_positions || []) {
-        claimed[p] = claimed[p] || [];
-        claimed[p].push(t.name);
+      if (t.station_kind) {
+        const key = `${t.station_kind} \u00b7 ${t.age_group || "all ages"}`;
+        (seen[key] = seen[key] || []).push(t.name);
+      } else {
+        for (const p of t.applies_to_positions || []) {
+          const key = `${p} \u00b7 ${t.age_group || "all ages"} (no station kind)`;
+          (seen[key] = seen[key] || []).push(t.name);
+        }
       }
     }
-    return Object.entries(claimed).filter(([, names]) => names.length > 1);
+    return Object.entries(seen).filter(([, names]) => names.length > 1);
   }, [templates]);
 
   const patchTemplate = (id, next) => setTemplates((ts) => (ts || []).map((t) => (t.id === id ? { ...t, ...next } : t)));
@@ -159,7 +168,7 @@ export default function Templates() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="font-display text-4xl text-foreground">Evaluation Templates</h1>
-          <p className="text-sm text-muted-foreground">Metric sets resolved by athlete position, then station, then org default.</p>
+          <p className="text-sm text-muted-foreground">Forms resolve by the station\u2019s kind + the athlete\u2019s age band first, then position/age, then the org default.</p>
         </div>
         {canEdit && (
           <Button className="rounded-lg h-9 shrink-0" onClick={openCreate} data-testid="template-create-btn">
@@ -172,7 +181,7 @@ export default function Templates() {
         <div className="rounded-xl bg-warning/15 border border-warning/40 px-4 py-3 text-sm text-warning flex items-start gap-2" data-testid="position-conflict-warning">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
           <div>
-            <p className="font-semibold">Overlapping position claims</p>
+            <p className="font-semibold">Ambiguous templates \u2014 two forms could load for the same athlete at the same station</p>
             <ul className="mt-1 space-y-0.5">
               {positionConflicts.map(([pos, names]) => (
                 <li key={pos}><span className="font-mono font-bold">{pos}</span>: {names.join(" · ")}</li>
