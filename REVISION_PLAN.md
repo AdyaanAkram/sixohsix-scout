@@ -555,3 +555,27 @@ retest events) — driven by the athlete's actual approved development prioritie
 advertising. Athletes/parents opt in to in-app + email notifications; each recommendation links
 to the applicable program/event when registration opens. Full cycle:
 `Evaluate → Assess → Develop → Recommend Programming → Train → Retest → Measure Progress`.
+
+---
+
+## SOURCE OF TRUTH — Registration + Evaluation Workflow (client memo, 16 Aug 2026)
+
+Full registration & consent specification + workflow memo received 16 Aug 2026 supersedes prior
+registration behavior. Canonical end-to-end flow:
+
+REGISTER → CHECK-IN → GROUP → EVALUATE → LIVE PROGRESS → VALIDATE → EVALUATOR SUBMIT →
+ADMIN REVIEW → APPROVE EVALUATION → AI GENERATES ASSESSMENT DRAFT → ADMIN REVIEWS/EDITS AI RECAP
+→ APPROVE → PUBLISH TO PERMANENT ATHLETE ID → TRACK DEVELOPMENT OVER TIME
+
+Key mandates: parent-first accounts (Google + email) managing multiple athletes; versioned,
+separate consent records (participation waiver, emergency auth, evaluation media,
+promotional media, privacy, terms, optional public profile — minors default OFF) with
+e-signature audit; event registration links auto-populating event data; positions-being-evaluated
+as structured data; deterministic evaluation routing (DOB→age band: 8–12 Development /
+13–18 Performance→positions→event config) with ZERO evaluator decisions; dropdown
+baseball-specific scoring (no generic 1–5), objective metrics numeric; event lifecycle
+Draft→Setup→Ready→Evaluation Active→Evaluation Complete→Review→Published/Closed with
+activation gating; athlete-level live progress bars + admin totals; AI recap with 12 sections
+(incl. verified measurements, per-position assessment, development trend vs history, coach +
+parent summaries) that is itself DRAFT until admin approval. AI never invents observations;
+N/O|N/A|DNP never negative; age-band-appropriate standards.
