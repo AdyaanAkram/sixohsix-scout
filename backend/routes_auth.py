@@ -380,6 +380,32 @@ async def accept_invitation(body: AcceptInviteBody):
         },
     }
 
+@router.delete("/staff/{user_id}")
+async def remove_staff(user_id: str, user=Depends(require_roles("owner"))):
+    """Remove a staff member from THIS organization entirely (owner only).
+    Their membership is deleted and any evaluator assignments here are revoked;
+    the login itself is deactivated only when no other org membership remains."""
+    if user_id == user["id"]:
+        raise HTTPException(status_code=400, detail="You can't remove your own account.")
+    membership = await db.memberships.find_one({"user_id": user_id, "organization_id": user["organization_id"]})
+    if not membership:
+        raise HTTPException(status_code=404, detail="Staff member not found.")
+    if membership["role"] == "owner":
+        raise HTTPException(status_code=403, detail="The owner account can't be removed.")
+    await db.memberships.delete_one({"id": membership["id"]})
+    await db.evaluator_assignments.update_many(
+        {"evaluator_id": user_id, "organization_id": user["organization_id"]},
+        {"$set": {"active": False, "updated_at": now_iso()}})
+    remaining = await db.memberships.count_documents({"user_id": user_id, "active": True})
+    removed_user = await db.users.find_one({"id": user_id}, {"_id": 0, "email": 1})
+    if remaining == 0:
+        await db.users.update_one({"id": user_id}, {"$set": {"active": False, "updated_at": now_iso()}})
+    await log_audit(user["organization_id"], user, "staff_removed", "user", user_id,
+                    {"email": (removed_user or {}).get("email"), "role": membership["role"],
+                     "login_deactivated": remaining == 0})
+    return {"message": "Staff member removed from the organization."}
+
+
 @router.patch("/staff/{user_id}")
 async def update_staff(user_id: str, body: UpdateStaffBody, user=Depends(require_roles("owner", "admin"))):
     membership = await db.memberships.find_one({"user_id": user_id, "organization_id": user["organization_id"]})

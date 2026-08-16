@@ -135,6 +135,18 @@ export default function Staff() {
                   <Button size="sm" variant="outline" className="rounded-lg h-9 text-xs" onClick={() => updateStaff(s.id, { active: !s.membership_active })} data-testid={`staff-toggle-active-${s.id}`}>
                     {s.membership_active ? "Deactivate" : "Reactivate"}
                   </Button>
+                  {user?.role === "owner" && (
+                    <Button size="sm" variant="outline" className="rounded-lg h-9 text-xs text-destructive hover:bg-destructive/10"
+                      data-testid={`staff-remove-${s.id}`}
+                      onClick={() => {
+                        if (!window.confirm(`Remove ${s.full_name} from the organization?\n\nTheir access here ends immediately. This does not delete any evaluations they submitted.`)) return;
+                        api.delete(`/staff/${s.id}`)
+                          .then(() => { toast.success("Staff member removed."); load(); })
+                          .catch((e) => toast.error(errMsg(e)));
+                      }}>
+                      Remove
+                    </Button>
+                  )}
                 </div>
               )}
             </CardContent>

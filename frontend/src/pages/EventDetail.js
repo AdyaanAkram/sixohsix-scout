@@ -2262,7 +2262,20 @@ export default function EventDetail() {
                     if (!ok) return;
                     api.delete(`/events/${eventId}`)
                       .then(() => { toast.success("Event deleted."); navigate("/events"); })
-                      .catch((e) => toast.error(errMsg(e)));
+                      .catch((e) => {
+                        // Submitted evaluations block a plain delete — the owner
+                        // can force it after a second, explicit confirmation.
+                        if (e?.response?.status === 409 && user?.role === "owner") {
+                          const force = window.confirm(
+                            `${errMsg(e)}\n\nForce delete anyway? This permanently removes the event AND its submitted evaluations.`);
+                          if (!force) return;
+                          api.delete(`/events/${eventId}?force=true`)
+                            .then(() => { toast.success("Event force-deleted."); navigate("/events"); })
+                            .catch((e2) => toast.error(errMsg(e2)));
+                          return;
+                        }
+                        toast.error(errMsg(e));
+                      });
                   }}
                 >
                   <Trash2 className="h-4 w-4 mr-1" /> Delete event
