@@ -1399,14 +1399,27 @@ const EvaluatorsTab = ({ eventId, isAdmin }) => {
   }, [eventId, isAdmin]);
   useEffect(() => { load(); }, [load]);
 
+  const [editing, setEditing] = useState(null); // {id, station_id} of the assignment being edited
+
   const add = async () => {
     try {
+      // Editing with a station change = move: revoke the old row first, then
+      // create the new one (same-station saves just upsert the groups).
+      if (editing && editing.station_id !== form.station_id) {
+        await api.delete(`/events/${eventId}/assignments/${editing.id}`);
+      }
       await api.post(`/events/${eventId}/assignments`, form);
-      toast.success("Evaluator assigned.");
+      toast.success(editing ? "Assignment updated." : "Evaluator assigned.");
       setOpen(false);
+      setEditing(null);
       setForm({ evaluator_id: "", station_id: "", group_ids: [] });
       load();
     } catch (e) { toast.error(errMsg(e)); }
+  };
+  const startEdit = (a) => {
+    setEditing({ id: a.id, station_id: a.station_id });
+    setForm({ evaluator_id: a.evaluator_id, station_id: a.station_id, group_ids: a.group_ids || [] });
+    setOpen(true);
   };
   const remove = async (aid) => {
     try { await api.delete(`/events/${eventId}/assignments/${aid}`); load(); } catch (e) { toast.error(errMsg(e)); }
@@ -1505,12 +1518,12 @@ const EvaluatorsTab = ({ eventId, isAdmin }) => {
         </Card>
       )}
       {isAdmin && (
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setEditing(null); setForm({ evaluator_id: "", station_id: "", group_ids: [] }); } }}>
           <DialogTrigger asChild>
             <Button className="rounded-xl bg-primary h-10" data-testid="assignment-add-button"><Plus className="h-4 w-4 mr-1" /> Assign Evaluator</Button>
           </DialogTrigger>
           <DialogContent className="rounded-2xl max-w-sm" data-testid="assign-stepper">
-            <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Assign Evaluator</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">{editing ? "Edit Assignment" : "Assign Evaluator"}</DialogTitle></DialogHeader>
             <p className="text-[11px] text-muted-foreground -mt-2">Evaluator → Group → Station → Save. Event: this one.</p>
             <div className="space-y-3">
               <div className="space-y-1">
@@ -1554,9 +1567,14 @@ const EvaluatorsTab = ({ eventId, isAdmin }) => {
                   <span className="text-muted-foreground"> — {(a.group_names || []).join(", ") || "All groups"} · {a.station_name}</span>
                 </p>
                 {isAdmin && (
-                  <Button variant="ghost" size="sm" className="h-8 rounded-lg text-muted-foreground shrink-0" onClick={() => remove(a.id)} data-testid={`assignment-delete-${a.id}`}>
-                    <Trash2 className="h-4 w-4 mr-1" /> Revoke
-                  </Button>
+                  <>
+                    <Button variant="outline" size="sm" className="h-8 rounded-lg shrink-0" onClick={() => startEdit(a)} data-testid={`assignment-edit-${a.id}`}>
+                      Edit
+                    </Button>
+                    <Button variant="ghost" size="sm" className="h-8 rounded-lg text-muted-foreground shrink-0" onClick={() => remove(a.id)} data-testid={`assignment-delete-${a.id}`}>
+                      <Trash2 className="h-4 w-4 mr-1" /> Revoke
+                    </Button>
+                  </>
                 )}
               </CardContent>
             </Card>
