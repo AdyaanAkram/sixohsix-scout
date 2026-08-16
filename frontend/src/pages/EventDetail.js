@@ -356,11 +356,33 @@ const RosterTab = ({ eventId, isAdmin }) => {
   const [addGroupId, setAddGroupId] = useState("");
   const [importAvailable, setImportAvailable] = useState(true);
 
+  const [newToday, setNewToday] = useState([]);
+
   const load = useCallback(() => {
     api.get(`/events/${eventId}/roster`).then((r) => setRoster(r.data));
     api.get(`/events/${eventId}/groups`).then((r) => setGroups(r.data)).catch(() => setGroups([]));
+    // Day-of signups: every athlete added to the ORG today surfaces at the top
+    // of this roster for one-tap approve/add, so walk-up-time registrations
+    // never hide on the Players page while the event is running.
+    api.get("/athletes").then((r) => {
+      const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+      setNewToday((r.data || []).filter((a) =>
+        a.status !== "archived" && a.created_at && new Date(a.created_at) >= midnight));
+    }).catch(() => setNewToday([]));
   }, [eventId]);
   useEffect(() => { load(); }, [load]);
+
+  const approveAthlete = async (athleteId) => {
+    try { await api.post(`/athletes/${athleteId}/approve`); toast.success("Player approved."); load(); }
+    catch (e) { toast.error(errMsg(e)); }
+  };
+  const quickAdd = async (athleteId) => {
+    try {
+      await api.post(`/events/${eventId}/roster`, { athlete_ids: [athleteId], group_id: null });
+      toast.success("Added to the event.");
+      load();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
 
   useEffect(() => {
     if (!addOpen) return;
@@ -403,6 +425,39 @@ const RosterTab = ({ eventId, isAdmin }) => {
   if (!roster) return <Skeleton className="h-48 rounded-2xl" />;
   return (
     <div className="space-y-3">
+      {isAdmin && newToday.length > 0 && (
+        <Card className="rounded-2xl border-warning/40 bg-warning/5" data-testid="roster-new-today-card">
+          <CardContent className="py-3 space-y-2">
+            <p className="text-sm font-semibold text-foreground">
+              New sign-ups today ({newToday.length})
+            </p>
+            {newToday.map((a) => {
+              const onRoster = rosterIds.has(a.id);
+              return (
+                <div key={a.id} className="flex flex-wrap items-center gap-2 rounded-xl bg-card border border-border px-3 py-2">
+                  <span className="text-sm font-semibold flex-1 min-w-[120px]">
+                    {a.first_name} {a.last_name}
+                    <span className="text-xs text-muted-foreground font-normal ml-2">{a.age_group || ""} {a.primary_position ? `· ${a.primary_position}` : ""}</span>
+                  </span>
+                  {a.status === "pending" && (
+                    <Button size="sm" className="h-8 rounded-lg text-xs bg-primary hover:bg-brand-secondary" onClick={() => approveAthlete(a.id)} data-testid={`roster-approve-${a.id}`}>
+                      Approve
+                    </Button>
+                  )}
+                  {a.status === "active" && !onRoster && (
+                    <Button size="sm" variant="outline" className="h-8 rounded-lg text-xs" onClick={() => quickAdd(a.id)} data-testid={`roster-quickadd-${a.id}`}>
+                      Add to event
+                    </Button>
+                  )}
+                  {a.status === "active" && onRoster && (
+                    <span className="text-xs font-semibold text-success">On roster ✓</span>
+                  )}
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm text-muted-foreground">{roster.length} players on roster</p>
@@ -468,7 +523,14 @@ const RosterTab = ({ eventId, isAdmin }) => {
         <EmptyState icon={Users} title="Roster is empty" hint="Add players from the directory or import a CSV first." />
       ) : (
         <div className="space-y-2">
-          {roster.map((r) => (
+          {[...roster].sort((a, b) => {
+            // Today's additions float to the top so day-of registrations are
+            // immediately visible; everyone else keeps the existing order.
+            const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+            const an = a.created_at && new Date(a.created_at) >= midnight ? 1 : 0;
+            const bn = b.created_at && new Date(b.created_at) >= midnight ? 1 : 0;
+            return bn - an;
+          }).map((r) => (
             <Card key={r.athlete_id} className="rounded-2xl border-border">
               <CardContent className="py-3 flex flex-wrap items-center gap-3">
                 <PlayerAvatar firstName={r.first_name} lastName={r.last_name} bib={r.bib_number} size="sm" />
