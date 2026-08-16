@@ -141,6 +141,9 @@ class MetricBody(BaseModel):
     display_order: int = 0
     higher_is_better: bool = True
     options: list[str] = []
+    # Dropdown scoring (Rev6): label -> 8-12 developmental score. Evaluators see
+    # only labels; the backend converts. Absent = legacy unscored multiple_choice.
+    option_scores: dict[str, float] | None = None
 
 
 class CategoryBody(BaseModel):

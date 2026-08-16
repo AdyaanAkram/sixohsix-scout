@@ -29,7 +29,10 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
 } from "recharts";
 
-const EVENT_STATUSES = ["Draft", "Registration Open", "Registration Closed", "Check-In Open", "Evaluation Active", "Evaluation Complete", "Reports Under Review", "Closed"];
+// Canonical event lifecycle. Older events may still carry legacy statuses
+// ("Registration Open" etc.) — those keep displaying as stored and appear as
+// the current value in the status control, but only canonical ones can be set.
+const EVENT_STATUSES = ["Draft", "Setup", "Ready", "Evaluation Active", "Evaluation Complete", "Review", "Published", "Closed"];
 
 // ---------------- Roster CSV import wizard ----------------
 const IMPORT_STATUS_META = {
@@ -1292,6 +1295,26 @@ const StationsTab = ({ eventId, isAdmin }) => {
 };
 
 // ---------------- Evaluators tab ----------------
+// Plain-English access-length choices for guest invite codes. Each maps to the
+// ttl_hours integer the invites API already expects — the API contract is
+// unchanged, only the wording is human.
+const INVITE_ACCESS_OPTIONS = [
+  { id: "end_of_today", label: "End of today" },
+  { id: "24h", label: "24 hours" },
+  { id: "3d", label: "3 days" },
+  { id: "1w", label: "1 week" },
+];
+
+const inviteTtlHours = (accessId) => {
+  if (accessId === "end_of_today") {
+    const now = new Date();
+    const end = new Date(now);
+    end.setHours(23, 59, 59, 999);
+    return Math.max(1, Math.ceil((end - now) / 3600000));
+  }
+  return { "24h": 24, "3d": 72, "1w": 168 }[accessId] || 24;
+};
+
 const EvaluatorsTab = ({ eventId, isAdmin }) => {
   const [assignments, setAssignments] = useState(null);
   const [staff, setStaff] = useState([]);
@@ -1300,7 +1323,7 @@ const EvaluatorsTab = ({ eventId, isAdmin }) => {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ evaluator_id: "", station_id: "", group_ids: [] });
   const [invites, setInvites] = useState([]);
-  const [inviteForm, setInviteForm] = useState({ role: "evaluator", email: "", station_id: "", ttl_hours: 48 });
+  const [inviteForm, setInviteForm] = useState({ role: "evaluator", email: "", station_id: "", access: "24h" });
   const [inviteBusy, setInviteBusy] = useState(false);
 
   const load = useCallback(() => {
@@ -1334,7 +1357,7 @@ const EvaluatorsTab = ({ eventId, isAdmin }) => {
         role: inviteForm.role,
         email: inviteForm.email || undefined,
         station_id: inviteForm.station_id || undefined,
-        ttl_hours: Number(inviteForm.ttl_hours) || 48,
+        ttl_hours: inviteTtlHours(inviteForm.access),
       });
       toast.success(`Code ${r.data.code} created — share /redeem`);
       navigator.clipboard?.writeText(r.data.code).catch(() => {});
@@ -1381,22 +1404,17 @@ const EvaluatorsTab = ({ eventId, isAdmin }) => {
                   {stations.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  min={1}
-                  max={720}
-                  value={inviteForm.ttl_hours}
-                  onChange={(e) => setInviteForm((f) => ({ ...f, ttl_hours: e.target.value }))}
-                  className="h-10 rounded-lg"
-                  data-testid="invite-ttl-hours"
-                  aria-label="Access TTL hours"
-                />
-                <span className="text-xs text-muted-foreground whitespace-nowrap">hrs TTL</span>
-              </div>
+              <Select value={inviteForm.access} onValueChange={(v) => setInviteForm((f) => ({ ...f, access: v }))}>
+                <SelectTrigger className="h-10 rounded-lg" data-testid="invite-access-select" aria-label="Access length">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {INVITE_ACCESS_OPTIONS.map((o) => <SelectItem key={o.id} value={o.id}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <p className="text-[11px] text-muted-foreground">
-              Code expires after TTL. Redeemed access lasts until the later of that TTL or ~12h after event end. Revoke deactivates temporary memberships.
+              The code stops working after the time you pick. Guest access always lasts through the end of the event day. Revoke ends a guest's access immediately.
             </p>
             {invites.length > 0 && (
               <div className="space-y-2">
@@ -1629,6 +1647,127 @@ const PlayerProgressDialog = ({ eventId, player, open, onOpenChange }) => {
   );
 };
 
+// ---------------- Athlete-level live progress (additive) ----------------
+// Per-station chip marks: ✓ complete, ● in progress, ○ missing; optional
+// stations render faded and never count against completion.
+const ATHLETE_STATION_CHIP = {
+  complete: { mark: "✓", cls: "bg-success/15 text-success border-success/30" },
+  in_progress: { mark: "●", cls: "bg-warning/15 text-warning border-warning/40" },
+  missing: { mark: "○", cls: "bg-card text-muted-foreground border-border" },
+  optional: { mark: "○", cls: "bg-card text-muted-foreground border-border opacity-50" },
+};
+
+// Hides itself entirely when GET /events/{id}/progress/athletes is unavailable
+// (older server). Polls every 20s while the tab is mounted.
+const AthleteProgressSection = ({ eventId }) => {
+  const [data, setData] = useState(); // undefined = loading, null = unavailable
+  const [expanded, setExpanded] = useState({});
+
+  useEffect(() => {
+    let live = true;
+    const load = () =>
+      api.get(`/events/${eventId}/progress/athletes`)
+        .then((r) => { if (live) setData(r.data); })
+        .catch(() => { if (live) setData((d) => (d === undefined ? null : d)); });
+    load();
+    const t = setInterval(load, 20000);
+    return () => { live = false; clearInterval(t); };
+  }, [eventId]);
+
+  if (data === null) return null;
+  if (data === undefined) return <Skeleton className="h-40 rounded-2xl" />;
+
+  const totals = data.totals || {};
+  const totalChips = [
+    { label: "Checked In", value: totals.checked_in, tone: "text-info" },
+    { label: "Not Started", value: totals.not_started, tone: "text-muted-foreground" },
+    { label: "In Progress", value: totals.in_progress, tone: "text-warning" },
+    { label: "Complete", value: totals.complete, tone: "text-success" },
+    { label: "Missing", value: totals.missing, tone: "text-brand" },
+    { label: "Flagged", value: totals.flagged, tone: totals.flagged ? "text-brand" : "text-muted-foreground" },
+    { label: "Submitted", value: totals.submitted, tone: "text-foreground" },
+    { label: "Awaiting Review", value: totals.awaiting_review, tone: "text-foreground" },
+  ];
+
+  return (
+    <Card className="rounded-2xl border-border" data-testid="event-athlete-progress">
+      <CardContent className="pt-4 pb-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-semibold text-foreground text-sm">Athletes</p>
+          <p className="text-[11px] text-muted-foreground">✓ complete · ● in progress · ○ missing</p>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {totalChips.map((c) => (
+            <span key={c.label} className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">
+              {c.label} <span className={cn("font-mono-num font-bold", c.tone)}>{c.value ?? 0}</span>
+            </span>
+          ))}
+        </div>
+        <div className="space-y-1.5">
+          {(data.athletes || []).map((a) => {
+            const hasMissing = (a.missing || []).length > 0;
+            const open = !!expanded[a.athlete_id];
+            return (
+              <div key={a.athlete_id} className="rounded-xl border border-border" data-testid={`athlete-progress-row-${a.athlete_id}`}>
+                <button
+                  type="button"
+                  onClick={() => hasMissing && setExpanded((s) => ({ ...s, [a.athlete_id]: !s[a.athlete_id] }))}
+                  className={cn("w-full px-3 py-2 text-left", hasMissing ? "cursor-pointer hover:bg-secondary rounded-xl" : "cursor-default")}
+                >
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <span className="font-mono-num text-xs text-muted-foreground w-10 shrink-0">#{a.bib_number || "—"}</span>
+                    <span className="text-sm font-semibold text-foreground truncate min-w-[110px] flex-1">
+                      {a.name}
+                      {a.flagged && <AlertTriangle className="inline h-3.5 w-3.5 text-brand ml-1 mb-0.5" />}
+                    </span>
+                    <span className="flex items-center gap-2 w-32 shrink-0">
+                      <span className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                        <span
+                          className={cn("block h-full rounded-full", a.pct_complete === 100 ? "bg-success" : "bg-brand")}
+                          style={{ width: `${a.pct_complete}%` }}
+                        />
+                      </span>
+                      <span className="font-mono-num text-xs text-muted-foreground">{a.pct_complete}%</span>
+                    </span>
+                    <span className="flex flex-wrap gap-1">
+                      {(a.stations || []).map((s) => {
+                        const chip = ATHLETE_STATION_CHIP[s.state] || ATHLETE_STATION_CHIP.missing;
+                        return (
+                          <span key={s.station_id} className={cn("text-[11px] font-semibold rounded-full border px-1.5 py-0.5", chip.cls)}>
+                            {s.name} {chip.mark}
+                          </span>
+                        );
+                      })}
+                    </span>
+                    {hasMissing && (
+                      <ChevronRight className={cn("h-4 w-4 text-muted-foreground shrink-0 ml-auto transition-transform", open && "rotate-90")} />
+                    )}
+                  </div>
+                </button>
+                {open && hasMissing && (
+                  <div className="px-3 pb-2.5 space-y-1 border-t border-divider pt-2">
+                    {a.missing.map((m, i) => (
+                      <p key={`${m.station}-${i}`} className="text-[11px] text-muted-foreground">
+                        <span className="font-semibold text-warning">{m.station}</span>
+                        {(m.metrics || []).length > 0
+                          ? <> — missing: {m.metrics.join(", ")}</>
+                          : " — not started"}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {(data.athletes || []).length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-4">No athletes on the roster yet.</p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
 const ProgressTab = ({ eventId }) => {
   const [data, setData] = useState(null);
   const [roster, setRoster] = useState(null);
@@ -1732,6 +1871,8 @@ const ProgressTab = ({ eventId }) => {
           </ResponsiveContainer>
         </CardContent>
       </Card>
+
+      <AthleteProgressSection eventId={eventId} />
 
       {roster && roster.length > 0 && (
         <Card className="rounded-2xl border-border">
@@ -2057,27 +2198,13 @@ export default function EventDetail() {
             {isAdmin && (
               <Select value={event.status} onValueChange={setStatus}>
                 <SelectTrigger className="h-10 w-[190px] rounded-xl bg-card" data-testid="event-status-select"><SelectValue /></SelectTrigger>
-                <SelectContent>{EVENT_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                <SelectContent>
+                  {!EVENT_STATUSES.includes(event.status) && (
+                    <SelectItem value={event.status}>{event.status} (legacy)</SelectItem>
+                  )}
+                  {EVENT_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
               </Select>
-            )}
-            {isAdmin && (
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-10 w-10 rounded-xl border-destructive/40 text-destructive hover:bg-destructive/10"
-                title="Delete event"
-                data-testid="event-delete-button"
-                onClick={() => {
-                  const ok = window.confirm(
-                    `Delete "${event.name}"?\n\nThis removes the event, its roster links, groups, stations, and assignments. Athlete profiles are never touched. Submitted evaluations block deletion.`);
-                  if (!ok) return;
-                  api.delete(`/events/${eventId}`)
-                    .then(() => { toast.success("Event deleted."); navigate("/events"); })
-                    .catch((e) => toast.error(errMsg(e)));
-                }}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
             )}
           </div>
         </div>
@@ -2114,6 +2241,37 @@ export default function EventDetail() {
           {event.description && <Card className="rounded-2xl border-border mt-3"><CardContent className="py-4 text-sm text-muted-foreground">{event.description}</CardContent></Card>}
           {(event.age_groups || []).length > 0 && (
             <div className="flex gap-2 mt-3">{event.age_groups.map((a) => <span key={a} className="rounded-full bg-card border px-3 py-1 text-xs font-semibold text-foreground">{a}</span>)}</div>
+          )}
+          {isAdmin && (
+            <div className="mt-8 rounded-2xl border border-border bg-card p-4" data-testid="event-danger-zone">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Danger zone</p>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground max-w-md">
+                  Deleting removes this event, its roster links, groups, stations, and assignments.
+                  Athlete profiles are never touched. Submitted evaluations block deletion.
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                  disabled={event.status === "Evaluation Active"}
+                  data-testid="event-delete-button"
+                  onClick={() => {
+                    const ok = window.confirm(
+                      `Delete "${event.name}"?\n\nThis removes the event, its roster links, groups, stations, and assignments. Athlete profiles are never touched. Submitted evaluations block deletion.`);
+                    if (!ok) return;
+                    api.delete(`/events/${eventId}`)
+                      .then(() => { toast.success("Event deleted."); navigate("/events"); })
+                      .catch((e) => toast.error(errMsg(e)));
+                  }}
+                >
+                  <Trash2 className="h-4 w-4 mr-1" /> Delete event
+                </Button>
+              </div>
+              {event.status === "Evaluation Active" && (
+                <p className="mt-1 text-[11px] text-warning" data-testid="event-delete-hint">Pause the evaluation before deleting.</p>
+              )}
+            </div>
           )}
         </TabsContent>
 

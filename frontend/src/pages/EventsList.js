@@ -14,6 +14,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { CalendarDays, MapPin, Plus, Users, UserCog, ChevronRight } from "lucide-react";
 
+// Chip styling for the canonical lifecycle statuses StatusBadge doesn't know
+// yet. Legacy statuses ("Registration Open" etc.) pass through as-is and keep
+// StatusBadge's own styling.
+const LIFECYCLE_BADGE_CLS = {
+  Setup: "bg-[hsl(var(--divider))] text-[hsl(var(--foreground))] border-[hsl(var(--border-strong))]",
+  Ready: "bg-[hsl(var(--info)/0.15)] text-info border-[hsl(var(--info)/0.4)]",
+  Review: "bg-warning/15 text-warning border-warning/40",
+  Published: "bg-success/15 text-success border-success/40",
+};
+
 const EVENT_TYPES = [
   "Evaluation",
   "Camp",
@@ -149,7 +159,7 @@ export default function EventsList() {
                 <CardContent className="pt-5 pb-5">
                   <div className="flex items-start justify-between gap-2">
                     <p className="font-display text-2xl text-foreground leading-tight">{ev.name}</p>
-                    <StatusBadge status={ev.status} />
+                    <StatusBadge status={ev.status} className={LIFECYCLE_BADGE_CLS[ev.status]} />
                   </div>
                   <div className="mt-2 space-y-1 text-sm text-muted-foreground">
                     <p className="flex items-center gap-1.5"><CalendarDays className="h-4 w-4 text-muted-foreground" /> {ev.date} {ev.start_time && `· ${ev.start_time}–${ev.end_time}`}</p>

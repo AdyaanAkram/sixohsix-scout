@@ -35,18 +35,58 @@ ASSESSMENT_MODEL_DEFAULT = "gpt-4o-mini"
 
 _SYSTEM_PROMPT = (
     "You are a youth baseball player-development analyst writing for 60'6\" Athletics. "
-    "You turn verified evaluation data into a development assessment read by the athlete "
-    "and their parents. Rules: be encouraging and specific; ground every statement in the "
-    "provided data — never invent scores or events; scores use an 8-12 developmental scale "
-    "(8 = emerging, 9 = developing, 10 = solid for age group, 11 = strong, 12 = advanced); "
-    "a metric state of not_observed/na/dnp/retest means NO conclusion may be drawn from it; "
-    "no medical, injury, or nutrition advice; no comparisons to named other athletes; "
+    "You turn verified evaluation data into a professional development recap read by the "
+    "athlete, their parents, and their coaches. Rules: be encouraging and specific; ground "
+    "every statement in the provided data — NEVER invent measurements, observations, "
+    "velocities, rankings, scores, or events; only reference data that appears in the input. "
+    "Scores use an 8-12 developmental scale (8 = emerging, 9 = developing, 10 = solid for "
+    "age group, 11 = strong, 12 = advanced). "
+    "A metric state of not_observed/na/dnp/retest/not offered is NEVER negative and NO "
+    "conclusion may be drawn from it — omit it or say \"Not Evaluated\". "
+    "Explicitly distinguish objective measurements (timed/measured numbers, with their "
+    "verified status) from evaluator observations (a coach's judgment); never present one "
+    "as the other. Reference actual evidence from the data (e.g. \"showed consistent "
+    "footwork on routine and forehand reps\") instead of generic praise. "
+    "Judge the athlete only against age-band-appropriate standards for the provided "
+    "evaluation_track — never judge an 11-year-old on a 17-year-old's bar. "
+    "development_trend may ONLY be built from the provided history, comparing verified "
+    "prior data against current data; when history is null (or absent), development_trend "
+    "MUST be null. "
+    "coach_summary may use scouting terminology; parent_summary must be jargon-free plain "
+    "language a family with no baseball background understands. "
+    "No medical, injury, or nutrition advice; no comparisons to named other athletes; "
     "age-appropriate tone. Respond ONLY with JSON matching exactly: "
-    '{"summary": str (3-5 sentences), '
-    '"strengths": [{"area": str, "detail": str}] (2-4 items), '
+    '{"evaluation_summary": str (plain-language recap of the evaluation), '
+    '"verified_measurements": [{"metric": str, "value": str, "unit": str|null, '
+    '"verified": bool}] (ONLY measurements actually collected in the input; empty list '
+    "if none were provided), "
+    '"position_assessments": [{"position": str, "summary": str}] (one per evaluated '
+    "position from positions_evaluated), "
+    '"athletic_profile": str|null (speed/explosiveness/movement quality — null if not '
+    "tested), "
+    '"hitting_assessment": str|null (ONLY when hitting was evaluated, else null), '
+    '"defensive_assessment": str|null (hands/footwork/transfer/throws/routes per '
+    "applicable position — null if defense was not evaluated), "
+    '"strengths": [{"area": str, "detail": str}] (2-4 items, evidence-supported), '
     '"development_priorities": [{"area": str, "why": str, "focus": str}] (2-4 items, '
     "why = what the data showed, focus = concrete practice guidance), "
-    '"next_steps": [str] (2-4 short actionable items)}'
+    '"next_steps": [str] (2-4 short age- and position-appropriate actionable items), '
+    '"development_trend": [{"area": str, "status": "Improved"|"Stable"|"Needs Attention", '
+    '"evidence": str}] | null (null when history is null), '
+    '"coach_summary": str (professional synopsis for coaches/scouts), '
+    '"parent_summary": str (jargon-free version for families)}'
+)
+
+# Response-shape contract for the 12-section recap (Rev6).
+_REQUIRED_CONTENT_KEYS = (
+    ("evaluation_summary", str), ("verified_measurements", list),
+    ("position_assessments", list), ("strengths", list),
+    ("development_priorities", list), ("next_steps", list),
+    ("coach_summary", str), ("parent_summary", str),
+)
+_NULLABLE_CONTENT_KEYS = (
+    ("athletic_profile", str), ("hitting_assessment", str),
+    ("defensive_assessment", str), ("development_trend", list),
 )
 
 
@@ -85,10 +125,14 @@ def _call_openai(payload_data: dict) -> dict:
             status_code=502,
             detail=f"The AI provider could not generate the assessment ({type(e).__name__}). Try again.")
     # minimal shape guard so the UI can rely on the sections existing
-    for key, kind in (("summary", str), ("strengths", list),
-                      ("development_priorities", list), ("next_steps", list)):
+    for key, kind in _REQUIRED_CONTENT_KEYS:
         if not isinstance(out.get(key), kind):
             raise HTTPException(status_code=502, detail="The AI response was malformed. Regenerate to try again.")
+    for key, kind in _NULLABLE_CONTENT_KEYS:
+        val = out.get(key)
+        if val is not None and not isinstance(val, kind):
+            raise HTTPException(status_code=502, detail="The AI response was malformed. Regenerate to try again.")
+        out.setdefault(key, None)
     return out
 
 
@@ -99,6 +143,125 @@ async def _approved_evaluations(org: str, athlete_id: str, event_id: str) -> lis
         {"organization_id": org, "athlete_id": athlete_id, "event_id": event_id,
          "status": "approved"},  # the non-negotiable gate
         {"_id": 0}).to_list(50)
+
+
+def _evaluation_track(athlete: dict) -> str:
+    """Development (8-12) vs Performance (13-18), from age or the age band."""
+    age = athlete.get("age")
+    if age is None:
+        import re
+        m = re.search(r"\d+", str(athlete.get("age_group") or ""))
+        if m:
+            age = int(m.group())
+    if age is not None and int(age) <= 12:
+        return "Development (8-12)"
+    return "Performance (13-18)"
+
+
+async def _positions_evaluated(org: str, athlete: dict, event_id: str) -> list[str]:
+    """Positions from the event roster entry; primary+secondary as fallback."""
+    entry = await db.event_athletes.find_one(
+        {"organization_id": org, "event_id": event_id, "athlete_id": athlete["id"]},
+        {"_id": 0, "positions_evaluated": 1})
+    positions = (entry or {}).get("positions_evaluated")
+    if isinstance(positions, list) and positions:
+        return [str(p) for p in positions if p]
+    fallback = [athlete.get("primary_position"), *(athlete.get("secondary_positions") or [])]
+    return [p for p in fallback if p]
+
+
+async def _verified_measurement_rows(org: str, athlete_id: str) -> list[dict]:
+    """Latest reading per canonical metric from db.verified_metrics, with its
+    verification status. Best-effort: an empty or odd-shaped collection yields []."""
+    try:
+        from routes_metrics import resolve_source, source_is_verified
+        from scoring import canonical_metric_key, metric_meta
+
+        rows = await db.verified_metrics.find(
+            {"organization_id": org, "athlete_id": athlete_id}, {"_id": 0}).to_list(1000)
+        latest: dict[str, dict] = {}
+        for r in rows:
+            key = canonical_metric_key(r.get("metric_key")) or r.get("metric_key")
+            if not key:
+                continue
+            when = r.get("measured_at") or r.get("created_at") or ""
+            prev = latest.get(key)
+            prev_when = (prev.get("measured_at") or prev.get("created_at") or "") if prev else ""
+            if prev is None or when >= prev_when:
+                latest[key] = r
+        out = []
+        for key, r in sorted(latest.items()):
+            meta = metric_meta(key) or {}
+            src = resolve_source(r)
+            out.append({
+                "metric": meta.get("label") or str(key).replace("_", " ").title(),
+                "value": r.get("value"),
+                "unit": r.get("unit") or meta.get("unit"),
+                "verified": source_is_verified(src),
+                "source": src,
+                "measured_at": r.get("measured_at"),
+            })
+        return out
+    except Exception:  # noqa: BLE001 — measurements are additive context, never fatal
+        return []
+
+
+async def _assessment_history(org: str, athlete_id: str, event_id: str) -> dict | None:
+    """Compact prior-data block: published assessments at OTHER events (their
+    development-priority areas + verified measurements) and prior approved
+    evaluations' overall scores, keyed by event date. None when nothing exists —
+    the model must then leave development_trend null."""
+    try:
+        prior_assessments = await db.assessments.find(
+            {"organization_id": org, "athlete_id": athlete_id, "status": "published",
+             "event_id": {"$nin": [event_id, None]}},
+            {"_id": 0, "event_id": 1, "content": 1, "published_at": 1}).to_list(25)
+        prior_evals = await db.evaluations.find(
+            {"organization_id": org, "athlete_id": athlete_id, "status": "approved",
+             "event_id": {"$nin": [event_id, None]}},
+            {"_id": 0, "event_id": 1, "computed": 1}).to_list(100)
+        if not prior_assessments and not prior_evals:
+            return None
+
+        event_ids = list({d["event_id"] for d in [*prior_assessments, *prior_evals]
+                          if d.get("event_id")})
+        events = await db.events.find(
+            {"id": {"$in": event_ids}, "organization_id": org},
+            {"_id": 0, "id": 1, "date": 1}).to_list(100)
+        dates = {e["id"]: e.get("date") for e in events}
+
+        assessment_blocks = []
+        for a in sorted(prior_assessments,
+                        key=lambda d: dates.get(d.get("event_id")) or d.get("published_at") or "",
+                        reverse=True)[:5]:
+            content = a.get("content") or {}
+            priorities = content.get("development_priorities") or []
+            areas = [p.get("area") for p in priorities
+                     if isinstance(p, dict) and p.get("area")][:6]
+            measurements = [m for m in (content.get("verified_measurements") or [])
+                            if isinstance(m, dict)][:12]
+            assessment_blocks.append({
+                "event_date": dates.get(a.get("event_id")),
+                "development_priority_areas": areas,
+                "verified_measurements": measurements,
+            })
+
+        score_blocks: dict[str, list] = {}
+        for e in prior_evals:
+            computed = e.get("computed") or {}
+            score = computed.get("overall_score") or computed.get("overall")
+            if score is None:
+                continue
+            score_blocks.setdefault(dates.get(e.get("event_id")) or "unknown", []).append(score)
+        prior_scores = [{"event_date": d, "overall_scores": s}
+                        for d, s in sorted(score_blocks.items(), reverse=True)[:8]]
+
+        if not assessment_blocks and not prior_scores:
+            return None
+        return {"previous_published_assessments": assessment_blocks,
+                "previous_approved_overall_scores": prior_scores}
+    except Exception:  # noqa: BLE001 — history is additive context, never fatal
+        return None
 
 
 async def _build_model_input(org: str, athlete: dict, event: dict, evals: list[dict]) -> dict:
@@ -128,26 +291,42 @@ async def _build_model_input(org: str, athlete: dict, event: dict, evals: list[d
             if row.get("tags"):
                 entry["observation_tags"] = row["tags"]
             metrics.append(entry)
-        eval_blocks.append({
+        block = {
             "station": e.get("station_name") or e.get("template_name") or "Evaluation",
             "overall_score": computed.get("overall_score") or computed.get("overall"),
             "category_scores": computed.get("category_scores"),
             "metrics": metrics,
             "evaluator_recommendation": e.get("recommendation"),
-        })
+        }
+        # Approved evaluator words — quotable as observation evidence.
+        comments = e.get("comments") or {}
+        notes = {k: comments.get(k) for k in ("strengths", "development_needs", "general")
+                 if comments.get(k)}
+        if notes:
+            block["evaluator_notes"] = notes
+        eval_blocks.append(block)
 
-    return {
+    history = await _assessment_history(org, athlete["id"], event["id"])
+    payload = {
         "athlete": {
             "first_name": athlete.get("first_name"),
             "age_group": athlete.get("age_group"),
+            "evaluation_track": _evaluation_track(athlete),
             "graduation_year": athlete.get("graduation_year"),
             "primary_position": athlete.get("primary_position"),
             "secondary_positions": athlete.get("secondary_positions") or [],
             "bats": athlete.get("bats"), "throws": athlete.get("throws"),
         },
         "event": {"name": event.get("name"), "date": event.get("date")},
+        "positions_evaluated": await _positions_evaluated(org, athlete, event["id"]),
         "approved_evaluations": eval_blocks,
+        "verified_measurements": await _verified_measurement_rows(org, athlete["id"]),
+        "history": history,
     }
+    if history is None:
+        payload["history_note"] = ("No prior published data exists for this athlete: "
+                                   "development_trend MUST be null.")
+    return payload
 
 
 # ---------------- Status derivation for the UI ----------------
@@ -248,8 +427,7 @@ async def edit_assessment(assessment_id: str, body: AssessmentEditBody,
         raise HTTPException(status_code=409, detail="A published assessment is permanent and cannot be edited.")
     updates = {"updated_at": now_iso()}
     if body.content is not None:
-        for key, kind in (("summary", str), ("strengths", list),
-                          ("development_priorities", list), ("next_steps", list)):
+        for key, kind in _REQUIRED_CONTENT_KEYS:
             if not isinstance(body.content.get(key), kind):
                 raise HTTPException(status_code=422, detail=f"content.{key} is missing or has the wrong type.")
         updates["content"] = body.content

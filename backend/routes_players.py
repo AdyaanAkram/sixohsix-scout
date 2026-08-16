@@ -64,8 +64,11 @@ def resolve_age_group(age_group: str | None, dob_str: str | None) -> str | None:
 class AthleteBody(BaseModel):
     first_name: str
     last_name: str
+    middle_name: str | None = None
     preferred_name: str | None = None
     date_of_birth: str | None = None
+    gender: str | None = None
+    current_grade: str | None = None
     age_group: str | None = None  # explicit band; falls back to the DOB-derived band
     graduation_year: int | None = None
     primary_position: str | None = None
@@ -84,7 +87,14 @@ class AthleteBody(BaseModel):
     guardian_email: str | None = None
     guardian_phone: str | None = None
     emergency_contact: str | None = None
+    emergency_contact_name: str | None = None
+    emergency_contact_relationship: str | None = None
+    emergency_contact_phone: str | None = None
     email: str | None = None  # athlete's own email (distinct from guardian)
+    phone: str | None = None  # athlete's own phone (distinct from guardian)
+    years_playing: int | None = None
+    participation_notes: str | None = None  # injuries/allergies/medications — RESTRICTED
+    public_profile_enabled: bool = False
     status: str = "active"
     photo_url: str | None = None
 
@@ -120,6 +130,8 @@ EVALUATOR_PRIVATE_FIELDS = [
     "insurance_info", "insurance_provider", "insurance_policy", "insurance_group",
     "financial_notes", "payment_status", "tuition", "fees_owed", "scholarship",
     "ssn", "tax_id",
+    "participation_notes", "emergency_contact_name",
+    "emergency_contact_relationship", "emergency_contact_phone", "phone",
 ]
 
 

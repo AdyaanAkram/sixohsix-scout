@@ -120,6 +120,206 @@ def supported_metric_keys():
     return list(CANONICAL_METRIC_CATALOG) + list(LEGACY_METRIC_CATALOG)
 
 
+# ---------------------------------------------------------------------------
+# Dropdown outcome scoring (client revision: dropdown scoring system)
+#
+# Evaluators never see numbers. Template metrics of metric_type
+# "multiple_choice" may carry an optional parallel `option_scores` map
+# {label -> developmental score, 12/10/9/8}. The evaluator taps a
+# baseball-specific outcome label; the backend silently converts the selection
+# to its mapped score for analytics/AI while the stored raw value stays the
+# label string so review UIs keep showing words.
+#
+# OUTCOME_LIBRARY is the single source for these option sets — seed.py builds
+# new templates from it and scripts/migrate_dropdown_scoring.py converts
+# existing rating metrics to it. `group` and `keywords` exist for the
+# migration's fuzzy matching; the app itself only reads options/scores.
+# ---------------------------------------------------------------------------
+
+def _outcomes(group, keywords, *labeled_scores):
+    return {
+        "group": group,
+        "keywords": keywords,
+        "options": [label for label, _ in labeled_scores],
+        "scores": {label: score for label, score in labeled_scores},
+    }
+
+
+OUTCOME_LIBRARY = {
+    # ---- Infield ----
+    "Routine Ground Ball — Hands": _outcomes(
+        "Infield", ["hands", "glove", "infield action", "ground-ball fundamentals",
+                    "ground ball fundamentals", "fielding"],
+        ("Clean, out front, works through ball", 12),
+        ("Secures ball, occasional double-clutch", 10),
+        ("Fights the ball / rigid hands", 9),
+        ("Ball plays him — needs fundamental work", 8)),
+    "Routine Ground Ball — Footwork": _outcomes(
+        "Infield", ["infield footwork", "footwork"],
+        ("Right-left through the ball, on time every rep", 12),
+        ("Good fielding position, feet occasionally late", 10),
+        ("Flat-footed — fields it standing still", 9),
+        ("Feet never set — no rhythm into the throw", 8)),
+    "Routine Ground Ball — Exchange & Transfer": _outcomes(
+        "Infield", ["exchange", "transfer"],
+        ("Quick, clean glove-to-hand, no wasted motion", 12),
+        ("Reliable exchange, a beat slow under pressure", 10),
+        ("Digs the ball out of the glove", 9),
+        ("Loses the ball on the transfer", 8)),
+    "Routine Ground Ball — Throw Accuracy": _outcomes(
+        "Infield", ["throwing accuracy", "arm accuracy", "accuracy"],
+        ("On the bag chest-high, every time", 12),
+        ("Mostly accurate, occasional short-hop or tail", 10),
+        ("Scattered — makes the first baseman work", 9),
+        ("Throws pull him off the play — rebuild mechanics", 8)),
+    "Forehand": _outcomes(
+        "Infield", ["forehand"],
+        ("Attacks the forehand, fields on the move, strong throw", 12),
+        ("Fields it clean, has to gather before the throw", 10),
+        ("Waits on the ball — range a step short", 9),
+        ("Circles around it instead of taking the forehand", 8)),
+    "Backhand": _outcomes(
+        "Infield", ["backhand"],
+        ("Sets feet early, clean backhand, strong throw", 12),
+        ("Fields it, throw takes him time", 10),
+        ("Reaches late, inconsistent glove position", 9),
+        ("Avoids the backhand — takes it on the forehand side", 8)),
+    "Slow Roller": _outcomes(
+        "Infield", ["slow roller"],
+        ("Charges hard, clean pick, throws on the run", 12),
+        ("Comes to get it, needs an extra gather step", 10),
+        ("Hesitates on the charge, lets the ball come to him", 9),
+        ("Stays back and waits — play is over before the throw", 8)),
+    # ---- Outfield ----
+    "Fly Ball — Routes & Reads": _outcomes(
+        "Outfield", ["route", "fly-ball", "fly ball", "reads"],
+        ("First step back, direct route, catches at full speed", 12),
+        ("Good read, minor banana route", 10),
+        ("Late read — drifts instead of driving to the spot", 9),
+        ("Misjudges the flight — ball over his head", 8)),
+    "Ground Ball Through the Outfield": _outcomes(
+        "Outfield", ["ground ball through", "through the outfield", "do-or-die"],
+        ("Attacks under control, fields off glove-side foot, in rhythm to throw", 12),
+        ("Fields it clean, momentum stalls before the throw", 10),
+        ("Rounds it cautiously — gives up the extra base", 9),
+        ("Blocks it flat-footed like an infielder — no attack", 8)),
+    "Crow-Hop & Throw Carry": _outcomes(
+        "Outfield", ["crow", "arm accuracy and carry", "carry"],
+        ("True crow-hop, throw carries on a line to the base", 12),
+        ("Solid mechanics, throw loses steam late", 10),
+        ("Rushed footwork, throw tails or bounces early", 9),
+        ("No crow-hop — arms it flat-footed", 8)),
+    # ---- Catching ----
+    "Receiving": _outcomes(
+        "Catching", ["receiving", "framing"],
+        ("Quiet glove, beats the ball to the spot, sticks strikes", 12),
+        ("Catches it clean, glove drifts out of the zone", 10),
+        ("Stabs at the ball — loses strikes", 9),
+        ("Ball controls the glove — fundamental receiving work needed", 8)),
+    "Blocking": _outcomes(
+        "Catching", ["blocking"],
+        ("Beats the ball down, chest square, keeps it in front", 12),
+        ("Gets down in time, ball kicks a step away", 10),
+        ("Drops late — picks at it instead of blocking", 9),
+        ("Turns away from the block — ball to the backstop", 8)),
+    "Exchange & Footwork on Throws": _outcomes(
+        "Catching", ["transfer and exchange", "stance and footwork", "exchange", "footwork"],
+        ("Clean transfer, quick feet, throw on line to the bag", 12),
+        ("Good exchange, footwork adds a beat", 10),
+        ("Slow out of the crouch, throw drags offline", 9),
+        ("Fights the transfer — no rhythm from catch to release", 8)),
+    # ---- Hitting ----
+    "Swing Mechanics": _outcomes(
+        "Hitting", ["swing", "hitting fundamentals"],
+        ("Balanced and connected — swing works from the ground up", 12),
+        ("Sound swing, occasional drift or early hips", 10),
+        ("All arms — lower half not involved", 9),
+        ("Long, disconnected swing — rebuild from setup", 8)),
+    "Contact Quality": _outcomes(
+        "Hitting", ["contact"],
+        ("Barrels it consistently — line drives gap to gap", 12),
+        ("Regular hard contact, some mishits off the end", 10),
+        ("More soft contact than square", 9),
+        ("Rarely squares it up — swing-and-miss in the zone", 8)),
+    "Approach & Timing": _outcomes(
+        "Hitting", ["approach", "timing", "confidence in the box"],
+        ("On time every pitch, adjusts to speed changes", 12),
+        ("Good rhythm, beatable with off-speed", 10),
+        ("Starts late — timing rescues the swing", 9),
+        ("No load or rhythm — guessing at every pitch", 8)),
+    "Bat Path": _outcomes(
+        "Hitting", ["bat path", "path"],
+        ("Short to it, long through it — matches the pitch plane", 12),
+        ("Solid path, occasionally cuts the finish short", 10),
+        ("In and out of the zone — one point of contact", 9),
+        ("Chops or uppercuts — path fights the pitch", 8)),
+    # ---- Pitching ----
+    "Delivery — Balance & Repeatability": _outcomes(
+        "Pitching", ["balance on the mound", "repeatability", "delivery", "mechanical"],
+        ("Balanced over the rubber — repeats it pitch after pitch", 12),
+        ("Good tempo, occasionally drifts or rushes", 10),
+        ("Falls off line — release point wanders", 9),
+        ("Off balance throughout — delivery needs a rebuild", 8)),
+    "Arm Action": _outcomes(
+        "Pitching", ["arm action"],
+        ("Loose, clean circle, on time at foot strike", 12),
+        ("Works fine, slight wrap or stab", 10),
+        ("Late arm — pushes to catch up", 9),
+        ("Short-arms or slings it — mechanical red flag", 8)),
+    "Fastball Command": _outcomes(
+        "Pitching", ["fastball command", "strike-throwing", "strike throwing", "command"],
+        ("Hits the glove to both sides of the plate", 12),
+        ("Fills the zone, misses within it", 10),
+        ("Around the zone, can't locate on purpose", 9),
+        ("Fights to throw strikes at all", 8)),
+    "Off-Speed Feel": _outcomes(
+        "Pitching", ["breaking ball", "changeup", "off-speed", "offspeed"],
+        ("Lands it for strikes and buries it when ahead", 12),
+        ("Real shape, command comes and goes", 10),
+        ("Slows the arm — hitters see it early", 9),
+        ("No usable off-speed pitch yet", 8)),
+    # ---- Athleticism / base running ----
+    "First-Step Quickness": _outcomes(
+        "Athletic", ["first-step", "first step", "lateral movement", "quickness"],
+        ("Explosive first step — wins the race to the ball", 12),
+        ("Good reaction, builds to speed quickly", 10),
+        ("Reads it, but the first step is a beat slow", 9),
+        ("Standing start every time — no burst", 8)),
+    "Running Form": _outcomes(
+        "Athletic", ["running mechanics", "running form", "run form"],
+        ("Tall and relaxed, arms drive straight, no wasted motion", 12),
+        ("Solid mechanics, minor crossover or heel strike", 10),
+        ("Upright and choppy — leaks speed", 9),
+        ("Fights himself down the line — form work needed", 8)),
+    "Turns & Reads on the Bases": _outcomes(
+        "Athletic", ["turns"],
+        ("Aggressive turns, cuts the bag tight, picks up coaches early", 12),
+        ("Good turns, occasionally rounds wide", 10),
+        ("Slows into the bag, late reads on the ball", 9),
+        ("Runs base to base — no anticipation", 8)),
+}
+
+
+def option_score(metric, raw):
+    """Developmental score mapped to a multiple_choice selection, else None.
+
+    Returns the numeric score from the metric's `option_scores` {label -> score}
+    when the raw value is a label present in the map. Legacy multiple_choice
+    metrics (no `option_scores`) and unmatched labels return None so they keep
+    the historical unscored behavior.
+    """
+    if raw in (None, ""):
+        return None
+    option_scores = metric.get("option_scores")
+    if not isinstance(option_scores, dict) or not option_scores:
+        return None
+    val = option_scores.get(raw if isinstance(raw, str) else str(raw))
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
 def normalize_rating(metric, raw):
     try:
         raw = float(raw)
@@ -267,7 +467,10 @@ def compute_evaluation_scores(template, scores, benchmarks, age_group=None, posi
         not_observed = bool(entry.get("not_observed"))
         mtype = m.get("metric_type")
 
-        if mtype in ("comment", "observation", "multiple_choice"):
+        has_outcome_scores = bool(m.get("option_scores")) and isinstance(m.get("option_scores"), dict)
+        if mtype in ("comment", "observation") or (mtype == "multiple_choice" and not has_outcome_scores):
+            # Text metrics and legacy multiple_choice (no option_scores map)
+            # record the raw value only — never a score.
             if raw not in (None, ""):
                 metric_results[mid] = {"raw": raw, "normalized": None, "weighted": None, "percentile": None}
             continue
@@ -281,6 +484,13 @@ def compute_evaluation_scores(template, scores, benchmarks, age_group=None, posi
         percentile = None
         if mtype in ("rating_5", "rating_10", "yes_no"):
             normalized = normalize_rating(m, raw)
+        elif mtype == "multiple_choice":
+            # Dropdown scoring: the selected outcome label maps straight to its
+            # developmental score (already on the 12/10/9/8 scale — no further
+            # normalization). Raw stays the label string so review UIs show
+            # words; an unmatched/legacy label leaves normalized None (unscored)
+            # exactly like the pre-dropdown behavior.
+            normalized = option_score(m, raw)
         elif mtype in ("numeric", "time", "velocity"):
             # use best of attempts when available
             candidates = [v for v in [raw, entry.get("attempt_2")] if v not in (None, "")]

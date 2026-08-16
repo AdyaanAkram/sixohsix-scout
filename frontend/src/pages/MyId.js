@@ -151,6 +151,9 @@ export default function MyId() {
   const [media, setMedia] = useState([]);
   const [goals, setGoals] = useState([]);
   const [assessments, setAssessments] = useState([]);
+  // Multi-athlete families (event registration). Endpoint may not be deployed
+  // yet — any failure hides the section entirely.
+  const [myAthletes, setMyAthletes] = useState([]);
 
   const reload = () => {
     Promise.all([
@@ -188,6 +191,12 @@ export default function MyId() {
   };
 
   useEffect(reload, []);
+
+  useEffect(() => {
+    api.get("/me/athletes")
+      .then((r) => setMyAthletes(Array.isArray(r.data) ? r.data : []))
+      .catch(() => setMyAthletes([]));
+  }, []);
 
   const togglePublic = async (on) => {
     try {
@@ -708,6 +717,21 @@ export default function MyId() {
           </div>
         )}
       </div>
+
+      {/* Families with more than one registered athlete see the whole roster. */}
+      {myAthletes.length > 1 && (
+        <Card className="rounded-2xl border-border" data-testid="my-athletes-section">
+          <CardContent className="py-4 space-y-2">
+            <p className="font-semibold text-sm text-foreground">My Athletes</p>
+            {myAthletes.map((a) => (
+              <div key={a.id} className="flex flex-wrap items-center justify-between gap-2 text-sm border-b border-divider pb-2 last:border-0 last:pb-0">
+                <span className="font-semibold">{a.first_name} {a.last_name}</span>
+                <span className="text-xs text-muted-foreground">{a.organization_name || "—"}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Already in a real org — quieter path to switch/join another club. */}
       {!inRegistry && <JoinClubCard prominent={false} />}

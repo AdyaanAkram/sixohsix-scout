@@ -21,8 +21,19 @@ from scoring import metric_meta
 
 router = APIRouter()
 
-EVENT_STATUSES = ["Draft", "Registration Open", "Registration Closed", "Check-In Open",
-                  "Evaluation Active", "Evaluation Complete", "Reports Under Review", "Closed"]
+# Canonical event lifecycle. Draft -> Setup -> Ready -> Evaluation Active ->
+# Evaluation Complete -> Review -> Published -> Closed.
+EVENT_STATUSES = ["Draft", "Setup", "Ready", "Evaluation Active",
+                  "Evaluation Complete", "Review", "Published", "Closed"]
+
+# Statuses events created before the lifecycle revision may still carry. They
+# stay valid on create/update and keep displaying as stored — existing data is
+# never migrated. For lifecycle gating, any legacy/unknown status behaves as
+# "Setup".
+LEGACY_EVENT_STATUSES = ["Registration Open", "Registration Closed",
+                         "Check-In Open", "Reports Under Review"]
+
+ACCEPTED_EVENT_STATUSES = EVENT_STATUSES + LEGACY_EVENT_STATUSES
 
 DONE_STATUSES = ["submitted", "approved"]
 
@@ -140,7 +151,7 @@ async def list_events(user=Depends(require_roles(*STAFF_ROLES))):
 
 @router.post("/events")
 async def create_event(body: EventBody, user=Depends(require_roles(*ADMIN_ROLES))):
-    if body.status not in EVENT_STATUSES:
+    if body.status not in ACCEPTED_EVENT_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid event status.")
     doc = body.model_dump()
     doc.update({"id": new_id(), "organization_id": user["organization_id"],
@@ -217,7 +228,7 @@ async def get_event(event_id: str, user=Depends(require_roles(*STAFF_ROLES))):
 @router.patch("/events/{event_id}")
 async def update_event(event_id: str, body: EventBody, user=Depends(require_roles(*ADMIN_ROLES))):
     await get_org_event(event_id, user)
-    if body.status not in EVENT_STATUSES:
+    if body.status not in ACCEPTED_EVENT_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid event status.")
     updates = body.model_dump()
     updates["updated_at"] = now_iso()
@@ -232,14 +243,44 @@ class StatusBody(BaseModel):
 
 @router.post("/events/{event_id}/status")
 async def set_event_status(event_id: str, body: StatusBody, user=Depends(require_roles(*ADMIN_ROLES))):
-    await get_org_event(event_id, user)
+    """Move an event through its lifecycle. Only canonical statuses can be SET
+    (legacy statuses keep displaying but are never written anew).
+
+    The one gated transition is TO "Evaluation Active": the event must have a
+    roster, at least one offered station and at least one active evaluator
+    assignment — otherwise 409 with every unmet requirement spelled out. Every
+    other transition is free for admins."""
+    ev = await get_org_event(event_id, user)
     if body.status not in EVENT_STATUSES:
-        raise HTTPException(status_code=400, detail="Invalid event status.")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid event status. Use one of: {', '.join(EVENT_STATUSES)}.")
+    org = user["organization_id"]
+    if body.status == "Evaluation Active" and ev.get("status") != "Evaluation Active":
+        base = {"event_id": event_id, "organization_id": org}
+        roster_count = await db.event_athletes.count_documents(base)
+        stations = await db.stations.find(base, {"_id": 0, "module_state": 1}).to_list(200)
+        has_offered_station = any(module_state_of(s) != "not_offered" for s in stations)
+        has_assignment = await db.evaluator_assignments.find_one(
+            {**base, **active_assignment_filter()}) is not None
+        unmet = []
+        if roster_count == 0:
+            unmet.append("at least one athlete on the roster")
+        if not has_offered_station:
+            unmet.append("at least one station that is offered at this event")
+        if not has_assignment:
+            unmet.append("at least one active evaluator assignment")
+        if unmet:
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot start the evaluation yet — this event still needs "
+                       + "; ".join(unmet) + ".")
     await db.events.update_one(
-        {"id": event_id, "organization_id": user["organization_id"]},
+        {"id": event_id, "organization_id": org},
         {"$set": {"status": body.status, "updated_at": now_iso()}})
-    await log_audit(user["organization_id"], user, "event_status_changed", "event", event_id, {"status": body.status})
-    return {"message": f"Event status set to {body.status}."}
+    await log_audit(org, user, "event_status_changed", "event", event_id,
+                    {"from": ev.get("status"), "status": body.status})
+    return {"message": f"Event status set to {body.status}.", "status": body.status}
 
 
 # ---------------- Roster ----------------
@@ -918,6 +959,133 @@ async def event_progress(event_id: str, user=Depends(require_roles(*COACH_ROLES)
         "station_progress": station_progress,
         "evaluator_progress": evaluator_progress,
     }
+
+
+@router.get("/events/{event_id}/progress/athletes")
+async def event_athletes_progress(event_id: str, user=Depends(require_roles(*STAFF_ROLES))):
+    """Athlete-level live progress: one row per rostered athlete with per-station
+    state, percent complete over REQUIRED stations, and exactly which station +
+    required metrics are still missing (drill-down data).
+
+    Bulk queries only — roster, groups, stations, templates and every event
+    evaluation are each fetched once; nothing is queried per athlete."""
+    await get_org_event(event_id, user)
+    org = user["organization_id"]
+    base = {"event_id": event_id, "organization_id": org}
+
+    entries = await db.event_athletes.find(base, {"_id": 0}).to_list(2000)
+    athletes = await db.athletes.find(
+        {"id": {"$in": [e["athlete_id"] for e in entries]}, "organization_id": org},
+        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1}).to_list(2000)
+    amap = {a["id"]: a for a in athletes}
+    groups = await db.event_groups.find(base, {"_id": 0, "id": 1, "name": 1}).to_list(200)
+    gmap = {g["id"]: g["name"] for g in groups}
+    # not_offered stations are excluded everywhere — they can never be missing.
+    stations = [s for s in await db.stations.find(base, {"_id": 0}).to_list(200)
+                if module_state_of(s) != "not_offered"]
+    stations.sort(key=station_sort_key)
+    templates = await db.evaluation_templates.find({"organization_id": org}, {"_id": 0}).to_list(500)
+    tmap = {t["id"]: t for t in templates}
+    evals = await db.evaluations.find(base, {
+        "_id": 0, "id": 1, "athlete_id": 1, "station_id": 1, "status": 1,
+        "template_id": 1, "scores": 1, "computed": 1}).to_list(5000)
+
+    submitted_total = sum(1 for e in evals if e.get("status") == "submitted")
+    approved_total = sum(1 for e in evals if e.get("status") == "approved")
+    evals_by_key = defaultdict(list)
+    for e in evals:
+        evals_by_key[(e.get("athlete_id"), e.get("station_id"))].append(e)
+
+    def _missing_metric_names(ev: dict) -> list[str]:
+        """Required-metric NAMES still missing on an evaluation. Prefers the
+        stored computed.missing_required ids (exactly what submit enforces),
+        mapped to names via the template; falls back to recomputing from
+        scores for drafts saved before `computed` existed."""
+        template = tmap.get(ev.get("template_id"))
+        computed = ev.get("computed") or {}
+        ids = computed.get("missing_required")
+        if isinstance(ids, list):
+            names = {m.get("id"): m.get("name") for m in (template or {}).get("metrics") or []}
+            return [names.get(mid) or mid for mid in ids]
+        return [m["name"] for m in _missing_required_metrics(template, ev.get("scores"))
+                if m.get("name")]
+
+    rows = []
+    totals = {"checked_in": 0, "not_started": 0, "in_progress": 0, "complete": 0,
+              "missing": 0, "flagged": 0, "submitted": submitted_total,
+              "awaiting_review": submitted_total, "approved": approved_total}
+    for entry in entries:
+        a = amap.get(entry["athlete_id"])
+        if not a:
+            continue
+        station_rows = []
+        missing = []
+        required_total = required_complete = 0
+        any_done = any_draft = any_eval = False
+        for s in stations:
+            if not _station_applies(s, entry.get("group_id")):
+                continue
+            mod_state = module_state_of(s)  # required | optional
+            station_evals = evals_by_key.get((entry["athlete_id"], s["id"]), [])
+            done = next((e for e in station_evals if e.get("status") in DONE_STATUSES), None)
+            draft = next((e for e in station_evals if e.get("status") == "draft"), None)
+            done_missing = _missing_metric_names(done) if done else []
+            if done and not done_missing:
+                state = "complete"
+            elif done or draft:
+                state = "in_progress"
+            elif mod_state == "optional":
+                state = "optional"
+            else:
+                state = "missing"
+            any_eval = any_eval or bool(station_evals)
+            any_done = any_done or bool(done)
+            any_draft = any_draft or bool(draft)
+            if mod_state == "required":
+                required_total += 1
+                if state == "complete":
+                    required_complete += 1
+                else:
+                    # Drill-down: name the station; for started work, the exact
+                    # required metric names still unanswered.
+                    started = done or draft
+                    missing.append({"station": s["name"],
+                                    "metrics": _missing_metric_names(started) if started else []})
+            station_rows.append({"station_id": s["id"], "name": s["name"], "state": state})
+
+        if required_total:
+            pct_complete = round(required_complete / required_total * 100)
+            status = ("complete" if required_complete == required_total
+                      else "in_progress" if (any_done or any_draft) else "not_started")
+        else:
+            # No required stations: any evaluation at all counts as done work.
+            pct_complete = 100 if any_eval else 0
+            status = ("complete" if any_done
+                      else "in_progress" if any_draft else "not_started")
+
+        flagged = bool(entry.get("flagged_incomplete"))
+        checked_in = entry.get("status") == "checked_in"
+        totals[status] += 1
+        if checked_in:
+            totals["checked_in"] += 1
+        if flagged:
+            totals["flagged"] += 1
+        if missing:
+            totals["missing"] += 1
+        rows.append({
+            "athlete_id": a["id"],
+            "name": f"{a.get('first_name') or ''} {a.get('last_name') or ''}".strip(),
+            "bib_number": entry.get("bib_number"),
+            "group_name": gmap.get(entry.get("group_id")),
+            "pct_complete": pct_complete,
+            "stations": station_rows,
+            "missing": missing,
+            "status": status,
+            "flagged": flagged,
+            "checked_in": checked_in,
+        })
+    rows.sort(key=lambda r: ((r.get("name") or "").split(" ")[-1].lower(), (r.get("name") or "").lower()))
+    return {"athletes": rows, "totals": totals}
 
 
 @router.get("/events/{event_id}/players/{athlete_id}/progress")

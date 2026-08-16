@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta, timezone
 from auth import hash_password
 from db import db, new_id, now_iso
 from positions import AGE_BANDS, age_band_for_age, resolve_template
-from scoring import compute_evaluation_scores
+from scoring import OUTCOME_LIBRARY, compute_evaluation_scores
 
 random.seed(42)
 
@@ -80,6 +80,20 @@ def metric(name, category, mtype, unit=None, weight=1, required=False, mn=None, 
             "name": name, "description": desc, "category": category, "metric_type": mtype,
             "unit": unit, "weight": weight, "required": required, "min_value": mn,
             "max_value": mx, "display_order": order, "higher_is_better": higher, "options": []}
+
+
+def outcome(rep, category, weight=1, required=False, order=0):
+    """Dropdown scoring metric built from the shared OUTCOME_LIBRARY.
+
+    Evaluators see only the outcome labels (rendered as tap buttons by the
+    existing multiple_choice UI); the backend converts the selection via
+    option_scores. Objective measurements stay numeric — never build those here.
+    """
+    lib = OUTCOME_LIBRARY[rep]
+    m = metric(rep, category, "multiple_choice", weight=weight, required=required, order=order)
+    m["options"] = list(lib["options"])
+    m["option_scores"] = dict(lib["scores"])
+    return m
 
 
 async def main():
@@ -211,24 +225,23 @@ async def main():
 
     def pitching_young(band):
         return cats("Arm Strength", "Defense", "Baseball IQ", "Coachability"), [
-            metric("Throwing Fundamentals", "Arm Strength", "rating_5", weight=2, required=True, order=1),
-            metric("Arm Action", "Arm Strength", "rating_5", weight=2, order=2),
-            metric("Strike-Throwing Consistency", "Arm Strength", "rating_5", weight=2, required=True, order=3),
-            metric("Balance on the Mound", "Defense", "rating_5", order=4),
-            metric("Fielding the Position", "Defense", "rating_5", order=5),
-            metric("Pitch Awareness", "Baseball IQ", "rating_5", order=6),
-            metric("Effort", "Coachability", "rating_5", required=True, order=7),
-            metric("Coachability", "Coachability", "rating_5", weight=2, order=8),
+            outcome("Delivery — Balance & Repeatability", "Arm Strength", weight=2, required=True, order=1),
+            outcome("Arm Action", "Arm Strength", weight=2, order=2),
+            outcome("Fastball Command", "Arm Strength", weight=2, required=True, order=3),
+            metric("Fielding the Position", "Defense", "rating_5", order=4),
+            metric("Pitch Awareness", "Baseball IQ", "rating_5", order=5),
+            metric("Effort", "Coachability", "rating_5", required=True, order=6),
+            metric("Coachability", "Coachability", "rating_5", weight=2, order=7),
         ]
 
     def pitching_old(band):
         return cats("Arm Strength", "Defense", "Baseball IQ", "Coachability"), [
             metric("Pitching Velocity", "Arm Strength", "velocity", unit="mph", weight=2,
                    key="pitching_velocity", required=True, order=1),
-            metric("Fastball Command", "Arm Strength", "rating_5", weight=2, required=True, order=2),
-            metric("Breaking Ball", "Arm Strength", "rating_5", order=3),
-            metric("Changeup", "Arm Strength", "rating_5", order=4),
-            metric("Mechanical Repeatability", "Arm Strength", "rating_5", weight=2, order=5),
+            outcome("Fastball Command", "Arm Strength", weight=2, required=True, order=2),
+            outcome("Off-Speed Feel", "Arm Strength", order=3),
+            outcome("Arm Action", "Arm Strength", weight=2, order=4),
+            outcome("Delivery — Balance & Repeatability", "Arm Strength", weight=2, order=5),
             metric("Fielding the Position", "Defense", "rating_5", order=6),
             metric("Holding Runners", "Defense", "rating_5", order=7),
             metric("Pitch Sequencing", "Baseball IQ", "rating_5", weight=2, order=8),
@@ -239,10 +252,9 @@ async def main():
 
     def catching_young(band):
         return cats("Defense", "Arm Strength", "Baseball IQ", "Coachability"), [
-            metric("Receiving Fundamentals", "Defense", "rating_5", weight=2, required=True, order=1),
-            metric("Blocking Fundamentals", "Defense", "rating_5", weight=2, order=2),
-            metric("Catching Stance and Footwork", "Defense", "rating_5", order=3),
-            metric("Throwing Fundamentals", "Arm Strength", "rating_5", weight=2, order=4),
+            outcome("Receiving", "Defense", weight=2, required=True, order=1),
+            outcome("Blocking", "Defense", weight=2, order=2),
+            outcome("Exchange & Footwork on Throws", "Arm Strength", weight=2, order=4),
             metric("Baseball Awareness", "Baseball IQ", "rating_5", order=5),
             metric("Effort", "Coachability", "rating_5", required=True, order=6),
             metric("Coachability", "Coachability", "rating_5", weight=2, order=7),
@@ -254,9 +266,9 @@ async def main():
                    key="pop_time", required=True, order=1),
             metric("Throwing Velocity", "Arm Strength", "velocity", unit="mph", weight=2,
                    key="throwing_velocity", order=2),
-            metric("Transfer and Exchange", "Arm Strength", "rating_5", order=3),
-            metric("Receiving and Framing", "Defense", "rating_5", weight=2, required=True, order=4),
-            metric("Blocking", "Defense", "rating_5", weight=2, order=5),
+            outcome("Exchange & Footwork on Throws", "Arm Strength", order=3),
+            outcome("Receiving", "Defense", weight=2, required=True, order=4),
+            outcome("Blocking", "Defense", weight=2, order=5),
             metric("Defensive Impact", "Defense", "rating_5", weight=2, order=6),
             metric("Game Calling", "Baseball IQ", "rating_5", weight=2, order=7),
             metric("Pitcher Management", "Baseball IQ", "rating_5", order=8),
@@ -266,45 +278,46 @@ async def main():
 
     def infield_young(band):
         return cats("Defense", "Arm Strength", "Athleticism", "Coachability"), [
-            metric("Ground-Ball Fundamentals", "Defense", "rating_5", weight=2, required=True, order=1),
-            metric("Glove Work", "Defense", "rating_5", weight=2, order=2),
-            metric("Infield Footwork", "Defense", "rating_5", order=3),
-            metric("First-Base Footwork and Scoop", "Defense", "rating_5", key="first_base_footwork", order=4),
-            metric("Throwing Fundamentals", "Arm Strength", "rating_5", weight=2, order=5),
-            metric("Throwing Accuracy", "Arm Strength", "rating_5", order=6),
-            metric("Lateral Movement", "Athleticism", "rating_5", order=7),
-            metric("Effort", "Coachability", "rating_5", required=True, order=8),
-            metric("Coachability", "Coachability", "rating_5", weight=2, order=9),
+            outcome("Routine Ground Ball — Hands", "Defense", weight=2, required=True, order=1),
+            outcome("Routine Ground Ball — Footwork", "Defense", weight=2, order=2),
+            outcome("Routine Ground Ball — Exchange & Transfer", "Defense", order=3),
+            outcome("Routine Ground Ball — Throw Accuracy", "Arm Strength", weight=2, order=4),
+            outcome("Forehand", "Defense", order=5),
+            outcome("Backhand", "Defense", order=6),
+            outcome("Slow Roller", "Defense", order=7),
+            outcome("First-Step Quickness", "Athleticism", order=8),
+            metric("Effort", "Coachability", "rating_5", required=True, order=9),
+            metric("Coachability", "Coachability", "rating_5", weight=2, order=10),
         ]
 
     def infield_old(band):
         return cats("Defense", "Arm Strength", "Athleticism", "Baseball IQ", "Coachability"), [
             metric("Throwing Velocity", "Arm Strength", "velocity", unit="mph", weight=2,
                    key="throwing_velocity", required=True, order=1),
-            metric("Arm Accuracy and Carry", "Arm Strength", "rating_5", weight=2, order=2),
-            metric("Infield Actions", "Defense", "rating_5", weight=2, required=True, order=3),
-            metric("Range", "Defense", "rating_5", weight=2, order=4),
-            metric("Double-Play Turn", "Defense", "rating_5", order=5),
-            metric("First-Base Footwork and Scoop", "Defense", "rating_5", key="first_base_footwork", order=6),
-            metric("Defensive Consistency", "Defense", "rating_5", weight=2, order=7),
+            outcome("Routine Ground Ball — Throw Accuracy", "Arm Strength", weight=2, order=2),
+            outcome("Routine Ground Ball — Hands", "Defense", weight=2, required=True, order=3),
+            outcome("Routine Ground Ball — Footwork", "Defense", weight=2, order=4),
+            outcome("Routine Ground Ball — Exchange & Transfer", "Defense", order=5),
+            outcome("Forehand", "Defense", order=6),
+            outcome("Backhand", "Defense", order=7),
+            outcome("Slow Roller", "Defense", order=8),
             metric("Home-to-First Time", "Athleticism", "time", unit="sec", higher=False,
-                   key="home_to_first", order=8),
-            metric("Physical Projection", "Athleticism", "rating_5", order=9),
-            metric("Baseball IQ", "Baseball IQ", "rating_5", weight=2, key="baseball_iq_rating", order=10),
-            metric("Recruitability", "Coachability", "rating_5", weight=2, order=11),
-            metric("Evaluator Summary", "Coachability", "comment", order=12),
+                   key="home_to_first", order=9),
+            metric("Physical Projection", "Athleticism", "rating_5", order=10),
+            metric("Baseball IQ", "Baseball IQ", "rating_5", weight=2, key="baseball_iq_rating", order=11),
+            metric("Recruitability", "Coachability", "rating_5", weight=2, order=12),
+            metric("Evaluator Summary", "Coachability", "comment", order=13),
         ]
 
     def outfield_young(band):
         return cats("Defense", "Arm Strength", "Athleticism", "Coachability"), [
-            metric("Fly-Ball Fundamentals", "Defense", "rating_5", weight=2, required=True, order=1),
-            metric("Routes to the Ball", "Defense", "rating_5", weight=2, order=2),
+            outcome("Fly Ball — Routes & Reads", "Defense", weight=2, required=True, order=1),
+            outcome("Ground Ball Through the Outfield", "Defense", weight=2, order=2),
             metric("Communication", "Defense", "rating_5", order=3),
-            metric("Throwing Fundamentals", "Arm Strength", "rating_5", weight=2, order=4),
-            metric("Throwing Accuracy", "Arm Strength", "rating_5", order=5),
-            metric("Running Mechanics", "Athleticism", "rating_5", order=6),
-            metric("Effort", "Coachability", "rating_5", required=True, order=7),
-            metric("Coachability", "Coachability", "rating_5", weight=2, order=8),
+            outcome("Crow-Hop & Throw Carry", "Arm Strength", weight=2, order=4),
+            outcome("Running Form", "Athleticism", order=5),
+            metric("Effort", "Coachability", "rating_5", required=True, order=6),
+            metric("Coachability", "Coachability", "rating_5", weight=2, order=7),
         ]
 
     def outfield_old(band):
@@ -314,9 +327,9 @@ async def main():
             metric("Physical Projection", "Athleticism", "rating_5", order=2),
             metric("Throwing Velocity", "Arm Strength", "velocity", unit="mph", weight=2,
                    key="throwing_velocity", required=True, order=3),
-            metric("Arm Accuracy and Carry", "Arm Strength", "rating_5", weight=2, order=4),
-            metric("Routes and Reads", "Defense", "rating_5", weight=2, required=True, order=5),
-            metric("Closing Speed", "Defense", "rating_5", weight=2, order=6),
+            outcome("Crow-Hop & Throw Carry", "Arm Strength", weight=2, order=4),
+            outcome("Fly Ball — Routes & Reads", "Defense", weight=2, required=True, order=5),
+            outcome("Ground Ball Through the Outfield", "Defense", weight=2, order=6),
             metric("Defensive Consistency", "Defense", "rating_5", weight=2, order=7),
             metric("Baseball IQ", "Baseball IQ", "rating_5", weight=2, key="baseball_iq_rating", order=8),
             metric("Recruitability", "Coachability", "rating_5", weight=2, order=9),
@@ -325,10 +338,10 @@ async def main():
 
     def hitting_young(band):
         return cats("Hitting", "Baseball IQ", "Coachability"), [
-            metric("Hitting Fundamentals", "Hitting", "rating_5", weight=2, required=True, order=1),
-            metric("Contact Consistency", "Hitting", "rating_5", weight=2, order=2),
-            metric("Swing Balance", "Hitting", "rating_5", order=3),
-            metric("Confidence in the Box", "Hitting", "rating_5", order=4),
+            outcome("Swing Mechanics", "Hitting", weight=2, required=True, order=1),
+            outcome("Contact Quality", "Hitting", weight=2, order=2),
+            outcome("Approach & Timing", "Hitting", order=3),
+            outcome("Bat Path", "Hitting", order=4),
             metric("Pitch Awareness", "Baseball IQ", "rating_5", order=5),
             metric("Effort", "Coachability", "rating_5", required=True, order=6),
             metric("Coachability", "Coachability", "rating_5", weight=2, order=7),
@@ -339,14 +352,15 @@ async def main():
             metric("Exit Velocity", "Hitting", "velocity", unit="mph", weight=2,
                    key="exit_velocity", required=True, order=1),
             metric("Bat Speed", "Hitting", "velocity", unit="mph", weight=2, key="bat_speed", required=True, order=2),
-            metric("Hitting Approach", "Hitting", "rating_5", weight=2, order=3),
-            metric("Contact Quality", "Hitting", "rating_5", weight=2, order=4),
-            metric("Power Projection", "Hitting", "rating_5", order=5),
-            metric("Game Performance - Hitting", "Hitting", "rating_5", key="game_performance_hitting", order=6),
-            metric("Pitch Recognition", "Baseball IQ", "rating_5", weight=2, order=7),
-            metric("Approach Consistency", "Baseball IQ", "rating_5", order=8),
-            metric("Recruitability", "Coachability", "rating_5", weight=2, order=9),
-            metric("Evaluator Summary", "Coachability", "comment", order=10),
+            outcome("Approach & Timing", "Hitting", weight=2, order=3),
+            outcome("Contact Quality", "Hitting", weight=2, order=4),
+            outcome("Swing Mechanics", "Hitting", weight=2, order=5),
+            outcome("Bat Path", "Hitting", order=6),
+            metric("Power Projection", "Hitting", "rating_5", order=7),
+            metric("Game Performance - Hitting", "Hitting", "rating_5", key="game_performance_hitting", order=8),
+            metric("Pitch Recognition", "Baseball IQ", "rating_5", weight=2, order=9),
+            metric("Recruitability", "Coachability", "rating_5", weight=2, order=10),
+            metric("Evaluator Summary", "Coachability", "comment", order=11),
         ]
 
     def station_template(name, cats_ms, age_group=None, applies_to=None, is_default=False):
@@ -409,9 +423,10 @@ async def main():
     tpl_baserunning = station_template("Base Running Station", (
         cats("Athleticism", "Baseball IQ"),
         [metric("Home-to-First Time", "Athleticism", "time", unit="sec", weight=2, higher=False, key="home_to_first", order=1),
-         metric("Lead and Jump", "Athleticism", "rating_5", order=2),
-         metric("Turns and Reads", "Baseball IQ", "rating_5", weight=2, required=True, order=3),
-         metric("Base-Running Instincts", "Baseball IQ", "rating_5", weight=2, order=4)]))
+         outcome("First-Step Quickness", "Athleticism", order=2),
+         outcome("Running Form", "Athleticism", order=3),
+         outcome("Turns & Reads on the Bases", "Baseball IQ", weight=2, required=True, order=4),
+         metric("Base-Running Instincts", "Baseball IQ", "rating_5", weight=2, order=5)]))
     tpl_iq = station_template("Baseball IQ Station", (
         cats("Baseball IQ"),
         [metric("Situational Awareness", "Baseball IQ", "rating_5", weight=2, required=True, order=1),
@@ -640,6 +655,9 @@ async def main():
                 scores[m["id"]] = {"value": random.randint(2, 5)}
             elif mt == "rating_10":
                 scores[m["id"]] = {"value": random.randint(4, 10)}
+            elif mt == "multiple_choice" and m.get("options"):
+                # Dropdown scoring reps: evaluator picks an outcome label.
+                scores[m["id"]] = {"value": random.choice(m["options"])}
             elif mt in ("time", "velocity", "numeric"):
                 span = band.get(m.get("key"))
                 if not span:

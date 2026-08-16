@@ -38,6 +38,7 @@ import PlayerCompare from "@/pages/PlayerCompare";
 import Teams from "@/pages/Teams";
 import TeamDetail from "@/pages/TeamDetail";
 import Workspace from "@/pages/Workspace";
+import RegisterEvent from "@/pages/RegisterEvent";
 
 const Protected = ({ children }) => {
   const { user, loading } = useAuth();
@@ -72,6 +73,7 @@ function App() {
           <Route path="/accept-invitation" element={<AcceptInvitation />} />
           <Route path="/story/:slug" element={<Story />} />
           <Route path="/redeem" element={<Redeem />} />
+          <Route path="/register/:eventId" element={<RegisterEvent />} />
           <Route path="/workspace" element={<Protected><Workspace /></Protected>} />
           <Route path="/my-id" element={<Protected><MyId /></Protected>} />
             <Route path="/my-id/edit" element={<Protected><MyIdEdit /></Protected>} />
