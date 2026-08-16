@@ -223,7 +223,16 @@ export default function RegisterEvent() {
   };
 
   const toggleEvalPosition = (pos) => {
-    setPositionsEvaluated((ps) => (ps.includes(pos) ? ps.filter((p) => p !== pos) : [...ps, pos]));
+    setPositionsEvaluated((ps) => {
+      if (ps.includes(pos)) return ps.filter((p) => p !== pos);
+      // 13-18 Performance track: evaluated at 1-2 positions max.
+      const age = calcAge((selectedAthlete || athlete).date_of_birth);
+      if (age != null && age >= 13 && ps.length >= 2) {
+        toast.error("Athletes 13 and older are evaluated at up to 2 positions — unselect one first.");
+        return ps;
+      }
+      return [...ps, pos];
+    });
   };
 
   const onGoogleCredential = (credential) => {

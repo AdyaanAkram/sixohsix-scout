@@ -291,6 +291,20 @@ async def _ensure_membership(uid: str, org: str, role: str):
         })
 
 
+async def _age_group_for_event(org: str, event_id: str, age: int | None) -> str | None:
+    """Match an athlete's age against event groups named like 'Ages 8-12' /
+    'Ages 13-18', so registration drops them straight into the right group."""
+    if age is None:
+        return None
+    groups = await db.event_groups.find(
+        {"event_id": event_id, "organization_id": org}, {"_id": 0, "id": 1, "name": 1}).to_list(100)
+    for g in groups:
+        m = re.match(r"^\s*ages?\s+(\d{1,2})\s*[-–]\s*(\d{1,2})\s*$", g.get("name") or "", re.I)
+        if m and int(m.group(1)) <= age <= int(m.group(2)):
+            return g["id"]
+    return None
+
+
 async def _match_org_athlete(org: str, first: str, last: str, dob: str | None) -> dict | None:
     """The permanent-ID rule routes_signup._link_or_copy_athlete uses: exact
     name (case-insensitive) + exact DOB inside the target org."""
@@ -443,19 +457,36 @@ async def register_for_event(event_id: str, body: RegistrationBody, request: Req
         await db.athletes.insert_one({**doc})
         athlete = doc
 
+    # 13-18 (Performance track): evaluated at 1-2 positions max, per the spec.
+    athlete_age = compute_age(athlete.get("date_of_birth"))
+    if athlete_age is not None and athlete_age >= 13 and len(positions) > 2:
+        raise HTTPException(
+            status_code=422,
+            detail="Athletes 13 and older are evaluated at up to 2 positions — "
+                   "pick their best one or two.")
+
+    # Auto-place into the event's age group ("Ages 8-12" / "Ages 13-18" style
+    # names) so a registered 14-year-old is grouped and evaluation-ready with
+    # zero admin steps. No matching group -> unassigned, exactly as before.
+    auto_group_id = await _age_group_for_event(org, event_id, athlete_age)
+
     # ---- Enroll on the event roster (same doc shape the CSV import writes) ----
     rostered = await db.event_athletes.find_one(
         {"event_id": event_id, "athlete_id": athlete["id"], "organization_id": org})
     if rostered:
+        patch = {}
         if not rostered.get("positions_evaluated"):
-            await db.event_athletes.update_one(
-                {"id": rostered["id"]},
-                {"$set": {"positions_evaluated": positions, "updated_at": now_iso()}})
+            patch["positions_evaluated"] = positions
+        if not rostered.get("group_id") and auto_group_id:
+            patch["group_id"] = auto_group_id
+        if patch:
+            patch["updated_at"] = now_iso()
+            await db.event_athletes.update_one({"id": rostered["id"]}, {"$set": patch})
     else:
         await db.event_athletes.insert_one({
             "id": new_id(), "organization_id": org,
             "event_id": event_id, "athlete_id": athlete["id"], "status": "registered",
-            "bib_number": None, "group_id": None, "late_arrival": False,
+            "bib_number": None, "group_id": auto_group_id, "late_arrival": False,
             "flagged_incomplete": False, "walk_up": False,
             "positions_evaluated": positions,
             "created_at": now_iso(), "updated_at": now_iso(),
