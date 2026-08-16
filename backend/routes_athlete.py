@@ -83,17 +83,25 @@ def resolve_invite_recipient(athlete: dict) -> tuple[str, str, str]:
     return athlete_email, "athlete_invitation", name
 
 
-async def _own_athlete(user) -> dict:
-    role = user.get("role")
-    org = user["organization_id"]
-    if role == "athlete":
-        a = await db.athletes.find_one(
-            {"user_id": user["id"], "organization_id": org}, {"_id": 0})
-    elif role == "parent":
-        a = await db.athletes.find_one(
-            {"guardian_user_id": user["id"], "organization_id": org}, {"_id": 0})
-    else:
-        raise HTTPException(status_code=403, detail="Athlete or guardian role required.")
+async def _own_athlete(user, athlete_id: str | None = None) -> dict:
+    """Resolve an athlete the caller OWNS — by linkage, not by role or org.
+
+    Ownership means the athlete record points at this user (user_id for the
+    athlete's own account, guardian_user_id for a parent) — cross-org and
+    role-agnostic, so staff who registered their own kids count too.
+
+    athlete_id (optional) selects one of a multi-child family's athletes; a
+    caller can only ever select an athlete they own (wrong id → 404). With no
+    athlete_id and multiple linked athletes, the first by created_at is
+    returned deterministically.
+    """
+    q = {
+        "status": {"$ne": "merged"},
+        "$or": [{"user_id": user["id"]}, {"guardian_user_id": user["id"]}],
+    }
+    if athlete_id:
+        q["id"] = athlete_id
+    a = await db.athletes.find_one(q, {"_id": 0}, sort=[("created_at", 1)])
     if not a:
         raise HTTPException(status_code=404, detail="No athlete profile linked to this account.")
     return a
@@ -207,20 +215,22 @@ async def athlete_invite_status(athlete_id: str, user=Depends(require_roles(*ADM
 # ---------- Athlete self-service ----------
 
 @router.get("/me/notes")
-async def me_notes(user=Depends(get_current_user)):
+async def me_notes(athlete_id: str | None = None, user=Depends(get_current_user)):
     """Parent/athlete-visible notes only — private staff/scout notes are filtered out."""
     from routes_development import _note_visible_to_role, _strip_note_for_role
-    a = await _own_athlete(user)
+    a = await _own_athlete(user, athlete_id)
     role = "parent" if user.get("role") in ("parent", "guardian") else "athlete"
+    # Scope by the ATHLETE's org, not the caller's active org — a kid can live
+    # in a different org than the parent's current session.
     notes = await db.athlete_notes.find(
-        {"athlete_id": a["id"], "organization_id": user["organization_id"]}, {"_id": 0}
+        {"athlete_id": a["id"], "organization_id": a["organization_id"]}, {"_id": 0}
     ).sort("created_at", -1).to_list(100)
     return [_strip_note_for_role(n, role) for n in notes if _note_visible_to_role(n, role)]
 
 
 @router.get("/me/athlete")
-async def me_athlete(user=Depends(get_current_user)):
-    a = await _own_athlete(user)
+async def me_athlete(athlete_id: str | None = None, user=Depends(get_current_user)):
+    a = await _own_athlete(user, athlete_id)
     return restrict_guardian(a, "athlete")
 
 
@@ -233,8 +243,9 @@ class MeAthletePatch(BaseModel):
 
 
 @router.patch("/me/athlete")
-async def patch_me_athlete(body: MeAthletePatch, user=Depends(get_current_user)):
-    a = await _own_athlete(user)
+async def patch_me_athlete(body: MeAthletePatch, athlete_id: str | None = None,
+                           user=Depends(get_current_user)):
+    a = await _own_athlete(user, athlete_id)
     raw = body.model_dump(exclude_unset=True)
     unknown = set(raw) - ATHLETE_PATCH_WHITELIST
     # pydantic extra=forbid already rejects unknowns; double-check
@@ -250,8 +261,10 @@ async def patch_me_athlete(body: MeAthletePatch, user=Depends(get_current_user))
         updates["public_slug"] = _ensure_public_slug(a)
     if not a.get("profile_completed_at") and updates.get("bio"):
         updates["profile_completed_at"] = now_iso()
+    # The athlete's own org, NOT the caller's active org — the update must land
+    # even when the kid lives in a different org than the parent's session.
     await db.athletes.update_one(
-        {"id": a["id"], "organization_id": user["organization_id"]}, {"$set": updates})
+        {"id": a["id"], "organization_id": a["organization_id"]}, {"$set": updates})
     a.update(updates)
     return clean(a)
 
@@ -276,7 +289,10 @@ async def me_athlete_photo(
 
     media_id = new_id()
     stored = f"{media_id}{ext}"
-    key = media_object_key(user["organization_id"], stored)
+    # Media belongs to the ATHLETE's org so staff there can see/serve it, even
+    # when the guardian's active org differs.
+    org = a["organization_id"]
+    key = media_object_key(org, stored)
     storage.put(key, contents, content_type=file.content_type)
 
     age = athlete_age_years(a)
@@ -285,7 +301,7 @@ async def me_athlete_photo(
         consent_status = "pending_consent"
 
     doc = {
-        "id": media_id, "organization_id": user["organization_id"],
+        "id": media_id, "organization_id": org,
         "athlete_id": a["id"], "uploaded_by": user["id"],
         "uploaded_by_name": user.get("full_name"),
         "file_type": "photo", "file_name": file.filename, "stored_name": stored,
@@ -302,9 +318,9 @@ async def me_athlete_photo(
     photo_url = f"/api/media/{media_id}/file"
     if consent_status == "approved":
         await db.athletes.update_one(
-            {"id": a["id"], "organization_id": user["organization_id"]},
+            {"id": a["id"], "organization_id": org},
             {"$set": {"photo_url": photo_url, "photo_media_id": media_id, "updated_at": now_iso()}})
-    await log_audit(user["organization_id"], user, "athlete_photo_uploaded", "athlete_media", media_id,
+    await log_audit(org, user, "athlete_photo_uploaded", "athlete_media", media_id,
                     {"athlete_id": a["id"], "consent_status": consent_status})
     return {"media_id": media_id, "photo_url": photo_url if consent_status == "approved" else None,
             "consent_status": consent_status,
@@ -312,19 +328,22 @@ async def me_athlete_photo(
 
 
 @router.get("/me/evaluations")
-async def me_evaluations(user=Depends(get_current_user)):
-    a = await _own_athlete(user)
+async def me_evaluations(athlete_id: str | None = None, user=Depends(get_current_user)):
+    a = await _own_athlete(user, athlete_id)
+    # Everything scopes by the ATHLETE's org — the kid may live in a different
+    # org than the parent's active session org.
+    org = a["organization_id"]
     evals = await db.evaluations.find({
-        "athlete_id": a["id"], "organization_id": user["organization_id"],
+        "athlete_id": a["id"], "organization_id": org,
         "status": {"$in": ["submitted", "approved"]},
     }, {"_id": 0}).sort("submitted_at", -1).to_list(200)
     out = []
     for ev in evals:
         station = await db.stations.find_one(
-            {"id": ev.get("station_id"), "organization_id": user["organization_id"]},
+            {"id": ev.get("station_id"), "organization_id": org},
             {"_id": 0, "name": 1})
         event = await db.events.find_one(
-            {"id": ev.get("event_id"), "organization_id": user["organization_id"]},
+            {"id": ev.get("event_id"), "organization_id": org},
             {"_id": 0, "name": 1, "date": 1})
         out.append({
             **{k: ev.get(k) for k in ("id", "status", "submitted_at", "computed", "resolved_position",
@@ -337,9 +356,10 @@ async def me_evaluations(user=Depends(get_current_user)):
 
 
 @router.get("/me/id-card")
-async def me_id_card(user=Depends(get_current_user)):
-    a = await _own_athlete(user)
-    org = user["organization_id"]
+async def me_id_card(athlete_id: str | None = None, user=Depends(get_current_user)):
+    a = await _own_athlete(user, athlete_id)
+    # The athlete's own org — not the caller's active org.
+    org = a["organization_id"]
     evals = await db.evaluations.find({
         "athlete_id": a["id"], "organization_id": org,
         "status": {"$in": ["submitted", "approved"]},
@@ -623,11 +643,13 @@ async def athlete_story_timeline(athlete_id: str, user=Depends(require_roles(*ST
 
 
 @router.get("/me/summary")
-async def me_summary(user=Depends(get_current_user)):
+async def me_summary(athlete_id: str | None = None, user=Depends(get_current_user)):
     """Own-athlete skill summary for My ID radar / growth (no staff fields)."""
-    a = await _own_athlete(user)
+    a = await _own_athlete(user, athlete_id)
+    # Scope by the athlete's org, not the caller's active org.
+    org = a["organization_id"]
     evals = await db.evaluations.find({
-        "athlete_id": a["id"], "organization_id": user["organization_id"],
+        "athlete_id": a["id"], "organization_id": org,
         "status": {"$in": ["submitted", "approved"]},
     }, {"_id": 0}).sort("submitted_at", 1).to_list(500)
     agg_all = aggregate_player_scores(evals)
@@ -637,13 +659,13 @@ async def me_summary(user=Depends(get_current_user)):
         by_event.setdefault(ev["event_id"], []).append(ev)
     for event_id, evs in by_event.items():
         event = await db.events.find_one(
-            {"id": event_id, "organization_id": user["organization_id"]},
+            {"id": event_id, "organization_id": org},
             {"_id": 0, "name": 1, "date": 1})
         event_name = (event or {}).get("name") or "Event"
         event_date = (event or {}).get("date")
         for ev in evs:
             template = await db.evaluation_templates.find_one(
-                {"id": ev.get("template_id"), "organization_id": user["organization_id"]},
+                {"id": ev.get("template_id"), "organization_id": org},
                 {"_id": 0, "metrics": 1})
             metrics_by_id = {m["id"]: m for m in (template or {}).get("metrics", [])}
             computed = (ev.get("computed") or {}).get("metrics") or {}

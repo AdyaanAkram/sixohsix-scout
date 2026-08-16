@@ -14,8 +14,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Pencil, TrendingUp, TrendingDown, Minus, Share2, Trophy, Sparkles, Target, CalendarClock, Shield } from "lucide-react";
+import { Pencil, TrendingUp, TrendingDown, Minus, Share2, Trophy, Sparkles, Target, CalendarClock, Shield, Plus } from "lucide-react";
 
 /** Same five checks the staff PlayerProfile uses — athlete and staff must not disagree. */
 function computeProfileCompletion(athlete, summary, mediaList) {
@@ -139,6 +142,113 @@ const JoinClubCard = ({ prominent }) => {
   );
 };
 
+const POSITIONS = ["P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "UTIL"];
+
+const EMPTY_CHILD = {
+  first_name: "", last_name: "", date_of_birth: "", graduation_year: "",
+  primary_position: "", bats: "", throws: "",
+};
+
+/* "+ Add child" — creates the athlete in the shared registry org, linked to
+   this account as guardian. They join a club/event afterwards through a
+   registration link or join code, like any registry athlete. */
+const AddChildDialog = ({ open, onOpenChange, onAdded }) => {
+  const [form, setForm] = useState(EMPTY_CHILD);
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
+  const canSubmit = form.first_name.trim() && form.last_name.trim() && form.date_of_birth && form.graduation_year;
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!canSubmit || busy) return;
+    setBusy(true);
+    try {
+      const payload = {
+        first_name: form.first_name.trim(),
+        last_name: form.last_name.trim(),
+        date_of_birth: form.date_of_birth,
+        graduation_year: Number(form.graduation_year),
+      };
+      if (form.primary_position) payload.primary_position = form.primary_position;
+      if (form.bats) payload.bats = form.bats;
+      if (form.throws) payload.throws = form.throws;
+      const r = await api.post("/me/athletes", payload);
+      toast.success("Added — register them for an event with your club's link or join code");
+      setForm(EMPTY_CHILD);
+      onOpenChange(false);
+      onAdded(r.data);
+    } catch (e2) {
+      toast.error(errMsg(e2));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md" data-testid="add-child-dialog">
+        <DialogHeader>
+          <DialogTitle>Add a child</DialogTitle>
+          <DialogDescription>
+            They start in the 60&apos;6&quot; Player Registry — register them for an event with
+            your club&apos;s link or join code.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="add-child-first">First name</Label>
+              <Input id="add-child-first" value={form.first_name} onChange={(e) => set("first_name")(e.target.value)} data-testid="add-child-first-name" />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="add-child-last">Last name</Label>
+              <Input id="add-child-last" value={form.last_name} onChange={(e) => set("last_name")(e.target.value)} data-testid="add-child-last-name" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="add-child-dob">Date of birth</Label>
+              <Input id="add-child-dob" type="date" value={form.date_of_birth} onChange={(e) => set("date_of_birth")(e.target.value)} data-testid="add-child-dob" />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="add-child-grad">Grad year</Label>
+              <Input id="add-child-grad" type="number" min="2024" max="2045" value={form.graduation_year} onChange={(e) => set("graduation_year")(e.target.value)} data-testid="add-child-grad-year" />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <Label>Primary position</Label>
+              <Select value={form.primary_position} onValueChange={set("primary_position")}>
+                <SelectTrigger data-testid="add-child-position"><SelectValue placeholder="—" /></SelectTrigger>
+                <SelectContent>{POSITIONS.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Bats</Label>
+              <Select value={form.bats} onValueChange={set("bats")}>
+                <SelectTrigger data-testid="add-child-bats"><SelectValue placeholder="—" /></SelectTrigger>
+                <SelectContent>{["R", "L", "S"].map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Throws</Label>
+              <Select value={form.throws} onValueChange={set("throws")}>
+                <SelectTrigger data-testid="add-child-throws"><SelectValue placeholder="—" /></SelectTrigger>
+                <SelectContent>{["R", "L"].map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="submit" disabled={!canSubmit || busy} className="rounded-xl bg-primary hover:bg-brand-secondary" data-testid="add-child-submit">
+              {busy ? "Adding…" : "Add child"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 export default function MyId() {
   const { user } = useAuth();
   const [athlete, setAthlete] = useState(null);
@@ -151,22 +261,28 @@ export default function MyId() {
   const [media, setMedia] = useState([]);
   const [goals, setGoals] = useState([]);
   const [assessments, setAssessments] = useState([]);
-  // Multi-athlete families (event registration). Endpoint may not be deployed
-  // yet — any failure hides the section entirely.
+  // Multi-child families: every linked athlete (any org) + the selected one.
+  // Endpoint may not be deployed yet — any failure hides the switcher entirely.
   const [myAthletes, setMyAthletes] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [addChildOpen, setAddChildOpen] = useState(false);
 
-  const reload = () => {
+  const reload = (athleteId = selectedId) => {
+    // Selecting a child scopes every /me/* call; null/undefined omits the
+    // param and the backend falls back to the first linked athlete.
+    const params = athleteId ? { athlete_id: athleteId } : undefined;
     Promise.all([
-      api.get("/me/athlete"),
-      api.get("/me/evaluations"),
-      api.get("/me/id-card"),
-      api.get("/me/summary"),
-      api.get("/me/metrics").catch(() => ({ data: { metrics: [], milestones: [] } })),
-      api.get("/me/awards").catch(() => ({ data: [] })),
+      api.get("/me/athlete", { params }),
+      api.get("/me/evaluations", { params }),
+      api.get("/me/id-card", { params }),
+      api.get("/me/summary", { params }),
+      api.get("/me/metrics", { params }).catch(() => ({ data: { metrics: [], milestones: [] } })),
+      api.get("/me/awards", { params }).catch(() => ({ data: [] })),
       api.get("/media/pending-consent").catch(() => ({ data: [] })),
       // No athlete-facing media list ships yet; completion falls back to "no approved video".
-      api.get("/me/media").catch(() => ({ data: [] })),
+      api.get("/me/media", { params }).catch(() => ({ data: [] })),
       // Published AI assessments only — the section renders nothing when empty.
+      // Returns ALL the family's published recaps by design (left unscoped).
       api.get("/me/assessments").catch(() => ({ data: [] })),
     ]).then(([a, e, c, s, m, aw, pm, md, asmt]) => {
       setAthlete(a.data);
@@ -181,7 +297,7 @@ export default function MyId() {
       // Athlete/parent sessions read their own goals via /me/goals; staff-linked
       // accounts fall back to the staff route. Priorities degrade to lowest
       // category scores when neither is readable. Never fabricate goal data.
-      api.get("/me/goals")
+      api.get("/me/goals", { params })
         .then((g) => setGoals(Array.isArray(g.data) ? g.data : []))
         .catch(() =>
           api.get(`/athletes/${a.data.id}/goals`)
@@ -190,17 +306,48 @@ export default function MyId() {
     }).catch((err) => toast.error(errMsg(err)));
   };
 
-  useEffect(reload, []);
+  const loadAthletes = () =>
+    api.get("/me/athletes")
+      .then((r) => {
+        const list = Array.isArray(r.data) ? r.data : [];
+        setMyAthletes(list);
+        return list;
+      })
+      .catch(() => {
+        setMyAthletes([]);
+        return [];
+      });
+
+  // Family list first, then the selected child's data — selecting an id kicks
+  // off the data load; accounts with no listable athletes keep the old
+  // "default athlete" load path (and its 404 handling) unchanged.
+  useEffect(() => {
+    loadAthletes().then((list) => {
+      if (list.length > 0) setSelectedId(list[0].id);
+      else reload(null);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
-    api.get("/me/athletes")
-      .then((r) => setMyAthletes(Array.isArray(r.data) ? r.data : []))
-      .catch(() => setMyAthletes([]));
-  }, []);
+    if (selectedId) reload(selectedId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
+
+  // After adding a child: refresh the family list, then switch to the new kid
+  // (the selection change reloads every section for them).
+  const handleChildAdded = (child) => {
+    loadAthletes().then(() => {
+      if (child?.id && child.id !== selectedId) setSelectedId(child.id);
+      else reload();
+    });
+  };
 
   const togglePublic = async (on) => {
     try {
-      await api.patch("/me/athlete", { public_enabled: on });
+      // athlete_id keeps the toggle on the SELECTED child, not the default one.
+      await api.patch("/me/athlete", { public_enabled: on },
+        selectedId ? { params: { athlete_id: selectedId } } : undefined);
       toast.success(on ? "Public ID Story enabled." : "Story is private again.");
       reload();
     } catch (e) { toast.error(errMsg(e)); }
@@ -304,6 +451,37 @@ export default function MyId() {
 
   return (
     <div className="space-y-5 max-w-3xl" data-testid="my-id-page">
+      {/* Multi-child switcher — one pill per kid, everything below follows the
+          selection. Single-child families see the page exactly as before. */}
+      {myAthletes.length > 1 && (
+        <div className="flex flex-wrap items-center gap-2" data-testid="my-child-switcher">
+          {myAthletes.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setSelectedId(c.id)}
+              data-testid={`my-child-pill-${c.id}`}
+              className={`rounded-full border px-4 py-1.5 text-sm font-semibold transition-colors ${
+                c.id === selectedId
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-card text-muted-foreground border-border hover:text-foreground hover:border-brand/60"
+              }`}
+            >
+              {c.first_name}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setAddChildOpen(true)}
+            data-testid="my-add-child-pill"
+            className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-4 py-1.5 text-sm font-semibold text-info hover:border-info"
+          >
+            <Plus className="h-3.5 w-3.5" /> Add child
+          </button>
+        </div>
+      )}
+      <AddChildDialog open={addChildOpen} onOpenChange={setAddChildOpen} onAdded={handleChildAdded} />
+
       {inRegistry && <JoinClubCard prominent />}
 
       {/* Hero — who you are, score, trend, last evaluated (§25) */}
@@ -717,21 +895,6 @@ export default function MyId() {
           </div>
         )}
       </div>
-
-      {/* Families with more than one registered athlete see the whole roster. */}
-      {myAthletes.length > 1 && (
-        <Card className="rounded-2xl border-border" data-testid="my-athletes-section">
-          <CardContent className="py-4 space-y-2">
-            <p className="font-semibold text-sm text-foreground">My Athletes</p>
-            {myAthletes.map((a) => (
-              <div key={a.id} className="flex flex-wrap items-center justify-between gap-2 text-sm border-b border-divider pb-2 last:border-0 last:pb-0">
-                <span className="font-semibold">{a.first_name} {a.last_name}</span>
-                <span className="text-xs text-muted-foreground">{a.organization_name || "—"}</span>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
 
       {/* Already in a real org — quieter path to switch/join another club. */}
       {!inRegistry && <JoinClubCard prominent={false} />}

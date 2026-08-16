@@ -574,6 +574,76 @@ async def my_athletes(event_id: str | None = None, user=Depends(get_current_user
     } for r in rows]
 
 
+class MeAthleteAdd(BaseModel):
+    first_name: str = Field(min_length=1, max_length=60)
+    last_name: str = Field(min_length=1, max_length=60)
+    date_of_birth: str = Field(min_length=8, max_length=10)
+    graduation_year: int
+    primary_position: str | None = None
+    secondary_positions: list[str] = []
+    bats: Literal["R", "L", "S"] | None = None
+    throws: Literal["R", "L"] | None = None
+    city: str | None = None
+    state: str | None = None
+
+
+@router.post("/me/athletes")
+async def add_my_athlete(body: MeAthleteAdd, user=Depends(get_current_user)):
+    """Add another child to the caller's family account.
+
+    The athlete is created in the shared 60'6\" Player Registry org with the
+    caller linked as guardian (guardian_user_id). From there the kid joins a
+    club's roster or an event exactly like any other registry athlete — through
+    an event registration link or a club join code. No consents are recorded
+    here; those are signed per-event at registration time.
+    """
+    from routes_players import AthleteBody, athlete_doc, compute_age
+    from routes_signup import ORG_REGISTRY, _ensure_registry_org
+
+    rate_limit(f"me_athletes_add:{user['id']}", 10, 3600)
+
+    if compute_age(body.date_of_birth) is None:
+        raise HTTPException(status_code=422, detail="Enter the birth date as YYYY-MM-DD.")
+    if body.primary_position and body.primary_position not in REGISTRATION_POSITIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"primary_position must be one of: {', '.join(REGISTRATION_POSITIONS)}")
+    if len(body.secondary_positions) > 2:
+        raise HTTPException(status_code=422, detail="Choose at most two secondary positions.")
+    bad = [p for p in body.secondary_positions if p not in REGISTRATION_POSITIONS]
+    if bad:
+        raise HTTPException(
+            status_code=422,
+            detail=f"secondary_positions must be a subset of: {', '.join(REGISTRATION_POSITIONS)}")
+
+    await _ensure_registry_org()
+    ath = AthleteBody(
+        first_name=body.first_name.strip(),
+        last_name=body.last_name.strip(),
+        date_of_birth=body.date_of_birth,
+        graduation_year=body.graduation_year,
+        primary_position=body.primary_position,
+        secondary_positions=body.secondary_positions,
+        bats=body.bats,
+        throws=body.throws,
+        city=body.city,
+        state=body.state,
+        guardian_name=user.get("full_name"),
+        guardian_email=user.get("email"),
+        guardian_phone=user.get("phone"),
+        status="active",
+    )
+    doc = athlete_doc(ath, ORG_REGISTRY, user["id"])
+    doc["guardian_user_id"] = user["id"]
+    doc["source"] = "parent_added"
+    doc["self_service_enabled"] = True
+    await db.athletes.insert_one({**doc})
+
+    await log_audit(ORG_REGISTRY, user, "parent_added_athlete", "athlete", doc["id"],
+                    {"guardian_user_id": user["id"]})
+    return clean(doc)
+
+
 # ---------------- Admin: consent audit trail ----------------
 
 @router.get("/athletes/{athlete_id}/consents")
