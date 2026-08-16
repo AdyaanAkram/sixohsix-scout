@@ -1383,7 +1383,7 @@ const EvaluatorsTab = ({ eventId, isAdmin }) => {
   const [stations, setStations] = useState([]);
   const [groups, setGroups] = useState([]);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ evaluator_id: "", station_id: "", group_ids: [] });
+  const [form, setForm] = useState({ evaluator_id: "", station_ids: [], group_ids: [] });
   const [invites, setInvites] = useState([]);
   const [inviteForm, setInviteForm] = useState({ role: "evaluator", email: "", station_id: "", access: "24h" });
   const [inviteBusy, setInviteBusy] = useState(false);
@@ -1403,22 +1403,25 @@ const EvaluatorsTab = ({ eventId, isAdmin }) => {
 
   const add = async () => {
     try {
-      // Editing with a station change = move: revoke the old row first, then
-      // create the new one (same-station saves just upsert the groups).
-      if (editing && editing.station_id !== form.station_id) {
+      // One assignment per selected station. Editing with the original station
+      // unchecked = move: the old row is revoked after the new ones exist.
+      for (const sid of form.station_ids) {
+        await api.post(`/events/${eventId}/assignments`,
+          { evaluator_id: form.evaluator_id, station_id: sid, group_ids: form.group_ids });
+      }
+      if (editing && !form.station_ids.includes(editing.station_id)) {
         await api.delete(`/events/${eventId}/assignments/${editing.id}`);
       }
-      await api.post(`/events/${eventId}/assignments`, form);
-      toast.success(editing ? "Assignment updated." : "Evaluator assigned.");
+      toast.success(editing ? "Assignment updated." : (form.station_ids.length > 1 ? `Assigned to ${form.station_ids.length} stations.` : "Evaluator assigned."));
       setOpen(false);
       setEditing(null);
-      setForm({ evaluator_id: "", station_id: "", group_ids: [] });
+      setForm({ evaluator_id: "", station_ids: [], group_ids: [] });
       load();
     } catch (e) { toast.error(errMsg(e)); }
   };
   const startEdit = (a) => {
     setEditing({ id: a.id, station_id: a.station_id });
-    setForm({ evaluator_id: a.evaluator_id, station_id: a.station_id, group_ids: a.group_ids || [] });
+    setForm({ evaluator_id: a.evaluator_id, station_ids: [a.station_id], group_ids: a.group_ids || [] });
     setOpen(true);
   };
   const remove = async (aid) => {
@@ -1546,14 +1549,20 @@ const EvaluatorsTab = ({ eventId, isAdmin }) => {
                 </div>
               </div>
               <div className="space-y-1">
-                <Label className="text-xs"><span className="font-mono-num text-muted-foreground">3.</span> Station *</Label>
-                <Select value={form.station_id || undefined} onValueChange={(v) => setForm((f) => ({ ...f, station_id: v }))}>
-                  <SelectTrigger className="h-11 rounded-lg" data-testid="assignment-station-select"><SelectValue placeholder="Select station" /></SelectTrigger>
-                  <SelectContent>{stations.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
-                </Select>
+                <Label className="text-xs"><span className="font-mono-num text-muted-foreground">3.</span> Stations * (pick one or more)</Label>
+                <div className="space-y-1.5" data-testid="assignment-station-select">
+                  {stations.map((s) => (
+                    <label key={s.id} className="flex items-center gap-2 text-sm min-h-[32px] cursor-pointer">
+                      <Checkbox checked={form.station_ids.includes(s.id)} onCheckedChange={(v) => setForm((f) => ({ ...f, station_ids: v ? [...f.station_ids, s.id] : f.station_ids.filter((x) => x !== s.id) }))} />
+                      {s.name}
+                    </label>
+                  ))}
+                </div>
               </div>
             </div>
-            <DialogFooter><Button className="w-full rounded-xl bg-primary h-11" disabled={!form.evaluator_id || !form.station_id} onClick={add} data-testid="assignment-create-submit">Save Assignment</Button></DialogFooter>
+            <DialogFooter><Button className="w-full rounded-xl bg-primary h-11" disabled={!form.evaluator_id || form.station_ids.length === 0} onClick={add} data-testid="assignment-create-submit">
+              {form.station_ids.length > 1 ? `Save ${form.station_ids.length} Assignments` : "Save Assignment"}
+            </Button></DialogFooter>
           </DialogContent>
         </Dialog>
       )}
