@@ -375,7 +375,11 @@ const RosterTab = ({ eventId, isAdmin }) => {
       const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
       setNewToday((r.data || []).filter((a) =>
         a.status === "pending" ||
-        (a.status === "active" && a.created_at && new Date(a.created_at) >= midnight)));
+        (a.status === "active" && a.created_at && new Date(a.created_at) >= midnight))
+        .sort((x, y) =>
+          // Approvals first (that's the action the strip exists for), newest first within each.
+          (x.status === "pending" ? 0 : 1) - (y.status === "pending" ? 0 : 1) ||
+          String(y.created_at || "").localeCompare(String(x.created_at || ""))));
     }).catch(() => setNewToday([]));
   }, [eventId]);
   useEffect(() => { load(); }, [load]);
