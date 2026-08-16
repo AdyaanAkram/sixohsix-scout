@@ -368,13 +368,14 @@ const RosterTab = ({ eventId, isAdmin }) => {
   const load = useCallback(() => {
     api.get(`/events/${eventId}/roster`).then((r) => setRoster(r.data));
     api.get(`/events/${eventId}/groups`).then((r) => setGroups(sortGroups(r.data))).catch(() => setGroups([]));
-    // Day-of signups: every athlete added to the ORG today surfaces at the top
-    // of this roster for one-tap approve/add, so walk-up-time registrations
-    // never hide on the Players page while the event is running.
+    // Surface at the top of this roster: EVERY athlete awaiting approval (any
+    // date — pending kids must never hide on the Players page mid-event), plus
+    // anyone added to the org today for one-tap add.
     api.get("/athletes").then((r) => {
       const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
       setNewToday((r.data || []).filter((a) =>
-        a.status !== "archived" && a.created_at && new Date(a.created_at) >= midnight));
+        a.status === "pending" ||
+        (a.status === "active" && a.created_at && new Date(a.created_at) >= midnight)));
     }).catch(() => setNewToday([]));
   }, [eventId]);
   useEffect(() => { load(); }, [load]);
@@ -436,7 +437,7 @@ const RosterTab = ({ eventId, isAdmin }) => {
         <Card className="rounded-2xl border-warning/40 bg-warning/5" data-testid="roster-new-today-card">
           <CardContent className="py-3 space-y-2">
             <p className="text-sm font-semibold text-foreground">
-              New sign-ups today ({newToday.length})
+              New sign-ups &amp; approvals ({newToday.length})
             </p>
             {newToday.map((a) => {
               const onRoster = rosterIds.has(a.id);
