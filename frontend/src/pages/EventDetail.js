@@ -346,6 +346,13 @@ const ImportRosterWizard = ({ eventId, onDone, onUnavailable }) => {
 };
 
 // ---------------- Roster tab ----------------
+// Age-bracket groups ("Ages 9-10") sort youngest-first; anything else falls
+// back to name order after them.
+const sortGroups = (gs) => [...(gs || [])].sort((a, b) => {
+  const lo = (g) => { const m = /^\s*ages?\s+(\d+)/i.exec(g.name || ""); return m ? parseInt(m[1], 10) : 999; };
+  return lo(a) - lo(b) || String(a.name).localeCompare(String(b.name));
+});
+
 const RosterTab = ({ eventId, isAdmin }) => {
   const [roster, setRoster] = useState(null);
   const [groups, setGroups] = useState([]);
@@ -360,7 +367,7 @@ const RosterTab = ({ eventId, isAdmin }) => {
 
   const load = useCallback(() => {
     api.get(`/events/${eventId}/roster`).then((r) => setRoster(r.data));
-    api.get(`/events/${eventId}/groups`).then((r) => setGroups(r.data)).catch(() => setGroups([]));
+    api.get(`/events/${eventId}/groups`).then((r) => setGroups(sortGroups(r.data))).catch(() => setGroups([]));
     // Day-of signups: every athlete added to the ORG today surfaces at the top
     // of this roster for one-tap approve/add, so walk-up-time registrations
     // never hide on the Players page while the event is running.
@@ -630,7 +637,7 @@ const CheckInTab = ({ eventId, isAdmin }) => {
 
   const load = useCallback(() => {
     api.get(`/events/${eventId}/roster`).then((r) => setRoster(r.data));
-    api.get(`/events/${eventId}/groups`).then((r) => setGroups(r.data));
+    api.get(`/events/${eventId}/groups`).then((r) => setGroups(sortGroups(r.data)));
   }, [eventId]);
   useEffect(() => { load(); }, [load]);
 
@@ -792,7 +799,7 @@ const GroupsTab = ({ eventId, isAdmin }) => {
   const [editName, setEditName] = useState("");
   const [mergeFrom, setMergeFrom] = useState(null); // group being merged away
   const [mergeInto, setMergeInto] = useState("");
-  const load = useCallback(() => api.get(`/events/${eventId}/groups`).then((r) => setGroups(r.data)), [eventId]);
+  const load = useCallback(() => api.get(`/events/${eventId}/groups`).then((r) => setGroups(sortGroups(r.data))), [eventId]);
   useEffect(() => { load(); }, [load]);
 
   const add = async () => {
@@ -1148,7 +1155,7 @@ const StationsTab = ({ eventId, isAdmin }) => {
   const load = useCallback(() => {
     api.get(`/events/${eventId}/stations`).then((r) => setStations(r.data));
     api.get("/templates").then((r) => setTemplates(r.data));
-    api.get(`/events/${eventId}/groups`).then((r) => setGroups(r.data));
+    api.get(`/events/${eventId}/groups`).then((r) => setGroups(sortGroups(r.data)));
   }, [eventId]);
   useEffect(() => { load(); }, [load]);
 
@@ -1391,7 +1398,7 @@ const EvaluatorsTab = ({ eventId, isAdmin }) => {
   const load = useCallback(() => {
     api.get(`/events/${eventId}/assignments`).then((r) => setAssignments(r.data));
     api.get(`/events/${eventId}/stations`).then((r) => setStations(r.data));
-    api.get(`/events/${eventId}/groups`).then((r) => setGroups(r.data));
+    api.get(`/events/${eventId}/groups`).then((r) => setGroups(sortGroups(r.data)));
     if (isAdmin) {
       api.get("/staff").then((r) => setStaff(r.data.filter((s) => ["evaluator", "head_scout", "coach", "admin", "owner"].includes(s.role))));
       api.get(`/events/${eventId}/invites`).then((r) => setInvites(r.data || [])).catch(() => setInvites([]));
