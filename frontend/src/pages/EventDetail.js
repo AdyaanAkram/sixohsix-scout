@@ -353,7 +353,16 @@ const sortGroups = (gs) => [...(gs || [])].sort((a, b) => {
   return lo(a) - lo(b) || String(a.name).localeCompare(String(b.name));
 });
 
-const RosterTab = ({ eventId, isAdmin }) => {
+// "PBG Evaluation 13-18U" / "9-12u Eval" -> [13, 18] / [9, 12]. No range in the
+// name -> null (no filtering). Unknown/broken athlete ages are never hidden.
+const eventAgeRange = (name) => {
+  const m = /(\d{1,2})\s*[uU]?\s*[-\u2013]\s*(\d{1,2})\s*[uU]?/.exec(name || "");
+  if (!m) return null;
+  const lo = parseInt(m[1], 10), hi = parseInt(m[2], 10);
+  return lo <= hi ? [lo, hi] : null;
+};
+
+const RosterTab = ({ eventId, isAdmin, eventName }) => {
   const [roster, setRoster] = useState(null);
   const [groups, setGroups] = useState([]);
   const [addOpen, setAddOpen] = useState(false);
@@ -373,15 +382,22 @@ const RosterTab = ({ eventId, isAdmin }) => {
     // anyone added to the org today for one-tap add.
     api.get("/athletes").then((r) => {
       const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+      const range = eventAgeRange(eventName);
+      const fitsEvent = (a) => {
+        if (!range) return true;
+        const age = a.age;
+        if (age == null || age <= 1) return true; // never hide a kid with a broken DOB
+        return age >= range[0] && age <= range[1];
+      };
       setNewToday((r.data || []).filter((a) =>
-        a.status === "pending" ||
-        (a.status === "active" && a.created_at && new Date(a.created_at) >= midnight))
+        (a.status === "pending" ||
+        (a.status === "active" && a.created_at && new Date(a.created_at) >= midnight)) && fitsEvent(a))
         .sort((x, y) =>
           // Approvals first (that's the action the strip exists for), newest first within each.
           (x.status === "pending" ? 0 : 1) - (y.status === "pending" ? 0 : 1) ||
           String(y.created_at || "").localeCompare(String(x.created_at || ""))));
     }).catch(() => setNewToday([]));
-  }, [eventId]);
+  }, [eventId, eventName]);
   useEffect(() => { load(); }, [load]);
 
   const approveAthlete = async (athleteId) => {
@@ -442,6 +458,11 @@ const RosterTab = ({ eventId, isAdmin }) => {
           <CardContent className="py-3 space-y-2">
             <p className="text-sm font-semibold text-foreground">
               New sign-ups &amp; approvals ({newToday.length})
+              {eventAgeRange(eventName) && (
+                <span className="text-xs text-muted-foreground font-normal ml-2">
+                  showing ages {eventAgeRange(eventName)[0]}\u2013{eventAgeRange(eventName)[1]} \u00b7 matched to this event
+                </span>
+              )}
             </p>
             {newToday.map((a) => {
               const onRoster = rosterIds.has(a.id);
@@ -2422,7 +2443,7 @@ export default function EventDetail() {
 
         {isStaffView && (
           <>
-            <TabsContent value="roster" className="mt-4"><RosterTab eventId={eventId} isAdmin={isAdmin} /></TabsContent>
+            <TabsContent value="roster" className="mt-4"><RosterTab eventId={eventId} isAdmin={isAdmin} eventName={event?.name} /></TabsContent>
             <TabsContent value="checkin" className="mt-4"><CheckInTab eventId={eventId} isAdmin={isAdmin || user?.role === "head_scout" || user?.role === "coach"} /></TabsContent>
             <TabsContent value="groups" className="mt-4"><GroupsTab eventId={eventId} isAdmin={isAdmin} /></TabsContent>
             <TabsContent value="stations" className="mt-4"><StationsTab eventId={eventId} isAdmin={isAdmin} /></TabsContent>
