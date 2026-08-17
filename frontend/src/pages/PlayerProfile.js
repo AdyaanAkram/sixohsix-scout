@@ -24,7 +24,7 @@ import { toast } from "sonner";
 import {
   ArrowLeft, FileDown, Flag, Plus, TrendingUp, TrendingDown, Minus,
   ClipboardList, Image as ImageIcon, StickyNote, CalendarClock, Target, Archive, Camera, Mail,
-  Gauge, Trophy, Sparkles, ChevronDown, Check, X,, Trash2,
+  Gauge, Trophy, Sparkles, ChevronDown, Check, X, Trash2,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
