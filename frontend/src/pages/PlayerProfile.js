@@ -710,6 +710,47 @@ export default function PlayerProfile() {
   }, [athleteId, canCoach]);
 
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState({});
+  const [editBusy, setEditBusy] = useState(false);
+
+  const EDIT_FIELDS = [
+    ["first_name", "First name"], ["last_name", "Last name"], ["preferred_name", "Preferred name"],
+    ["date_of_birth", "Date of birth", "date"], ["graduation_year", "Grad year", "number"],
+    ["height", "Height"], ["weight", "Weight"], ["jersey_number", "Jersey #"],
+    ["current_team", "Team"], ["school", "School"], ["city", "City"], ["state", "State"],
+    ["email", "Athlete email", "email"], ["guardian_name", "Guardian name"],
+    ["guardian_email", "Guardian email", "email"], ["guardian_phone", "Guardian phone"],
+  ];
+  const openProfileEdit = () => {
+    const a0 = summary?.athlete || {};
+    const f = {};
+    EDIT_FIELDS.forEach(([k]) => { f[k] = a0[k] ?? ""; });
+    f.primary_position = a0.primary_position || "";
+    f.bats = a0.bats || ""; f.throws = a0.throws || "";
+    setEditForm(f); setEditOpen(true);
+  };
+  const saveProfileEdit = async () => {
+    const a0 = summary?.athlete || {};
+    setEditBusy(true);
+    try {
+      // PATCH replaces the document — send the full merged payload
+      const payload = {};
+      ATHLETE_PATCH_KEYS.forEach((k) => { payload[k] = a0[k] ?? null; });
+      payload.secondary_positions = a0.secondary_positions || [];
+      payload.status = a0.status || "active";
+      EDIT_FIELDS.forEach(([k, , t]) => {
+        const v = String(editForm[k] ?? "").trim();
+        payload[k] = v === "" ? null : (t === "number" ? parseInt(v, 10) || null : v);
+      });
+      payload.primary_position = editForm.primary_position || null;
+      payload.bats = editForm.bats || null; payload.throws = editForm.throws || null;
+      await api.patch(`/athletes/${athleteId}`, payload);
+      toast.success("Profile updated.");
+      setEditOpen(false);
+      loadSummary();
+    } catch (e) { toast.error(errMsg(e)); } finally { setEditBusy(false); }
+  };
   const [inviteForm, setInviteForm] = useState({ email: "", guardian_name: "", guardian_email: "" });
 
   const openInvite = () => {
@@ -990,6 +1031,52 @@ export default function PlayerProfile() {
                   <p className="text-sm font-mono-num text-brand" data-testid="profile-permanent-id">{formatPermanentId(a.id)}</p>
                 </div>
                 <div className="flex flex-wrap justify-center sm:justify-end gap-2 mx-auto sm:mx-0">
+                  {isAdmin && (
+                    <Dialog open={editOpen} onOpenChange={setEditOpen}>
+                      <Button variant="outline" className="rounded-xl h-10" onClick={openProfileEdit} data-testid="profile-edit-button">
+                        Edit Profile
+                      </Button>
+                      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl">
+                        <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Edit Profile</DialogTitle></DialogHeader>
+                        <div className="grid grid-cols-2 gap-3">
+                          {EDIT_FIELDS.map(([k, label, type]) => (
+                            <div key={k} className="space-y-1">
+                              <Label className="text-xs">{label}</Label>
+                              <Input type={type || "text"} value={editForm[k] ?? ""} onChange={(e) => setEditForm((f) => ({ ...f, [k]: e.target.value }))} className="h-10 rounded-lg" data-testid={`edit-profile-${k.replace(/_/g, "-")}`} />
+                            </div>
+                          ))}
+                          <div className="space-y-1">
+                            <Label className="text-xs">Primary position</Label>
+                            <Select value={editForm.primary_position || undefined} onValueChange={(v) => setEditForm((f) => ({ ...f, primary_position: v }))}>
+                              <SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="Select" /></SelectTrigger>
+                              <SelectContent>{["P","C","1B","2B","3B","SS","LF","CF","RF","UTIL"].map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                            </Select>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <Label className="text-xs">Bats</Label>
+                              <Select value={editForm.bats || undefined} onValueChange={(v) => setEditForm((f) => ({ ...f, bats: v }))}>
+                                <SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="—" /></SelectTrigger>
+                                <SelectContent><SelectItem value="R">R</SelectItem><SelectItem value="L">L</SelectItem><SelectItem value="S">S</SelectItem></SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Throws</Label>
+                              <Select value={editForm.throws || undefined} onValueChange={(v) => setEditForm((f) => ({ ...f, throws: v }))}>
+                                <SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="—" /></SelectTrigger>
+                                <SelectContent><SelectItem value="R">R</SelectItem><SelectItem value="L">L</SelectItem></SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button onClick={saveProfileEdit} disabled={editBusy} className="rounded-xl bg-primary hover:bg-brand-secondary w-full h-11" data-testid="edit-profile-save">
+                            {editBusy ? "Saving…" : "Save Profile"}
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  )}
                   {canCoach && (
                     <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
                       <Button variant="outline" className="rounded-xl h-10" disabled={inviteBusy || inviteStatus?.status === "accepted"} onClick={openInvite} data-testid="invite-to-platform-button">
