@@ -2366,7 +2366,7 @@ export default function EventDetail() {
             // keep the active tab visible on phones — the row scrolls, so a
             // coach deep-linked to Live/Results should never land on a bar
             // that looks like it ends at "Groups"
-            if (el) { const act = el.querySelector('[data-state="active"]'); act?.scrollIntoView({ inline: "center", block: "nearest" }); }
+            if (el) { requestAnimationFrame(() => { const act = el.querySelector('[data-state="active"]'); act?.scrollIntoView({ inline: "center", block: "nearest" }); }); }
           }}>
             <TabsList className="rounded-xl bg-secondary h-11 w-max">
               {tabs.map((t) => (

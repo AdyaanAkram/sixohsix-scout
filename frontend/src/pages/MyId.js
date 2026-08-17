@@ -467,7 +467,7 @@ export default function MyId() {
                   : "bg-card text-muted-foreground border-border hover:text-foreground hover:border-brand/60"
               }`}
             >
-              {c.first_name}
+              {c.first_name}{c.last_name ? ` ${String(c.last_name)[0]}.` : ""}
             </button>
           ))}
           <button
