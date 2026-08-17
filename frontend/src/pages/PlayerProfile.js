@@ -24,7 +24,7 @@ import { toast } from "sonner";
 import {
   ArrowLeft, FileDown, Flag, Plus, TrendingUp, TrendingDown, Minus,
   ClipboardList, Image as ImageIcon, StickyNote, CalendarClock, Target, Archive, Camera, Mail,
-  Gauge, Trophy, Sparkles, ChevronDown, Check, X,
+  Gauge, Trophy, Sparkles, ChevronDown, Check, X,, Trash2,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -155,15 +155,30 @@ function deltaLabel(current, other, lowerBetter, unit) {
   return { text, tone: better ? "text-success" : "text-destructive" };
 }
 
-const MetricRow = ({ m }) => (
+const MetricRow = ({ m, canDelete, onDelete }) => (
   <Card className="rounded-2xl border-border">
-    <CardContent className="py-3 flex justify-between gap-2">
+    <CardContent className="py-3 flex justify-between items-center gap-2">
       <div>
         <p className="text-sm font-semibold capitalize">{m.label || String(m.metric_key || "").replace(/_/g, " ")}</p>
         <p className="text-xs text-muted-foreground">{m.measured_at} · {m.verified_by_name || "Staff"}</p>
         {m.source && <div className="mt-1"><SourceBadge source={m.source} compact /></div>}
       </div>
-      <p className="font-mono-num font-bold text-lg text-brand">{m.value} {m.unit}</p>
+      <div className="flex items-center gap-2">
+        <p className="font-mono-num font-bold text-lg text-brand">{m.value} {m.unit}</p>
+        {canDelete && (
+          <button
+            type="button"
+            className="text-muted-foreground hover:text-destructive p-1.5"
+            title="Remove this mis-entered reading"
+            data-testid={`metric-delete-${m.id}`}
+            onClick={() => {
+              if (window.confirm(`Remove ${m.label || m.metric_key} = ${m.value} ${m.unit || ""} (${m.measured_at})?\n\nUse this to fix typos — the removal is audit-logged.`)) onDelete(m.id);
+            }}
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        )}
+      </div>
     </CardContent>
   </Card>
 );
@@ -644,6 +659,14 @@ export default function PlayerProfile() {
   const [comparison, setComparison] = useState(null);
   const [metricForm, setMetricForm] = useState({ metric_key: "exit_velo", value: "", measured_at: "", source: "coach_submitted" });
   const [metricBusy, setMetricBusy] = useState(false);
+  const deleteMetric = async (id) => {
+    try {
+      await api.delete(`/metrics/${id}`);
+      toast.success("Reading removed.");
+      api.get(`/metrics/athlete/${athleteId}`).then((r) => setMetrics(r.data)).catch(() => {});
+      loadComparison();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
   const [metricError, setMetricError] = useState("");
   const [awards, setAwards] = useState(null);
   const [awardForm, setAwardForm] = useState({ title: "", category: "overall", description: "" });
@@ -1465,12 +1488,12 @@ export default function PlayerProfile() {
                 View Details — all logged measurements ({metrics.length}) <ChevronDown className="h-3.5 w-3.5" />
               </CollapsibleTrigger>
               <CollapsibleContent>
-                <div className="space-y-2 pt-2">{metrics.map((m) => <MetricRow key={m.id} m={m} />)}</div>
+                <div className="space-y-2 pt-2">{metrics.map((m) => <MetricRow key={m.id} m={m} canDelete={isAdmin} onDelete={deleteMetric} />)}</div>
               </CollapsibleContent>
             </Collapsible>
           ) : (
             <div className="space-y-2">
-              {metrics.map((m) => <MetricRow key={m.id} m={m} />)}
+              {metrics.map((m) => <MetricRow key={m.id} m={m} canDelete={isAdmin} onDelete={deleteMetric} />)}
             </div>
           )}
         </TabsContent>

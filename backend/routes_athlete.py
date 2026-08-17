@@ -20,7 +20,12 @@ from storage import media_object_key, storage
 
 router = APIRouter()
 
-ATHLETE_PATCH_WHITELIST = {"bio", "public_enabled"}
+# Parent/athlete self-editable fields (Coach G, Aug 17): everything a family
+# reasonably maintains — never identity (name/DOB/grad), evaluation data, or
+# photos (org-only per Coach G).
+ATHLETE_PATCH_WHITELIST = {"bio", "public_enabled", "height", "weight", "current_team",
+                           "school", "city", "state", "phone", "email", "years_playing",
+                           "primary_position", "secondary_positions", "bats", "throws"}
 INVITE_TTL_DAYS = 14
 APP_PUBLIC_URL = settings.app_public_url
 
@@ -274,6 +279,13 @@ async def me_athlete_photo(
     file: UploadFile = File(...),
     user=Depends(get_current_user),
 ):
+    # Coach G (Aug 17): profile photos are uploaded by the ORGANIZATION only —
+    # family accounts see a clear explanation instead of an upload path.
+    if user.get("role") in ("parent", "athlete"):
+        raise HTTPException(
+            status_code=403,
+            detail="Profile photos are added by the organization's staff at "
+                   "evaluations — ask your coach to update it.")
     a = await _own_athlete(user)
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_IMAGE:

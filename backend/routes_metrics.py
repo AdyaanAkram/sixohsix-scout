@@ -13,7 +13,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from auth import COACH_ROLES, REVIEW_ROLES, STAFF_ROLES, get_current_user, require_roles
+from auth import ADMIN_ROLES, COACH_ROLES, REVIEW_ROLES, STAFF_ROLES, get_current_user, require_roles
 from db import clean, db, log_audit, new_id, now_iso
 from notifications import notify_athlete_users
 from scoring import (
@@ -280,6 +280,21 @@ def _resolve_write_source(user, requested: str | None) -> str:
 # ---------------------------------------------------------------------------
 # Write
 # ---------------------------------------------------------------------------
+
+@router.delete("/metrics/{metric_id}")
+async def delete_metric(metric_id: str, user=Depends(require_roles(*ADMIN_ROLES))):
+    """Remove a mis-entered reading (typo'd time/velocity). Admin-only, audited.
+    History correction, not falsification: the audit log keeps what was removed."""
+    doc = await db.verified_metrics.find_one(
+        {"id": metric_id, "organization_id": user["organization_id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Metric entry not found.")
+    await db.verified_metrics.delete_one({"id": metric_id, "organization_id": user["organization_id"]})
+    await log_audit(user["organization_id"], user, "metric_deleted", "metric", metric_id,
+                    {"athlete_id": doc.get("athlete_id"), "metric_key": doc.get("metric_key"),
+                     "value": doc.get("value"), "measured_at": doc.get("measured_at")})
+    return {"message": "Metric entry removed."}
+
 
 @router.post("/metrics")
 async def add_metric(body: MetricBody, user=Depends(get_current_user)):
