@@ -2324,7 +2324,7 @@ export default function EventDetail() {
   const tabs = isStaffView
     ? ["overview", "roster", "checkin", "groups", "stations", "evaluators", "progress", "results"]
     : ["overview"];
-  const TAB_LABELS = { overview: "Overview", roster: "Roster", checkin: "Check-In", groups: "Groups", stations: "Stations", evaluators: "Evaluators", progress: "Live Progress", results: "Results" };
+  const TAB_LABELS = { overview: "Overview", roster: "Roster", checkin: "Check-In", groups: "Groups", stations: "Stations", evaluators: "Evaluators", progress: "Live", results: "Results" };
 
   return (
     <div className="space-y-4">
@@ -2334,20 +2334,23 @@ export default function EventDetail() {
         </button>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="font-display text-4xl text-foreground">{event.name}</h1>
+            <h1 className="font-display text-3xl sm:text-4xl text-foreground">{event.name}</h1>
             <p className="text-sm text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
               <span className="inline-flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" /> {event.date} {event.start_time && `· ${event.start_time}–${event.end_time}`}</span>
               {event.location && <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" /> {event.location}</span>}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <StatusBadge status={event.status} testId="event-status-badge" />
+            {/* the select already shows the status for admins — one source on phones */}
+            <span className={isAdmin ? "hidden sm:inline-flex" : ""}>
+              <StatusBadge status={event.status} testId="event-status-badge" />
+            </span>
             {isAdmin && (
               <Select value={event.status} onValueChange={setStatus}>
                 <SelectTrigger className="h-10 w-[190px] rounded-xl bg-card" data-testid="event-status-select"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {!EVENT_STATUSES.includes(event.status) && (
-                    <SelectItem value={event.status}>{event.status} (legacy)</SelectItem>
+                    <SelectItem value={event.status}>{event.status}</SelectItem>
                   )}
                   {EVENT_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                 </SelectContent>
@@ -2358,14 +2361,23 @@ export default function EventDetail() {
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
-        <div className="overflow-x-auto -mx-4 px-4">
-          <TabsList className="rounded-xl bg-secondary h-11 w-max">
-            {tabs.map((t) => (
-              <TabsTrigger key={t} value={t} className="rounded-lg px-3.5 data-[state=active]:bg-primary data-[state=active]:text-white" data-testid={`event-tab-${t}`}>
-                {TAB_LABELS[t]}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+        <div className="relative">
+          <div className="overflow-x-auto -mx-4 px-4 scroll-smooth" ref={(el) => {
+            // keep the active tab visible on phones — the row scrolls, so a
+            // coach deep-linked to Live/Results should never land on a bar
+            // that looks like it ends at "Groups"
+            if (el) { const act = el.querySelector('[data-state="active"]'); act?.scrollIntoView({ inline: "center", block: "nearest" }); }
+          }}>
+            <TabsList className="rounded-xl bg-secondary h-11 w-max">
+              {tabs.map((t) => (
+                <TabsTrigger key={t} value={t} className="rounded-lg px-3.5 data-[state=active]:bg-primary data-[state=active]:text-white" data-testid={`event-tab-${t}`}>
+                  {TAB_LABELS[t]}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </div>
+          {/* right-edge fade: signals there are more tabs off-screen */}
+          <div className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-background to-transparent sm:hidden" />
         </div>
 
         <TabsContent value="overview" className="mt-4">
