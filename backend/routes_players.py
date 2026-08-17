@@ -1294,6 +1294,26 @@ CSV_IGNORED_COLUMNS = {
     "age", "event group",               # org-level import derives age from DOB; groups are per-event
 }
 
+# Measured-result columns: "hand-written metrics" sheets sync straight onto the
+# athlete's verified-metrics history (source: coach_submitted). Header aliases
+# map to scoring.py's canonical metric keys.
+METRIC_CSV_COLUMNS = {
+    "60 yard": "sixty_yard_dash", "60 yard dash": "sixty_yard_dash", "60yd": "sixty_yard_dash",
+    "sixty yard": "sixty_yard_dash", "sixty yard dash": "sixty_yard_dash", "60": "sixty_yard_dash",
+    "home to first": "home_to_first", "home to 1st": "home_to_first", "h1": "home_to_first",
+    "home to second": "home_to_second", "home to 2nd": "home_to_second",
+    "exit velo": "exit_velocity", "exit velocity": "exit_velocity", "ev": "exit_velocity",
+    "throwing velo": "throwing_velocity", "throwing velocity": "throwing_velocity",
+    "arm velo": "throwing_velocity", "of velo": "throwing_velocity", "if velo": "throwing_velocity",
+    "pitch velo": "pitching_velocity", "pitching velocity": "pitching_velocity",
+    "fastball velo": "pitching_velocity", "fb velo": "pitching_velocity",
+    "pop time": "pop_time", "pop": "pop_time",
+    "bat speed": "bat_speed",
+    "broad jump": "broad_jump", "vertical jump": "vertical_jump", "vertical": "vertical_jump", "vert": "vertical_jump",
+}
+METRIC_DATE_HEADERS = {"measured at", "measurement date", "test date", "date measured"}
+
+
 
 def _normalize_header(col: str) -> str:
     """Normalize CSV headers so GameChanger / spreadsheet variants map cleanly."""
@@ -1338,13 +1358,18 @@ async def import_preview(file: UploadFile = File(...), user=Depends(require_role
             mapping[col] = CSV_COLUMNS[key]
         elif key in ("b/t", "bats/throws", "bat/throw"):
             mapping[col] = "bats_throws"
+        elif key in METRIC_CSV_COLUMNS:
+            mapping[col] = "metric::" + METRIC_CSV_COLUMNS[key]
+        elif key in METRIC_DATE_HEADERS:
+            mapping[col] = "metric_measured_at"
         elif key in CSV_IGNORED_COLUMNS:
             ignored.append(col)
         else:
             unmapped.append(col)
 
-    existing = await db.athletes.find({"organization_id": user["organization_id"], "status": {"$ne": "merged"}}, {"_id": 0, "first_name": 1, "last_name": 1, "date_of_birth": 1}).to_list(2000)
-    existing_keys = {(e.get("first_name", "").lower(), e.get("last_name", "").lower(), e.get("date_of_birth")) for e in existing}
+    existing = await db.athletes.find({"organization_id": user["organization_id"], "status": {"$ne": "merged"}}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "date_of_birth": 1}).to_list(2000)
+    existing_ids = {(e.get("first_name", "").lower(), e.get("last_name", "").lower(), e.get("date_of_birth")): e["id"] for e in existing}
+    existing_keys = set(existing_ids)
 
     rows = []
     for idx, row in enumerate(file_rows):
@@ -1390,6 +1415,16 @@ async def import_preview(file: UploadFile = File(...), user=Depends(require_role
                     record[field] = None
             elif field == "secondary_positions":
                 record[field] = [p.strip() for p in val.replace(";", ",").split(",") if p.strip()] if val else []
+            elif field.startswith("metric::"):
+                if val:
+                    num = "".join(ch for ch in val if ch.isdigit() or ch in ".-")
+                    try:
+                        record.setdefault("metrics", {})[field[8:]] = float(num)
+                    except ValueError:
+                        errors.append(f"{field[8:]}: not a number ({val})")
+            elif field == "metric_measured_at":
+                parsed, _err = parse_dob(val)  # same tolerant date formats
+                record["metric_measured_at"] = parsed
             else:
                 # don't overwrite a stronger explicit field with empty
                 if val or field not in record:
@@ -1404,7 +1439,8 @@ async def import_preview(file: UploadFile = File(...), user=Depends(require_role
             errors.append("Last name is required")
         dup_key = ((record.get("first_name") or "").lower(), (record.get("last_name") or "").lower(), record.get("date_of_birth"))
         is_duplicate = dup_key in existing_keys
-        rows.append({"row_number": idx + 2, "data": record, "errors": errors, "is_duplicate": is_duplicate, "valid": len(errors) == 0})
+        rows.append({"row_number": idx + 2, "data": record, "errors": errors, "is_duplicate": is_duplicate,
+                     "matched_athlete_id": existing_ids.get(dup_key), "valid": len(errors) == 0})
 
     return {
         "total_rows": len(rows),
@@ -1424,16 +1460,61 @@ class ImportConfirmBody(BaseModel):
     include_duplicates: bool = False
 
 
+async def _write_import_metrics(org: str, user: dict, athlete_id: str,
+                                metrics: dict, measured_at: str | None) -> int:
+    """Sheet metrics -> verified_metrics history (source: coach_submitted).
+    Mirrors routes_metrics' submit doc so every consumer (profile, AI recap,
+    trends) sees them identically."""
+    from routes_metrics import resolve_season_id, source_is_verified
+    from scoring import metric_meta
+    ts = now_iso()
+    day = measured_at or ts[:10]
+    n = 0
+    for key, value in (metrics or {}).items():
+        meta = metric_meta(key)
+        if not meta:
+            continue
+        # one reading per athlete+metric+day from imports — re-running a sheet
+        # must not stack duplicates
+        exists = await db.verified_metrics.find_one({
+            "organization_id": org, "athlete_id": athlete_id,
+            "metric_key": key, "measured_at": day, "source": "coach_submitted"})
+        if exists:
+            continue
+        verified = source_is_verified("coach_submitted")
+        await db.verified_metrics.insert_one({
+            "id": new_id(), "organization_id": org, "athlete_id": athlete_id,
+            "metric_key": key, "value": float(value), "unit": meta.get("unit"),
+            "source": "coach_submitted", "is_verified": verified,
+            "submitted_by": user["id"], "submitted_by_name": user.get("full_name"),
+            "verified_by": user["id"] if verified else None,
+            "verified_by_name": user.get("full_name") if verified else None,
+            "verified_at": ts if verified else None,
+            "measured_at": day,
+            "season_id": await resolve_season_id(athlete_id, org, None, day),
+            "created_at": ts,
+        })
+        n += 1
+    return n
+
+
 @router.post("/athletes/import/confirm")
 async def import_confirm(body: ImportConfirmBody, user=Depends(require_roles(*ADMIN_ROLES))):
     imported = 0
     skipped = 0
+    metrics_written = 0
+    org = user["organization_id"]
     for r in body.rows:
         data = r.get("data", {})
         if r.get("errors") or not data.get("first_name") or not data.get("last_name"):
             skipped += 1
             continue
         if r.get("is_duplicate") and not body.include_duplicates:
+            # Profile creation is skipped for existing athletes — but their sheet
+            # metrics still sync onto the MATCHED athlete's history.
+            if data.get("metrics") and r.get("matched_athlete_id"):
+                metrics_written += await _write_import_metrics(
+                    org, user, r["matched_athlete_id"], data["metrics"], data.get("metric_measured_at"))
             skipped += 1
             continue
         doc = {
@@ -1471,8 +1552,15 @@ async def import_confirm(body: ImportConfirmBody, user=Depends(require_roles(*AD
         }
         await db.athletes.insert_one(doc)
         imported += 1
-    await log_audit(user["organization_id"], user, "athletes_imported", "athlete", None, {"imported": imported, "skipped": skipped})
-    return {"imported": imported, "skipped": skipped, "message": f"Imported {imported} players. Skipped {skipped}."}
+        if data.get("metrics"):
+            metrics_written += await _write_import_metrics(
+                org, user, doc["id"], data["metrics"], data.get("metric_measured_at"))
+    await log_audit(user["organization_id"], user, "athletes_imported", "athlete", None,
+                    {"imported": imported, "skipped": skipped, "metrics_written": metrics_written})
+    msg = f"Imported {imported} players. Skipped {skipped}."
+    if metrics_written:
+        msg += f" Synced {metrics_written} measurements onto athlete histories."
+    return {"imported": imported, "skipped": skipped, "metrics_written": metrics_written, "message": msg}
 
 
 @router.get("/athletes-export/csv")
