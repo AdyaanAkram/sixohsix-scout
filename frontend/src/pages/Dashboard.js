@@ -514,7 +514,7 @@ export default function Dashboard() {
             <CardHeader className="pb-2"><CardTitle className="text-base">Quick Actions</CardTitle></CardHeader>
             <CardContent className="space-y-2">
               <QuickAction to="/events" icon={CalendarPlus} label="Create Event" testId="quick-action-create-event" />
-              <QuickAction to="/players/import" icon={Upload} label="Import Players" testId="quick-action-import-players" />
+              <QuickAction to="/players/import" icon={Upload} label="Import Athletes" testId="quick-action-import-players" />
               {ev && <QuickAction to={`/events/${ev.id}?tab=evaluators`} icon={UserCog} label="Assign Evaluators" testId="quick-action-assign-evaluators" />}
               {ev && <QuickAction to={`/events/${ev.id}?tab=checkin`} icon={ClipboardCheck} label="Open Check-In" testId="quick-action-open-checkin" />}
               {ev && <QuickAction to={`/events/${ev.id}?tab=progress`} icon={Activity} label="View Live Progress" testId="quick-action-live-progress" />}

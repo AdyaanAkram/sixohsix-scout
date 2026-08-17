@@ -8,7 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
 
 export default function Redeem() {
-  const [form, setForm] = useState({ code: "", email: "", full_name: "", password: "" });
+  const [form, setForm] = useState({ code: (new URLSearchParams(window.location.search).get("code") || "").toUpperCase(), email: "", full_name: "", password: "" });
   const [busy, setBusy] = useState(false);
 
   const submit = async (e) => {

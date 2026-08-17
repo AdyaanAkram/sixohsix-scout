@@ -56,7 +56,7 @@ const AddPlayerDialog = ({ onCreated }) => {
       const payload = { ...form, graduation_year: form.graduation_year ? parseInt(form.graduation_year) : null, secondary_positions: [] };
       Object.keys(payload).forEach((k) => { if (payload[k] === "") payload[k] = null; });
       await api.post("/athletes", payload);
-      toast.success("Player added.");
+      toast.success("Athlete added.");
       setOpen(false);
       setForm(EMPTY_FORM);
       onCreated();
@@ -73,11 +73,11 @@ const AddPlayerDialog = ({ onCreated }) => {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button className="rounded-xl bg-primary hover:bg-brand-secondary h-11" data-testid="add-player-button">
-          <Plus className="h-4 w-4 mr-1" /> Add Player
+          <Plus className="h-4 w-4 mr-1" /> Add Athlete
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl">
-        <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Add Player</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Add Athlete</DialogTitle></DialogHeader>
         <form onSubmit={submit} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             {field({ label: "First name *", k: "first_name" })}
@@ -119,7 +119,7 @@ const AddPlayerDialog = ({ onCreated }) => {
           </div>
           <DialogFooter>
             <Button type="submit" disabled={busy || !form.first_name || !form.last_name} className="rounded-xl bg-primary hover:bg-brand-secondary w-full h-11" data-testid="add-player-submit-button">
-              {busy ? "Adding…" : "Add Player"}
+              {busy ? "Adding…" : "Add Athlete"}
             </Button>
           </DialogFooter>
         </form>
@@ -175,12 +175,12 @@ const RegistrySearchDialog = ({ onAdded }) => {
     <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setQ(""); setResults([]); } }}>
       <DialogTrigger asChild>
         <Button variant="outline" className="rounded-xl h-11" data-testid="registry-search-button">
-          <UserSearch className="h-4 w-4 mr-1" /> Find registered players
+          <UserSearch className="h-4 w-4 mr-1" /> Find registered athletes
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-lg max-h-[85vh] flex flex-col rounded-2xl" data-testid="registry-search-dialog">
         <DialogHeader>
-          <DialogTitle className="font-display text-2xl text-foreground">Find registered players</DialogTitle>
+          <DialogTitle className="font-display text-2xl text-foreground">Find registered athletes</DialogTitle>
         </DialogHeader>
         <div className="space-y-3 flex-1 min-h-0 flex flex-col">
           <div className="relative">
@@ -486,7 +486,7 @@ export default function PlayersList() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-display text-4xl text-foreground">Players</h1>
+          <h1 className="font-display text-4xl text-foreground">Athletes</h1>
           <p className="text-sm text-muted-foreground">{visible.length} player{visible.length === 1 ? "" : "s"} in the roster</p>
         </div>
         {isAdmin && (

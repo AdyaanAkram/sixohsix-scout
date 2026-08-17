@@ -507,13 +507,39 @@ export const AppLayout = ({ children }) => {
             {notifs.length === 0 ? (
               <p className="text-sm text-muted-foreground">You&apos;re all caught up.</p>
             ) : (
-              notifs.map((n) => (
-                <div key={n.id} className={cn("rounded-xl border border-border px-3 py-2.5", !n.read && "bg-secondary/50")}>
-                  <p className="text-sm font-semibold text-foreground">{n.title}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{n.body}</p>
-                  <p className="text-[10px] text-muted-foreground mt-1">{(n.created_at || "").slice(0, 16).replace("T", " ")}</p>
-                </div>
-              ))
+              notifs.map((n) => {
+                // Every notification deep-links to the place you act on it.
+                const dest = (() => {
+                  const p = n.payload || {};
+                  switch (n.kind) {
+                    case "signup_pending": return "/players";
+                    case "assessment_published":
+                    case "moment_approved":
+                    case "moment_rejected":
+                    case "org_added": return "/my-id";
+                    case "event_invite": return p.code ? `/redeem?code=${p.code}` : "/redeem";
+                    case "award_pending": return p.athlete_id ? `/players/${p.athlete_id}?tab=awards` : "/players";
+                    default:
+                      if (p.event_id) return `/events/${p.event_id}`;
+                      if (p.athlete_id) return `/players/${p.athlete_id}`;
+                      return null;
+                  }
+                })();
+                return (
+                  <button
+                    key={n.id}
+                    type="button"
+                    onClick={() => { if (dest) { setNotifOpen(false); navigate(dest); } }}
+                    className={cn("w-full text-left rounded-xl border border-border px-3 py-2.5 transition-colors",
+                      !n.read && "bg-secondary/50", dest && "hover:border-brand/50 cursor-pointer")}
+                    data-testid={`notification-item-${n.id}`}
+                  >
+                    <p className="text-sm font-semibold text-foreground">{n.title}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{n.body}</p>
+                    <p className="text-[10px] text-muted-foreground mt-1">{(n.created_at || "").slice(0, 16).replace("T", " ")}{dest ? " · tap to open" : ""}</p>
+                  </button>
+                );
+              })
             )}
           </div>
         </SheetContent>

@@ -494,7 +494,7 @@ const RosterTab = ({ eventId, isAdmin, eventName }) => {
       )}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="text-sm text-muted-foreground">{roster.length} players on roster</p>
+          <p className="text-sm text-muted-foreground">{roster.length} athletes on roster</p>
           {groups.length === 0 && (
             <p className="text-xs text-muted-foreground mt-0.5">
               Groups are optional lanes (e.g. 12U A). Create them under the Groups tab, then assign here or at Check-In.
@@ -509,11 +509,11 @@ const RosterTab = ({ eventId, isAdmin, eventName }) => {
           <Dialog open={addOpen} onOpenChange={(o) => { setAddOpen(o); if (!o) { setSelected({}); setAddGroupId(""); } }}>
             <DialogTrigger asChild>
               <Button className="rounded-xl bg-primary hover:bg-brand-secondary h-10" data-testid="roster-add-players-button">
-                <UserPlus className="h-4 w-4 mr-1" /> Add Players
+                <UserPlus className="h-4 w-4 mr-1" /> Add Athletes
               </Button>
             </DialogTrigger>
             <DialogContent className="rounded-2xl max-w-md max-h-[80vh] flex flex-col">
-              <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Add Players to Event</DialogTitle></DialogHeader>
+              <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Add Athletes to Event</DialogTitle></DialogHeader>
               <Input value={dirSearch} onChange={(e) => setDirSearch(e.target.value)} placeholder="Search directory…" className="h-10 rounded-xl" data-testid="roster-directory-search" />
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Assign to group (optional)</Label>
@@ -714,7 +714,7 @@ const CheckInTab = ({ eventId, isAdmin }) => {
               <Button variant="outline" className="rounded-xl h-10" data-testid="walk-up-button"><Plus className="h-4 w-4 mr-1" /> Walk-Up Player</Button>
             </DialogTrigger>
             <DialogContent className="rounded-2xl max-w-sm">
-              <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Add Walk-Up Player</DialogTitle></DialogHeader>
+              <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Add Walk-Up Athlete</DialogTitle></DialogHeader>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1"><Label className="text-xs">First name *</Label><Input value={walkUp.first_name} onChange={(e) => setWalkUp((w) => ({ ...w, first_name: e.target.value }))} className="h-10 rounded-lg" data-testid="walkup-first-name" /></div>
                 <div className="space-y-1"><Label className="text-xs">Last name *</Label><Input value={walkUp.last_name} onChange={(e) => setWalkUp((w) => ({ ...w, last_name: e.target.value }))} className="h-10 rounded-lg" data-testid="walkup-last-name" /></div>
