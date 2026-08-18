@@ -351,6 +351,7 @@ async def _roster_intel(org_id: str, athletes: list[dict], role: str) -> list[di
             "latest_overall": latest_overall,
             "score_change": score_change,
             "development_focus": focus_by_athlete.get(aid),
+            "last_eval_at": last_eval_at or None,
             "statuses": statuses,
         })
         out.append(shaped)

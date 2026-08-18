@@ -19,7 +19,8 @@ import { toast } from "sonner";
 import {
   Search, Plus, Upload, FileDown, Users, ChevronRight, LayoutGrid, List,
   SlidersHorizontal, Eye, TrendingUp, TrendingDown, Minus, ArrowRight,
-  UserSearch, UserCheck,
+  UserSearch, UserCheck, ClipboardCheck, AlertTriangle, BarChart3, Star,
+  CalendarPlus,
 } from "lucide-react";
 
 const AGE_GROUPS = ["8U", "9U", "10U", "11U", "12U", "13U", "14U", "15U", "16U", "17U", "18U"];
@@ -326,6 +327,87 @@ const ScoreTrend = ({ score, change, size = "md" }) => {
   );
 };
 
+const fmtDate = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? "—"
+    : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+};
+
+const pct = (x, total) => (total ? Math.round((x / total) * 100) : 0);
+
+/* Scouting-card status pill. Priority: follow_up > needs eval > improving >
+   evaluated. Warning = needs attention, success = on track. */
+const CardStatusPill = ({ statuses }) => {
+  const s = statuses || {};
+  let label = "EVALUATED";
+  let cls = "bg-success/15 text-success";
+  let trending = false;
+  if (s.follow_up) {
+    label = "FOLLOW-UP";
+    cls = "bg-warning/15 text-warning";
+  } else if (!s.evaluated) {
+    label = "NEEDS EVAL";
+    cls = "bg-warning/15 text-warning";
+  } else if (s.improving) {
+    trending = true;
+  }
+  return (
+    <span className={cn("inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide", cls)}>
+      {trending ? <TrendingUp className="h-3 w-3" /> : <span aria-hidden="true">•</span>}
+      {label}
+    </span>
+  );
+};
+
+/* Right side of the card score block — adapted from ScoreTrend, with the
+   "since last eval" caption the scouting card design calls for. */
+const ChangeSince = ({ change }) => {
+  const hasChange = change !== null && change !== undefined && Number.isFinite(Number(change)) && Number(change) !== 0;
+  const up = hasChange && Number(change) > 0;
+  return (
+    <div className="text-right shrink-0">
+      {hasChange ? (
+        <span className={cn("inline-flex items-center gap-0.5 font-mono-num text-sm font-semibold", up ? "text-success" : "text-warning")}>
+          {up ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+          {up ? "+" : ""}{Number(change).toFixed(1).replace(/\.0$/, "")}
+        </span>
+      ) : (
+        <Minus className="ml-auto h-3.5 w-3.5 text-muted-foreground" />
+      )}
+      <span className="block text-[10px] text-muted-foreground">since last eval</span>
+    </div>
+  );
+};
+
+/* One stat block inside the class snapshot band. Clickable blocks (Improving /
+   Needs Follow-Up) toggle the quick filter, mirroring the old snapshot tiles. */
+const SnapshotStat = ({ icon: Icon, tint, label, value, sub, onClick, active, testId }) => {
+  const Tag = onClick ? "button" : "div";
+  return (
+    <Tag
+      type={onClick ? "button" : undefined}
+      onClick={onClick}
+      data-testid={testId}
+      className={cn(
+        "flex items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
+        onClick && "cursor-pointer hover:bg-secondary",
+        active && "bg-secondary ring-1 ring-brand/40"
+      )}
+    >
+      <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", tint)}>
+        <Icon className="h-4 w-4" />
+      </span>
+      <span className="min-w-0">
+        <span className="block font-mono-num text-2xl font-bold leading-tight text-foreground">{value ?? "—"}</span>
+        <span className="block text-[11px] font-semibold text-muted-foreground whitespace-nowrap">{label}{active ? " ✕" : ""}</span>
+        {sub}
+      </span>
+    </Tag>
+  );
+};
+
 const identityLine = (p) =>
   [p.graduation_year ? `Class of ${p.graduation_year}` : null, p.primary_position || null, `${p.bats || "—"}/${p.throws || "—"}`]
     .filter(Boolean)
@@ -356,7 +438,36 @@ export default function PlayersList() {
   });
   const [pending, setPending] = useState([]); // self-signup athletes awaiting approval
   const [pendingBusyId, setPendingBusyId] = useState(null);
+  // Watchlist star toggle on cards. null → GET /watchlist failed or still
+  // loading, stars hidden entirely (feature-detect, same as Scout.js).
+  const [watchedIds, setWatchedIds] = useState(null);
   const isAdmin = ["owner", "admin"].includes(user?.role);
+
+  useEffect(() => {
+    api.get("/watchlist")
+      .then((r) => setWatchedIds(new Set((Array.isArray(r.data) ? r.data : []).map((w) => w.id))))
+      .catch(() => setWatchedIds(null));
+  }, []);
+
+  const toggleWatch = (e, p) => {
+    e.stopPropagation();
+    if (!watchedIds) return;
+    const wasWatched = watchedIds.has(p.id);
+    // Optimistic flip; roll back and toast on error.
+    setWatchedIds((prev) => {
+      const next = new Set(prev);
+      if (wasWatched) next.delete(p.id); else next.add(p.id);
+      return next;
+    });
+    (wasWatched ? api.delete(`/watchlist/${p.id}`) : api.post(`/watchlist/${p.id}`)).catch((err) => {
+      setWatchedIds((prev) => {
+        const next = new Set(prev);
+        if (wasWatched) next.add(p.id); else next.delete(p.id);
+        return next;
+      });
+      toast.error(errMsg(err));
+    });
+  };
 
   const setView = (v) => {
     setViewState(v);
@@ -452,13 +563,6 @@ export default function PlayersList() {
   const moreFiltersActive = (ageGroup !== "all" ? 1 : 0) + (status !== "active" ? 1 : 0);
   const gradYearOptions = gradYears?.length ? gradYears : gradYear !== "all" ? [{ year: gradYear, count: null }] : [];
 
-  const snapshotTiles = snapshot ? [
-    { key: "total", label: "Athletes", value: snapshot.total },
-    { key: "evaluated", label: "Evaluated", value: snapshot.evaluated },
-    { key: "improving", label: "Improving", value: snapshot.improving, filter: "improving" },
-    { key: "follow-up", label: "Needs Follow-Up", value: snapshot.follow_up, filter: "follow_up" },
-  ] : [];
-
   const quickViewOpen = (p) => setQuickView(p);
 
   const approvePending = async (p) => {
@@ -487,7 +591,7 @@ export default function PlayersList() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-display text-4xl text-foreground">Athletes</h1>
-          <p className="text-sm text-muted-foreground">{visible.length} player{visible.length === 1 ? "" : "s"} in the roster</p>
+          <p className="text-sm text-muted-foreground">{visible.length} player{visible.length === 1 ? "" : "s"} in the directory</p>
         </div>
         {isAdmin && (
           <div className="flex flex-wrap gap-2">
@@ -541,50 +645,90 @@ export default function PlayersList() {
         </Card>
       )}
 
-      {/* Class snapshot — development at a glance, reflecting current filters.
-          Improving / Needs Follow-Up tiles toggle a quick filter. */}
-      {snapshot && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2" data-testid="players-snapshot">
-          {snapshotTiles.map(({ key, label, value, filter }) => {
-            const active = filter && quickFilter === filter;
-            const Tag = filter ? "button" : "div";
-            return (
-              <Tag
-                key={key}
-                type={filter ? "button" : undefined}
-                onClick={filter ? () => setQuickFilter(active ? null : filter) : undefined}
-                data-testid={`players-snapshot-${key}`}
-                className={cn(
-                  "rounded-2xl border bg-card px-4 py-3 text-left transition-colors",
-                  filter && "cursor-pointer hover:border-brand/50",
-                  active ? "border-brand ring-1 ring-brand/40" : "border-border"
-                )}
+      {/* Class snapshot band — class selector + development at a glance,
+          reflecting current filters. Improving / Needs Follow-Up stats toggle a
+          quick filter. Legacy fallback (snapshot null) keeps only the selector. */}
+      <div className="rounded-2xl border border-border bg-card px-4 py-4 sm:px-6" data-testid="players-snapshot">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
+          <div className="min-w-[120px]">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Class of</p>
+            <Select value={gradYear} onValueChange={setGradYear}>
+              <SelectTrigger
+                className="h-auto w-auto gap-1.5 border-0 bg-transparent p-0 focus:ring-0 focus:ring-offset-0"
+                data-testid="players-gradyear-select"
               >
-                <p className="font-mono-num text-2xl font-bold text-foreground leading-tight">{value ?? "—"}</p>
-                <p className="text-xs font-semibold text-muted-foreground">{label}{active ? " ✕" : ""}</p>
-              </Tag>
-            );
-          })}
+                <SelectValue placeholder="Grad Year">
+                  <span className={cn("font-display text-4xl leading-none", gradYear === "all" ? "text-foreground" : "text-primary")}>
+                    {gradYear === "all" ? "All" : gradYear}
+                  </span>
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All classes</SelectItem>
+                {gradYearOptions.map(({ year, count }) => (
+                  <SelectItem key={year} value={String(year)}>
+                    Class of {year}{count !== null && count !== undefined ? ` (${count})` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="mt-1 text-xs text-muted-foreground">{visible.length} athlete{visible.length === 1 ? "" : "s"}</p>
+          </div>
+          {snapshot && (
+            <>
+              <div className="hidden md:block w-px self-stretch bg-border" />
+              <SnapshotStat
+                icon={Users}
+                tint="bg-[hsl(var(--info)_/_0.15)] text-info"
+                label="Total Athletes"
+                value={snapshot.total}
+                testId="players-snapshot-total"
+              />
+              <SnapshotStat
+                icon={ClipboardCheck}
+                tint="bg-success/15 text-success"
+                label="Evaluated"
+                value={snapshot.evaluated}
+                sub={<span className="block font-mono-num text-[10px] font-semibold text-success">{pct(snapshot.evaluated, snapshot.total)}%</span>}
+                testId="players-snapshot-evaluated"
+              />
+              <SnapshotStat
+                icon={TrendingUp}
+                tint="bg-success/15 text-success"
+                label="Improving"
+                value={snapshot.improving}
+                sub={<span className="block font-mono-num text-[10px] font-semibold text-success">{pct(snapshot.improving, snapshot.total)}%</span>}
+                onClick={() => setQuickFilter(quickFilter === "improving" ? null : "improving")}
+                active={quickFilter === "improving"}
+                testId="players-snapshot-improving"
+              />
+              <SnapshotStat
+                icon={AlertTriangle}
+                tint="bg-warning/15 text-warning"
+                label="Need Follow-Up"
+                value={snapshot.follow_up}
+                sub={<span className="block font-mono-num text-[10px] font-semibold text-warning">{pct(snapshot.follow_up, snapshot.total)}%</span>}
+                onClick={() => setQuickFilter(quickFilter === "follow_up" ? null : "follow_up")}
+                active={quickFilter === "follow_up"}
+                testId="players-snapshot-follow-up"
+              />
+              <div className="ml-auto">
+                <Button variant="outline" className="rounded-xl h-10" onClick={() => navigate("/reports")} data-testid="players-view-class-report">
+                  <BarChart3 className="h-4 w-4 mr-1.5" /> View Class Report
+                </Button>
+              </div>
+            </>
+          )}
         </div>
-      )}
+      </div>
 
-      {/* Control bar: Search | Grad Year | Position | Team | More Filters | View */}
+      {/* Control bar: Search | Position | Team | More Filters | View
+          (Grad Year lives in the class snapshot band above) */}
       <div className="flex flex-wrap gap-2">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name…" className="pl-9 h-11 rounded-xl bg-card" data-testid="players-search-input" />
         </div>
-        <Select value={gradYear} onValueChange={setGradYear}>
-          <SelectTrigger className="w-[160px] h-11 rounded-xl bg-card" data-testid="players-gradyear-select"><SelectValue placeholder="Grad Year" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All classes</SelectItem>
-            {gradYearOptions.map(({ year, count }) => (
-              <SelectItem key={year} value={String(year)}>
-                Class of {year}{count !== null && count !== undefined ? ` (${count})` : ""}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
         <Select value={position} onValueChange={setPosition}>
           <SelectTrigger className="w-[120px] h-11 rounded-xl bg-card" data-testid="players-filter-position"><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="all">All positions</SelectItem>{POSITIONS.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
@@ -665,44 +809,110 @@ export default function PlayersList() {
       ) : visible.length === 0 ? (
         <EmptyState icon={Users} title="No players found" hint="Adjust your filters, or add players manually or via CSV import." />
       ) : view === "card" ? (
-        /* Card view — athlete identity first, development second, details on demand. */
+        /* Card view — premium scouting card: status + watchlist on top, identity,
+           score block, then focus / last-eval meta. Whole card opens Quick View
+           (div+role, not <button>, so the star and CTA can be real buttons). */
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3" data-testid="players-card-grid">
-          {visible.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => quickViewOpen(p)}
-              className="text-left"
-              data-testid={`players-card-${p.id}`}
-            >
-              <Card className="h-full rounded-2xl border-border transition-colors hover:border-brand/50">
-                <CardContent className="p-4 space-y-3">
-                  <div className="flex items-start gap-3">
-                    <PlayerAvatar firstName={p.first_name} lastName={p.last_name} photoUrl={p.photo_url} size="lg" />
-                    <div className="min-w-0 flex-1">
-                      <p className="font-display text-lg leading-tight text-foreground truncate">{p.first_name} {p.last_name}</p>
-                      <p className="text-xs text-muted-foreground truncate">{identityLine(p) || "—"}</p>
-                      <p className="text-xs text-muted-foreground truncate">{p.current_team || "No team"}</p>
-                    </div>
-                  </div>
-                  {snapshot && (
-                    <>
-                      <div className="flex items-center justify-between rounded-xl bg-secondary px-3 py-2">
-                        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Latest eval</span>
-                        <ScoreTrend score={p.latest_overall} change={p.score_change} size="sm" />
+          {visible.map((p) => {
+            const hasScore = p.latest_overall !== null && p.latest_overall !== undefined;
+            const watched = watchedIds?.has(p.id);
+            return (
+              <div
+                key={p.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => quickViewOpen(p)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); quickViewOpen(p); } }}
+                className="text-left cursor-pointer h-full"
+                data-testid={`players-card-${p.id}`}
+              >
+                <Card className="h-full rounded-2xl border-border transition-all hover:border-brand/50 hover:shadow-lg hover:-translate-y-0.5">
+                  <CardContent className="p-4 space-y-3">
+                    {(snapshot || watchedIds) && (
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                          {snapshot && <CardStatusPill statuses={p.statuses} />}
+                          {snapshot && p.statuses?.new_video && (
+                            <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-[hsl(var(--info)_/_0.15)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-info">
+                              <span aria-hidden="true">•</span> NEW VIDEO
+                            </span>
+                          )}
+                        </div>
+                        {watchedIds && (
+                          <button
+                            type="button"
+                            onClick={(e) => toggleWatch(e, p)}
+                            className="shrink-0 rounded-lg p-1 -m-1 transition-colors hover:bg-secondary"
+                            title={watched ? "Remove from watchlist" : "Add to watchlist"}
+                            aria-label={watched ? "Remove from watchlist" : "Add to watchlist"}
+                            aria-pressed={!!watched}
+                            data-testid={`players-watch-${p.id}`}
+                          >
+                            <Star className={cn("h-4 w-4", watched ? "fill-current text-warning" : "text-muted-foreground")} />
+                          </button>
+                        )}
                       </div>
-                      {p.development_focus && (
-                        <p className="text-xs text-muted-foreground truncate" title={p.development_focus}>
-                          <span className="font-semibold text-foreground">Focus:</span> {p.development_focus}
+                    )}
+                    <div className="flex items-start gap-3">
+                      <PlayerAvatar firstName={p.first_name} lastName={p.last_name} photoUrl={p.photo_url} size="lg" />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-display text-lg leading-tight text-foreground truncate">{p.first_name} {p.last_name}</p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {p.primary_position || "—"} · {p.bats || "—"}/{p.throws || "—"} · {p.current_team || "No team"}
                         </p>
-                      )}
-                      <StatusChips statuses={p.statuses} max={3} />
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-            </button>
-          ))}
+                        {(p.graduation_year || p.age_group) && (
+                          <p className="text-xs text-muted-foreground truncate">
+                            {[p.graduation_year ? `Class of ${p.graduation_year}` : null, p.age_group || null].filter(Boolean).join(" · ")}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    {snapshot && (
+                      <>
+                        {hasScore ? (
+                          <div className="flex min-h-[52px] items-center justify-between gap-2 rounded-xl bg-secondary px-3 py-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="rounded-lg bg-success/15 px-2.5 py-1 font-mono-num text-2xl font-bold text-success">
+                                {fmtScore(p.latest_overall)}
+                              </span>
+                              <span className="text-[10px] font-semibold uppercase tracking-wide leading-tight text-muted-foreground">
+                                Overall Eval Score
+                              </span>
+                            </div>
+                            <ChangeSince change={p.score_change} />
+                          </div>
+                        ) : (
+                          <div className="flex min-h-[52px] items-center rounded-xl bg-secondary px-3 py-2">
+                            <span className="text-xs text-muted-foreground">No eval yet · Not Evaluated</span>
+                          </div>
+                        )}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Focus</p>
+                            <p className="text-xs text-foreground truncate" title={p.development_focus || undefined}>{p.development_focus || "—"}</p>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Last Eval</p>
+                            <p className="text-xs text-foreground truncate">{fmtDate(p.last_eval_at)}</p>
+                          </div>
+                        </div>
+                        {!hasScore && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); navigate("/events"); }}
+                            className="flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-warning/40 bg-warning/15 text-xs font-semibold text-warning transition-colors hover:bg-warning/25"
+                            data-testid={`players-schedule-${p.id}`}
+                          >
+                            <CalendarPlus className="h-4 w-4" /> Schedule Evaluation
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <>
@@ -734,6 +944,7 @@ export default function PlayersList() {
                   <TableHead>Age Group</TableHead>
                   <TableHead>Position</TableHead>
                   <TableHead>B/T</TableHead>
+                  {snapshot && <TableHead>Score</TableHead>}
                   <TableHead>Team</TableHead>
                   <TableHead>Location</TableHead>
                   <TableHead>Status</TableHead>
@@ -753,6 +964,9 @@ export default function PlayersList() {
                     <TableCell>{p.age_group || "—"}</TableCell>
                     <TableCell>{p.primary_position || "—"}</TableCell>
                     <TableCell className="font-mono-num text-xs">{p.bats || "—"}/{p.throws || "—"}</TableCell>
+                    {snapshot && (
+                      <TableCell className="font-mono-num font-semibold text-foreground">{fmtScore(p.latest_overall)}</TableCell>
+                    )}
                     <TableCell className="text-muted-foreground">{p.current_team || "—"}</TableCell>
                     <TableCell className="text-muted-foreground">{p.city ? `${p.city}, ${p.state}` : "—"}</TableCell>
                     <TableCell><StatusBadge status={p.status} /></TableCell>
@@ -795,9 +1009,12 @@ export default function PlayersList() {
               </DialogHeader>
               <div className="space-y-3">
                 {snapshot && (
-                  <div className="flex items-center justify-between rounded-xl bg-secondary px-4 py-3">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Latest eval</span>
-                    <ScoreTrend score={quickView.latest_overall} change={quickView.score_change} />
+                  <div className="rounded-xl bg-secondary px-4 py-3 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Latest eval</span>
+                      <ScoreTrend score={quickView.latest_overall} change={quickView.score_change} />
+                    </div>
+                    <p className="text-xs text-muted-foreground">Last eval · {fmtDate(quickView.last_eval_at)}</p>
                   </div>
                 )}
                 {snapshot && <StatusChips statuses={quickView.statuses} max={3} testIdPrefix="players-quickview" />}
