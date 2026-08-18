@@ -28,6 +28,7 @@ import AuditLog from "@/pages/AuditLog";
 import MyId from "@/pages/MyId";
 import MyIdEdit from "@/pages/MyIdEdit";
 import Landing from "@/pages/Landing";
+import Store from "@/pages/Store";
 import Programs from "@/pages/Programs";
 import ProgramDetail from "@/pages/ProgramDetail";
 import Story from "@/pages/Story";
@@ -69,6 +70,7 @@ function App() {
             <Route path="/" element={<Landing />} />
             <Route path="/signin" element={<SignIn />} />
             <Route path="/signup" element={<SignUp />} />
+            <Route path="/store" element={<Store />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/accept-invitation" element={<AcceptInvitation />} />
           <Route path="/story/:slug" element={<Story />} />

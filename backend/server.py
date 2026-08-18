@@ -31,6 +31,7 @@ import routes_awards  # noqa: E402
 import routes_drills  # noqa: E402
 import routes_assessments  # noqa: E402
 import routes_signup  # noqa: E402
+import routes_store  # noqa: E402
 import routes_registration  # noqa: E402
 
 logging.basicConfig(
@@ -171,6 +172,7 @@ api_router.include_router(routes_awards.router)
 api_router.include_router(routes_drills.router)
 api_router.include_router(routes_assessments.router)
 api_router.include_router(routes_signup.router)
+api_router.include_router(routes_store.router)
 api_router.include_router(routes_registration.router)
 
 app.include_router(api_router)
