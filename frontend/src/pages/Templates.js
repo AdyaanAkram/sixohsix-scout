@@ -37,8 +37,51 @@ const putBody = (t, overrides = {}) => ({
   metrics: t.metrics || [],
   applies_to_positions: t.applies_to_positions || [],
   is_default: !!t.is_default,
+  station_kind: t.station_kind ?? null,
   ...overrides,
 });
+
+// Fixed display order for age-band sections; anything unrecognized lands after
+// College, and templates with no age_group go in the final General bucket.
+const AGE_BAND_ORDER = ["7U-8U", "9U-10U", "11U-12U", "13U-14U", "15U-16U", "17U-18U", "College"];
+const GENERAL_BAND = "General / All ages";
+const bandKey = (b) => b.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+// Metric types that carry no score, hence no meaningful weight.
+const UNSCORED_TYPES = new Set(["comment", "observation"]);
+
+// Module-level on purpose: defining this inline inside Templates() would remount
+// the input on every parent render and drop focus after each keystroke.
+function MetricWeightInput({ templateId, metricId, weight, disabled, onSave }) {
+  const [val, setVal] = useState(String(weight ?? 0));
+  useEffect(() => { setVal(String(weight ?? 0)); }, [weight]);
+  const commit = () => {
+    const n = Number(val);
+    if (val.trim() === "" || Number.isNaN(n) || n < 0) {
+      toast.error("Weight must be a non-negative number.");
+      setVal(String(weight ?? 0));
+      return;
+    }
+    if (n === Number(weight ?? 0)) { setVal(String(n)); return; } // unchanged — skip the round-trip
+    onSave(n);
+  };
+  return (
+    <Input
+      type="number"
+      step="0.5"
+      min="0"
+      value={val}
+      disabled={disabled}
+      onChange={(e) => setVal(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+      onClick={(e) => e.stopPropagation()}
+      className="w-16 h-8 rounded-lg text-xs"
+      aria-label="Metric weight"
+      data-testid={`metric-weight-${templateId}-${metricId}`}
+    />
+  );
+}
 
 export default function Templates() {
   const { user } = useAuth();
@@ -46,6 +89,7 @@ export default function Templates() {
   const [templates, setTemplates] = useState(null);
   const [ageBands, setAgeBands] = useState([]);
   const [expanded, setExpanded] = useState({});
+  const [openBands, setOpenBands] = useState({}); // all collapsed on load
   const [savingId, setSavingId] = useState(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState(null); // template being edited, or null = create
@@ -77,6 +121,38 @@ export default function Templates() {
     }
     return Object.entries(seen).filter(([, names]) => names.length > 1);
   }, [templates]);
+
+  // Group templates into age-band sections in fixed order; cards within a
+  // section sort by station_kind then name. Only non-empty sections render.
+  const bandSections = useMemo(() => {
+    const byBand = {};
+    for (const t of templates || []) {
+      const band = t.age_group && AGE_BAND_ORDER.includes(t.age_group) ? t.age_group : t.age_group || GENERAL_BAND;
+      (byBand[band] = byBand[band] || []).push(t);
+    }
+    const extras = Object.keys(byBand).filter((b) => !AGE_BAND_ORDER.includes(b) && b !== GENERAL_BAND).sort();
+    const order = [...AGE_BAND_ORDER, ...extras, GENERAL_BAND];
+    const sortCards = (a, b) =>
+      (a.station_kind || "").localeCompare(b.station_kind || "") || (a.name || "").localeCompare(b.name || "");
+    return order.filter((b) => byBand[b]?.length).map((b) => [b, byBand[b].sort(sortCards)]);
+  }, [templates]);
+
+  // Inline weight edit: one metric's weight changes, everything else in the
+  // template document is preserved via putBody.
+  const saveMetricWeight = async (t, metricId, weight) => {
+    if (!canEdit) return;
+    const metrics = (t.metrics || []).map((m) => (m.id === metricId ? { ...m, weight } : m));
+    setSavingId(t.id);
+    try {
+      await api.put(`/templates/${t.id}`, putBody(t, { metrics }));
+      toast.success("Weight saved");
+      await load();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setSavingId(null);
+    }
+  };
 
   const patchTemplate = (id, next) => setTemplates((ts) => (ts || []).map((t) => (t.id === id ? { ...t, ...next } : t)));
 
@@ -194,8 +270,29 @@ export default function Templates() {
       {templates.length === 0 ? (
         <EmptyState icon={FileSpreadsheet} title="No templates" hint="Templates define the metrics evaluators score at each station." />
       ) : (
-        <div className="space-y-2">
-          {templates.map((t) => {
+        <div className="space-y-3">
+          {bandSections.map(([band, sectionTemplates]) => (
+            <div key={band} className="space-y-2">
+              <Card className="rounded-2xl border-border">
+                <CardContent className="py-4">
+                  <button
+                    className="w-full text-left flex items-center justify-between gap-2"
+                    onClick={() => setOpenBands((x) => ({ ...x, [band]: !x[band] }))}
+                    data-testid={`template-band-${bandKey(band)}`}
+                  >
+                    <div className="flex flex-wrap items-center gap-3">
+                      <p className="font-display text-2xl text-foreground">{band}</p>
+                      <span className="inline-flex items-center rounded-full bg-secondary text-muted-foreground px-2.5 py-0.5 text-xs font-semibold">
+                        {sectionTemplates.length} {sectionTemplates.length === 1 ? "template" : "templates"}
+                      </span>
+                    </div>
+                    <ChevronDown className={cn("h-5 w-5 shrink-0 text-muted-foreground transition-transform", openBands[band] && "rotate-180")} />
+                  </button>
+                </CardContent>
+              </Card>
+              {openBands[band] && (
+                <div className="space-y-2 pl-3">
+          {sectionTemplates.map((t) => {
             const cats = [...(t.categories || [])].sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
             const mets = [...(t.metrics || [])].sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
             const badWeights = cats.length > 0 && !weightsOk(cats);
@@ -302,9 +399,20 @@ export default function Templates() {
                         <div className="space-y-1">
                           {mets.map((m, i) => (
                             <div key={m.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-sm hover:bg-secondary/40" data-testid={`template-metric-row-${t.id}-${m.id}`}>
-                              <span className="font-medium text-foreground">
-                                {m.name} {m.required && <span className="text-destructive">*</span>}
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-foreground">
+                                  {m.name} {m.required && <span className="text-destructive">*</span>}
+                                </span>
+                                {canEdit && !UNSCORED_TYPES.has(m.metric_type) && (
+                                  <MetricWeightInput
+                                    templateId={t.id}
+                                    metricId={m.id}
+                                    weight={m.weight}
+                                    disabled={savingId === t.id}
+                                    onSave={(w) => saveMetricWeight(t, m.id, w)}
+                                  />
+                                )}
+                              </div>
                               <div className="flex items-center gap-2">
                                 <span className="text-xs text-muted-foreground">
                                   {m.category} · {TYPE_LABELS[m.metric_type]} {m.unit && `(${m.unit})`} · weight {m.weight}
@@ -327,6 +435,10 @@ export default function Templates() {
               </CardContent>
             </Card>
           );})}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
