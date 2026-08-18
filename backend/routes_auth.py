@@ -232,11 +232,12 @@ async def list_staff(user=Depends(require_roles(*ADMIN_ROLES, "head_scout"))):
     user_ids = [m["user_id"] for m in memberships]
     users = await db.users.find({"id": {"$in": user_ids}}, {"_id": 0, "password_hash": 0}).to_list(500)
     umap = {u["id"]: u for u in users}
+    STAFF_ROLE_SET = ("owner", "admin", "head_scout", "coach", "evaluator")
     out = []
     for m in memberships:
         u = umap.get(m["user_id"])
-        if not u:
-            continue
+        if not u or m["role"] not in STAFF_ROLE_SET:
+            continue  # families (parent/athlete memberships) are not staff
         out.append({**u, "role": m["role"], "membership_active": m.get("active", True)})
     return out
 
@@ -275,6 +276,53 @@ async def invite_staff(body: InviteBody, user=Depends(require_roles(*ADMIN_ROLES
     masked = f"{local[0]}***@{domain}" if local else f"***@{domain}"
     return {"sent": bool(result.get("sent")), "email": masked,
             "invitation_id": inv["id"], "expires_at": expires_at}
+
+
+class InviteResendBody(BaseModel):
+    email: str | None = None  # corrected address, optional
+
+
+@router.post("/invitations/{invitation_id}/resend")
+async def resend_invitation(invitation_id: str, body: InviteResendBody,
+                            user=Depends(require_roles(*ADMIN_ROLES))):
+    """Resend a pending invitation, optionally to a corrected email address."""
+    inv = await db.invitations.find_one(
+        {"id": invitation_id, "organization_id": user["organization_id"], "status": "pending"})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Pending invitation not found.")
+    email = (body.email or inv["email"] or "").lower().strip()
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        raise HTTPException(status_code=422, detail="Enter a valid email address.")
+    if email != inv["email"]:
+        await db.invitations.update_one({"id": inv["id"]}, {"$set": {"email": email}})
+    link = f"{settings.app_public_url}/accept-invitation?token={inv['token']}"
+    if inv.get("athlete_id"):
+        athlete = await db.athletes.find_one(
+            {"id": inv["athlete_id"], "organization_id": user["organization_id"]}, {"_id": 0})
+        tpl = "guardian_invitation" if inv.get("role") == "parent" else "athlete_invitation"
+        result = safe_send(email, tpl, {
+            "name": inv.get("full_name") or "there",
+            "org": user.get("organization_name") or "60'6\" Athletics", "link": link,
+            "athlete_name": f"{(athlete or {}).get('first_name','')} {(athlete or {}).get('last_name','')}".strip()})
+    else:
+        result = safe_send(email, "staff_invitation", {
+            "name": inv.get("full_name") or "there",
+            "org": user.get("organization_name") or "60'6\"", "link": link})
+    await log_audit(user["organization_id"], user, "invite_resent", "invitation", inv["id"],
+                    {"email": email, "changed": email != inv["email"]})
+    local, _, domain = email.partition("@")
+    return {"sent": bool(result.get("sent")), "email": f"{local[0]}***@{domain}"}
+
+
+@router.delete("/invitations/{invitation_id}")
+async def cancel_invitation(invitation_id: str, user=Depends(require_roles(*ADMIN_ROLES))):
+    res = await db.invitations.update_one(
+        {"id": invitation_id, "organization_id": user["organization_id"], "status": "pending"},
+        {"$set": {"status": "revoked"}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Pending invitation not found.")
+    await log_audit(user["organization_id"], user, "invite_cancelled", "invitation", invitation_id, None)
+    return {"message": "Invitation cancelled."}
 
 
 @router.get("/invitations")

@@ -103,9 +103,34 @@ export default function Staff() {
             <p className="text-sm font-semibold text-warning mb-2">Pending invitations</p>
             <div className="space-y-1.5">
               {invitations.map((i) => (
-                <div key={i.id} className="flex items-center justify-between text-sm gap-2">
-                  <span className="truncate">{i.full_name} · {i.email} · {ROLE_LABELS[i.role] || i.role}</span>
-                  <span className="text-xs text-muted-foreground shrink-0">Pending · emailed</span>
+                <div key={i.id} className="flex flex-wrap items-center justify-between text-sm gap-2">
+                  <span className="truncate min-w-0">{i.full_name} · {i.email} · {ROLE_LABELS[i.role] || i.role}</span>
+                  <span className="flex items-center gap-1.5 shrink-0">
+                    <Button size="sm" variant="outline" className="h-7 rounded-lg text-xs"
+                      onClick={async () => {
+                        try { const r = await api.post(`/invitations/${i.id}/resend`, {}); toast.success(`Invitation re-emailed to ${r.data.email}`); }
+                        catch (e) { toast.error(errMsg(e)); }
+                      }} data-testid={`invite-resend-${i.id}`}>
+                      Resend
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-7 rounded-lg text-xs"
+                      onClick={async () => {
+                        const email = window.prompt(`Send this invitation to a different email:`, i.email);
+                        if (!email || email === i.email) return;
+                        try { const r = await api.post(`/invitations/${i.id}/resend`, { email }); toast.success(`Invitation sent to ${r.data.email}`); load(); }
+                        catch (e) { toast.error(errMsg(e)); }
+                      }} data-testid={`invite-edit-${i.id}`}>
+                      Edit email
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-7 rounded-lg text-xs text-muted-foreground hover:text-destructive"
+                      onClick={async () => {
+                        if (!window.confirm(`Cancel the invitation to ${i.full_name}? The link stops working.`)) return;
+                        try { await api.delete(`/invitations/${i.id}`); toast.success("Invitation cancelled."); load(); }
+                        catch (e) { toast.error(errMsg(e)); }
+                      }} data-testid={`invite-cancel-${i.id}`}>
+                      Cancel
+                    </Button>
+                  </span>
                 </div>
               ))}
             </div>
