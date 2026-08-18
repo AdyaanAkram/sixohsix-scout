@@ -444,6 +444,18 @@ async def update_checkin(event_id: str, athlete_id: str, body: CheckInBody, user
         raise HTTPException(status_code=400, detail="Invalid check-in status.")
     if updates.get("status") == "checked_in":
         updates["checked_in_at"] = now_iso()
+        # A checked-in kid should never be ungrouped: when no group is set (and
+        # none supplied), place them into the event's matching "Ages X-Y" group
+        # automatically. Admins can still drag them elsewhere afterwards.
+        if not entry.get("group_id") and not updates.get("group_id"):
+            athlete = await db.athletes.find_one(
+                {"id": athlete_id, "organization_id": user["organization_id"]},
+                {"_id": 0, "age": 1})
+            from routes_registration import _age_group_for_event
+            auto_gid = await _age_group_for_event(
+                user["organization_id"], event_id, (athlete or {}).get("age"))
+            if auto_gid:
+                updates["group_id"] = auto_gid
     if "group_id" in updates and updates["group_id"]:
         g = await db.event_groups.find_one({
             "id": updates["group_id"], "event_id": event_id, "organization_id": user["organization_id"]})

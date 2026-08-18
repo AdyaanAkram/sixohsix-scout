@@ -826,8 +826,48 @@ const GroupsTab = ({ eventId, isAdmin }) => {
   const [editName, setEditName] = useState("");
   const [mergeFrom, setMergeFrom] = useState(null); // group being merged away
   const [mergeInto, setMergeInto] = useState("");
-  const load = useCallback(() => api.get(`/events/${eventId}/groups`).then((r) => setGroups(sortGroups(r.data))), [eventId]);
+  const [members, setMembers] = useState([]); // event roster w/ names for member chips
+  const load = useCallback(() => {
+    api.get(`/events/${eventId}/groups`).then((r) => setGroups(sortGroups(r.data)));
+    api.get(`/events/${eventId}/roster`).then((r) => setMembers(r.data || [])).catch(() => setMembers([]));
+  }, [eventId]);
   useEffect(() => { load(); }, [load]);
+
+  // Move one athlete to a group (or null = unassigned). Used by drag-drop AND
+  // the tap fallback so phones/tablets get the same power as desktop drag.
+  const moveAthlete = async (athleteId, groupId) => {
+    try {
+      await api.patch(`/events/${eventId}/roster/${athleteId}`, { group_id: groupId || "" });
+      load();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+  const onDropInto = (groupId) => (ev) => {
+    ev.preventDefault();
+    const aid = ev.dataTransfer.getData("text/athlete-id");
+    if (aid) moveAthlete(aid, groupId);
+  };
+  const MemberChip = ({ m }) => (
+    <span
+      draggable={isAdmin}
+      onDragStart={(ev) => ev.dataTransfer.setData("text/athlete-id", m.athlete_id)}
+      className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-semibold text-foreground cursor-grab active:cursor-grabbing"
+      data-testid={`group-member-${m.athlete_id}`}
+    >
+      {m.first_name} {m.last_name}
+      {isAdmin && (
+        <Select value="__stay__" onValueChange={(v) => moveAthlete(m.athlete_id, v === "__none__" ? null : v)}>
+          <SelectTrigger className="h-5 w-5 p-0 border-0 bg-transparent shadow-none [&>svg]:h-3.5 [&>svg]:w-3.5" aria-label="Move to group" />
+          <SelectContent>
+            <SelectItem value="__stay__" className="hidden">Move to…</SelectItem>
+            {(groups || []).filter((g2) => g2.id !== m.group_id).map((g2) => (
+              <SelectItem key={g2.id} value={g2.id}>→ {g2.name}</SelectItem>
+            ))}
+            {m.group_id && <SelectItem value="__none__">→ Unassigned</SelectItem>}
+          </SelectContent>
+        </Select>
+      )}
+    </span>
+  );
 
   const add = async () => {
     if (!name.trim()) return;
@@ -931,9 +971,19 @@ const GroupsTab = ({ eventId, isAdmin }) => {
       )}
       {groups.length === 0 ? <EmptyState icon={Layers} title="No groups yet" hint="Create groups like 'Group A - 10U' to organize players, or auto-group by grad year." /> : (
         <>
+          {members.some((m) => !m.group_id) && (
+            <Card className="rounded-2xl border-dashed border-border" onDragOver={(ev) => ev.preventDefault()} onDrop={onDropInto(null)}>
+              <CardContent className="py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Unassigned — drag into a group (or tap the arrow)</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {members.filter((m) => !m.group_id).map((m) => <MemberChip key={m.athlete_id} m={m} />)}
+                </div>
+              </CardContent>
+            </Card>
+          )}
           <div className="grid gap-2 sm:grid-cols-2">
             {groups.map((g) => (
-              <Card key={g.id} className="rounded-2xl border-border">
+              <Card key={g.id} className="rounded-2xl border-border" onDragOver={(ev) => ev.preventDefault()} onDrop={onDropInto(g.id)}>
                 <CardContent className="py-4 flex items-center justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     {editingId === g.id ? (
@@ -950,6 +1000,9 @@ const GroupsTab = ({ eventId, isAdmin }) => {
                       <p className="font-semibold text-foreground truncate">{g.name}</p>
                     )}
                     <p className="text-xs text-muted-foreground">{g.player_count} players</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {members.filter((m) => m.group_id === g.id).map((m) => <MemberChip key={m.athlete_id} m={m} />)}
+                    </div>
                   </div>
                   {isAdmin && (
                     <div className="flex items-center shrink-0">

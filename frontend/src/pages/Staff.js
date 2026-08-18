@@ -17,6 +17,7 @@ const ROLE_LABELS = { owner: "Organization Owner", admin: "Administrator", head_
 const INVITABLE = ["admin", "head_scout", "coach", "evaluator"];
 
 export default function Staff() {
+  const [staffSearch, setStaffSearch] = useState("");
   const { user } = useAuth();
   const [staff, setStaff] = useState(null);
   const [invitations, setInvitations] = useState([]);
@@ -112,8 +113,22 @@ export default function Staff() {
         </Card>
       )}
 
+      <div className="space-y-1.5">
+        <Input
+          value={staffSearch}
+          onChange={(e) => setStaffSearch(e.target.value)}
+          placeholder="Search coaches & evaluators…"
+          className="h-10 rounded-xl"
+          data-testid="staff-search-input"
+        />
+      </div>
       <div className="space-y-2">
-        {staff.map((s) => (
+        {(staffSearch.trim()
+          ? staff.filter((s) =>
+              ["coach", "evaluator"].includes(s.role) &&
+              `${s.full_name || ""} ${s.email || ""}`.toLowerCase().includes(staffSearch.trim().toLowerCase()))
+          : staff
+        ).map((s) => (
           <Card key={s.id} className="rounded-2xl border-border">
             <CardContent className="py-3.5 flex flex-wrap items-center gap-3">
               <div className="h-10 w-10 rounded-full bg-[hsl(var(--brand-secondary))] text-white flex items-center justify-center font-bold text-sm">
