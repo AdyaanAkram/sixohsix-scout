@@ -46,6 +46,7 @@ const imageSrc = (raw, path, version) => {
 
 export default function Settings() {
   const { user } = useAuth();
+  const [accountName, setAccountName] = useState(user?.full_name || "");
   const [org, setOrg] = useState(null);
   const [form, setForm] = useState(formFromOrg(null));
   const [baseline, setBaseline] = useState(formFromOrg(null));
@@ -447,7 +448,27 @@ export default function Settings() {
       <Card className="rounded-2xl border-border">
         <CardContent className="pt-5 pb-5 space-y-2">
           <p className="font-semibold text-foreground flex items-center gap-2"><KeyRound className="h-4 w-4" /> Account</p>
-          <p className="text-sm text-muted-foreground">Signed in as <span className="font-semibold">{user?.full_name}</span> ({user?.email})</p>
+          <p className="text-sm text-muted-foreground">Signed in as ({user?.email})</p>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="space-y-1 flex-1 min-w-[200px] max-w-xs">
+              <Label className="text-xs">Your name</Label>
+              <Input value={accountName} onChange={(e) => setAccountName(e.target.value)} placeholder="Full name" className="h-10 rounded-lg" data-testid="account-name-input" />
+            </div>
+            <Button
+              className="h-10 rounded-xl bg-primary"
+              disabled={!accountName.trim() || accountName.trim() === (user?.full_name || "")}
+              data-testid="account-name-save"
+              onClick={async () => {
+                try {
+                  await api.patch("/auth/me", { full_name: accountName.trim() });
+                  toast.success("Name updated.");
+                  window.location.reload(); // re-bootstraps the session with the new name everywhere
+                } catch (e) { toast.error(errMsg(e)); }
+              }}
+            >
+              Save
+            </Button>
+          </div>
           <p className="text-xs text-muted-foreground">To change your password, use “Forgot password” on the sign-in page. Sessions expire automatically after 7 days.</p>
         </CardContent>
       </Card>

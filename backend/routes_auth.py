@@ -128,6 +128,21 @@ async def me(user=Depends(get_current_user)):
     return await _user_payload(full or user, membership)
 
 
+class MeUpdateBody(BaseModel):
+    full_name: str = Field(min_length=1, max_length=120)
+
+
+@router.patch("/auth/me")
+async def update_me(body: MeUpdateBody, user=Depends(get_current_user)):
+    """Self-service: update your own display name."""
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"full_name": body.full_name.strip(), "updated_at": now_iso()}})
+    await log_audit(user["organization_id"], user, "profile_name_updated", "user", user["id"],
+                    {"full_name": body.full_name.strip()})
+    return {"message": "Name updated.", "full_name": body.full_name.strip()}
+
+
 @router.get("/auth/memberships")
 async def list_memberships(user=Depends(get_current_user)):
     """Organizations this user can enter — each with own athletes, staff, programs, events."""
