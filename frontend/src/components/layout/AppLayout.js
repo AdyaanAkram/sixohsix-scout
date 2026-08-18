@@ -7,7 +7,7 @@ import {
   LayoutDashboard, CalendarDays, Users, ClipboardList, BarChart3, TrendingUp,
   UserCog, FileSpreadsheet, Settings, LogOut, Home, ClipboardCheck,
   MoreHorizontal, ScrollText, IdCard, CalendarRange, Bell, Dumbbell,
-  ChevronsUpDown, Building2, Check, Crosshair, Shield, Star, ArrowLeftRight,
+  ChevronsUpDown, Building2, Check, Crosshair, Shield, Star, ArrowLeftRight,, ShoppingBag,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -96,7 +96,7 @@ const NAV_BY_WORKSPACE = {
 };
 
 const ADMIN_BY_WORKSPACE = {
-  hq: ["review", "scout", "reports", "programs", "staff", "templates", "drills", "audit", "settings"],
+  hq: ["review", "scout", "reports", "programs", "store", "staff", "templates", "drills", "audit", "settings"],
   coach: ["scout", "reports", "programs", "settings"],
   scout: ["players", "reports", "programs", "settings"],
   evaluator: ["settings"], // owner/coach dropping into evaluator mode keep Settings
@@ -131,6 +131,7 @@ const NAV_ITEMS = {
   drills: { to: "/drills", label: "Drills", icon: Dumbbell },
   audit: { to: "/audit-log", label: "Audit Log", icon: ScrollText },
   settings: { to: "/settings", label: "Settings", icon: Settings },
+  store: { to: "/store", label: "Store", icon: ShoppingBag },
   "my-id": { to: "/my-id", label: "My Development", icon: IdCard, slug: "my-id" },
 };
 

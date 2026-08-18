@@ -71,7 +71,7 @@ export function PublicNav({ onLanding = false }) {
             variant="outline"
             className="rounded-full h-10 px-4 sm:px-5 border-border bg-surface-2/40 text-foreground hover:bg-surface-3 hover:text-foreground"
           >
-            <Link to="/signin" data-testid="landing-signin-link">Sign in</Link>
+            <Link to={`/signin?next=${encodeURIComponent(window.location.pathname)}`} data-testid="landing-signin-link">Sign in</Link>
           </Button>
           <Button
             asChild
@@ -100,7 +100,7 @@ export function PublicFooter() {
             </p>
           </div>
           <nav className="grid grid-cols-2 gap-x-12 gap-y-2 text-sm" aria-label="Footer">
-            <Link to="/signin" className="text-muted-foreground hover:text-foreground transition-colors">Sign in</Link>
+            <Link to={`/signin?next=${encodeURIComponent(window.location.pathname)}`} className="text-muted-foreground hover:text-foreground transition-colors">Sign in</Link>
             <Link to="/signup" className="text-muted-foreground hover:text-foreground transition-colors">Register</Link>
             <Link to="/store" className="text-muted-foreground hover:text-foreground transition-colors">Store</Link>
             <a href="/guide" className="text-muted-foreground hover:text-foreground transition-colors">Guide</a>
