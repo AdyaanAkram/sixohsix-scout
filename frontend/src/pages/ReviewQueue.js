@@ -168,8 +168,14 @@ const TopTeamsCard = ({ teams }) => {
 };
 
 const PositionDonutCard = ({ byPosition }) => {
-  const top = (byPosition || []).slice(0, 5);
-  const rest = (byPosition || []).slice(5);
+  // "Other" can come from the backend (athletes without a position) AND from the
+  // tail beyond the top 5 — merge them into one slice so the legend never shows
+  // two "Other" rows. Named positions rank first so real positions get colors.
+  const rows = byPosition || [];
+  const named = rows.filter((p) => p.position !== "Other");
+  const backendOther = rows.filter((p) => p.position === "Other");
+  const top = named.slice(0, 5);
+  const rest = [...named.slice(5), ...backendOther];
   const slices = top.map((p, i) => ({ label: p.position, count: p.count, pct: p.pct, color: DONUT_COLORS[i] }));
   if (rest.length > 0) {
     slices.push({
@@ -256,7 +262,11 @@ const RecentEvalCard = ({ r }) => {
         </div>
       </div>
       <div className="text-center">
-        <span className="inline-block rounded-xl bg-success/15 px-3 py-1 font-mono-num text-2xl font-bold text-success">{r.overall_score ?? "—"}</span>
+        {r.overall_score !== null && r.overall_score !== undefined ? (
+          <span className="inline-block rounded-xl bg-success/15 px-3 py-1 font-mono-num text-2xl font-bold text-success">{r.overall_score}</span>
+        ) : (
+          <span className="inline-block rounded-xl bg-secondary px-3 py-1.5 text-xs font-semibold text-muted-foreground">Metrics recorded</span>
+        )}
         {r.station_name && <p className="text-[10px] text-muted-foreground mt-1 truncate">{r.station_name}</p>}
       </div>
       {(r.top_categories || []).length > 0 && (

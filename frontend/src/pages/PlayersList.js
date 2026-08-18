@@ -881,6 +881,13 @@ export default function PlayersList() {
                             </div>
                             <ChangeSince change={p.score_change} />
                           </div>
+                        ) : p.statuses?.evaluated ? (
+                          /* Evaluated, but the evals carry raw measurements only —
+                             no normalized overall. Don't contradict the pill. */
+                          <div className="flex min-h-[52px] items-center justify-between gap-2 rounded-xl bg-secondary px-3 py-2">
+                            <span className="text-xs text-muted-foreground">Evaluated · verified metrics on file</span>
+                            <span className="text-[10px] font-semibold uppercase tracking-wide text-info">View profile →</span>
+                          </div>
                         ) : (
                           <div className="flex min-h-[52px] items-center rounded-xl bg-secondary px-3 py-2">
                             <span className="text-xs text-muted-foreground">No eval yet · Not Evaluated</span>
@@ -896,7 +903,7 @@ export default function PlayersList() {
                             <p className="text-xs text-foreground truncate">{fmtDate(p.last_eval_at)}</p>
                           </div>
                         </div>
-                        {!hasScore && (
+                        {!hasScore && !p.statuses?.evaluated && (
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); navigate("/events"); }}
