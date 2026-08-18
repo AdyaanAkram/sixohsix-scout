@@ -841,11 +841,17 @@ const GroupsTab = ({ eventId, isAdmin }) => {
       load();
     } catch (e) { toast.error(errMsg(e)); }
   };
+  const [dragOverGroup, setDragOverGroup] = useState(null); // group id (or "none") under the dragged chip
   const onDropInto = (groupId) => (ev) => {
     ev.preventDefault();
+    setDragOverGroup(null);
     const aid = ev.dataTransfer.getData("text/athlete-id");
     if (aid) moveAthlete(aid, groupId);
   };
+  const dragTargetProps = (key) => ({
+    onDragOver: (ev) => { ev.preventDefault(); setDragOverGroup(key); },
+    onDragLeave: (ev) => { if (!ev.currentTarget.contains(ev.relatedTarget)) setDragOverGroup((d) => (d === key ? null : d)); },
+  });
   const MemberChip = ({ m }) => (
     <span
       draggable={isAdmin}
@@ -972,7 +978,12 @@ const GroupsTab = ({ eventId, isAdmin }) => {
       {groups.length === 0 ? <EmptyState icon={Layers} title="No groups yet" hint="Create groups like 'Group A - 10U' to organize players, or auto-group by grad year." /> : (
         <>
           {members.some((m) => !m.group_id) && (
-            <Card className="rounded-2xl border-dashed border-border" onDragOver={(ev) => ev.preventDefault()} onDrop={onDropInto(null)}>
+            <Card className={cn("rounded-2xl border-dashed border-border relative transition-all",
+                dragOverGroup === "none" && "border-brand ring-2 ring-brand/50 bg-brand-tertiary/20")}
+              {...dragTargetProps("none")} onDrop={onDropInto(null)}>
+              {dragOverGroup === "none" && (
+                <span className="absolute -top-2.5 right-3 rounded-full bg-primary text-white text-xs font-bold px-2.5 py-0.5 shadow">+ Drop here</span>
+              )}
               <CardContent className="py-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Unassigned — drag into a group (or tap the arrow)</p>
                 <div className="flex flex-wrap gap-1.5">
@@ -983,7 +994,13 @@ const GroupsTab = ({ eventId, isAdmin }) => {
           )}
           <div className="grid gap-2 sm:grid-cols-2">
             {groups.map((g) => (
-              <Card key={g.id} className="rounded-2xl border-border" onDragOver={(ev) => ev.preventDefault()} onDrop={onDropInto(g.id)}>
+              <Card key={g.id}
+                className={cn("rounded-2xl border-border relative transition-all",
+                  dragOverGroup === g.id && "border-brand ring-2 ring-brand/50 bg-brand-tertiary/20")}
+                {...dragTargetProps(g.id)} onDrop={onDropInto(g.id)}>
+                {dragOverGroup === g.id && (
+                  <span className="absolute -top-2.5 right-3 rounded-full bg-primary text-white text-xs font-bold px-2.5 py-0.5 shadow">+ Drop here</span>
+                )}
                 <CardContent className="py-4 flex items-center justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     {editingId === g.id ? (
@@ -2519,20 +2536,45 @@ export default function EventDetail() {
               </CardContent>
             </Card>
           )}
-          {isStaffView && <div className="mb-3"><StaffingPanel eventId={eventId} /></div>}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-            {[
-              { label: "Players", value: event.player_count, icon: Users },
-              { label: "Checked In", value: event.checked_in_count, icon: CheckCircle2 },
-              { label: "Evaluators", value: event.evaluator_count, icon: ClipboardList },
-              { label: "Stations", value: event.station_count, icon: Layers },
-              { label: "Groups", value: event.group_count, icon: Layers },
-            ].map((s) => (
-              <Card key={s.label} className="rounded-2xl border-border"><CardContent className="py-4 text-center">
-                <p className="text-2xl font-bold font-mono-num text-foreground">{s.value ?? 0}</p>
-                <p className="text-xs text-muted-foreground">{s.label}</p>
-              </CardContent></Card>
-            ))}
+          {/* The three things an event-runner touches constantly — big, direct,
+              one tap each. Staffing math moved out of the way (Evaluators tab). */}
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Card className="rounded-2xl border-border hover:border-brand/50 transition-colors cursor-pointer" onClick={() => setParams({ tab: "roster" })} data-testid="overview-athletes-card">
+              <CardContent className="py-4">
+                <div className="flex items-center justify-between">
+                  <p className="font-semibold text-foreground flex items-center gap-2"><Users className="h-4 w-4 text-brand" /> Athletes</p>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <p className="text-3xl font-bold font-mono-num mt-2">{event.player_count ?? 0}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">on the roster · tap to manage &amp; approve</p>
+              </CardContent>
+            </Card>
+            <Card className="rounded-2xl border-border hover:border-brand/50 transition-colors cursor-pointer" onClick={() => setParams({ tab: "checkin" })} data-testid="overview-checkin-card">
+              <CardContent className="py-4">
+                <div className="flex items-center justify-between">
+                  <p className="font-semibold text-foreground flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-success" /> Check-In</p>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <p className="text-3xl font-bold font-mono-num mt-2">
+                  {event.checked_in_count ?? 0}<span className="text-lg text-muted-foreground">/{event.player_count ?? 0}</span>
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {(event.player_count ?? 0) - (event.checked_in_count ?? 0) > 0
+                    ? `${(event.player_count ?? 0) - (event.checked_in_count ?? 0)} still to check in`
+                    : "everyone is in"}
+                </p>
+              </CardContent>
+            </Card>
+            <Card className="rounded-2xl border-border hover:border-brand/50 transition-colors cursor-pointer" onClick={() => setParams({ tab: "groups" })} data-testid="overview-groups-card">
+              <CardContent className="py-4">
+                <div className="flex items-center justify-between">
+                  <p className="font-semibold text-foreground flex items-center gap-2"><Layers className="h-4 w-4 text-info" /> Groups</p>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <p className="text-3xl font-bold font-mono-num mt-2">{event.group_count ?? 0}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">tap to balance with drag &amp; drop</p>
+              </CardContent>
+            </Card>
           </div>
           {event.description && <Card className="rounded-2xl border-border mt-3"><CardContent className="py-4 text-sm text-muted-foreground">{event.description}</CardContent></Card>}
           {(event.age_groups || []).length > 0 && (
