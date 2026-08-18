@@ -7,7 +7,7 @@ import {
   LayoutDashboard, CalendarDays, Users, ClipboardList, BarChart3, TrendingUp,
   UserCog, FileSpreadsheet, Settings, LogOut, Home, ClipboardCheck,
   MoreHorizontal, ScrollText, IdCard, CalendarRange, Bell, Dumbbell,
-  ChevronsUpDown, Building2, Check, Crosshair, Shield, Star, ArrowLeftRight,, ShoppingBag,
+  ChevronsUpDown, Building2, Check, Crosshair, Shield, Star, ArrowLeftRight, ShoppingBag,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
