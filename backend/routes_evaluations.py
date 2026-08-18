@@ -934,6 +934,29 @@ def _rank_scored_items(category_scores: dict, metric_rows: list[dict]) -> list[d
     return items
 
 
+@router.get("/athletes/{athlete_id}/evaluations")
+async def athlete_evaluations(athlete_id: str, user=Depends(require_roles(*COACH_ROLES))):
+    """Every submitted/approved evaluation for one athlete, newest first, with
+    station/event names — the profile's Evaluations tab reads this (the review
+    queue only holds *pending* items, so approved history was invisible)."""
+    org = user["organization_id"]
+    evs = await db.evaluations.find(
+        {"organization_id": org, "athlete_id": athlete_id,
+         "status": {"$in": ["submitted", "approved", "returned"]}},
+        {"_id": 0, "scores": 0}).to_list(200)
+    station_ids = list({e.get("station_id") for e in evs if e.get("station_id")})
+    event_ids = list({e.get("event_id") for e in evs if e.get("event_id")})
+    smap = {st["id"]: st.get("name") for st in await db.stations.find(
+        {"id": {"$in": station_ids}, "organization_id": org}, {"_id": 0, "id": 1, "name": 1}).to_list(200)}
+    emap = {ev0["id"]: ev0.get("name") for ev0 in await db.events.find(
+        {"id": {"$in": event_ids}, "organization_id": org}, {"_id": 0, "id": 1, "name": 1}).to_list(200)}
+    for e in evs:
+        e["station_name"] = smap.get(e.get("station_id"))
+        e["event_name"] = emap.get(e.get("event_id"))
+    evs.sort(key=lambda e: e.get("submitted_at") or e.get("updated_at") or "", reverse=True)
+    return [clean(e) for e in evs]
+
+
 @router.get("/evaluations/{evaluation_id}/results")
 async def evaluation_results(evaluation_id: str, user=Depends(require_roles(*STAFF_ROLES))):
     """Visual-summary-first payload for the evaluation results page: the scores and

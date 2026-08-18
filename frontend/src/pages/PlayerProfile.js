@@ -24,7 +24,7 @@ import { toast } from "sonner";
 import {
   ArrowLeft, FileDown, Flag, Plus, TrendingUp, TrendingDown, Minus,
   ClipboardList, Image as ImageIcon, StickyNote, CalendarClock, Target, Archive, Camera, Mail,
-  Gauge, Trophy, Sparkles, ChevronDown, Check, X, Trash2,
+  Gauge, Trophy, Sparkles, ChevronDown, ChevronRight, Check, X, Trash2,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -798,7 +798,7 @@ export default function PlayerProfile() {
 
   useEffect(() => {
     if (tab === "evaluations" && !evaluations) {
-      api.get("/review/queue").then((r) => setEvaluations(r.data.filter((e) => e.athlete_id === athleteId))).catch(() => {
+      api.get(`/athletes/${athleteId}/evaluations`).then((r) => setEvaluations(r.data)).catch(() => {
         api.get("/my-evaluations").then((r) => setEvaluations(r.data.filter((e) => e.athlete_id === athleteId))).catch(() => setEvaluations([]));
       });
     }
@@ -1481,14 +1481,16 @@ export default function PlayerProfile() {
           ) : (
             <div className="space-y-2">
               {evaluations.map((ev) => (
-                <Card key={ev.id} className="rounded-2xl border-border">
+                <Card key={ev.id} className="rounded-2xl border-border hover:border-brand/50 transition-colors cursor-pointer"
+                  onClick={() => navigate(`/evaluation/${ev.id}/results`)} data-testid={`evaluation-open-${ev.id}`}>
                   <CardContent className="py-3.5 flex items-center gap-3">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-foreground">{ev.station_name} — {ev.event_name}</p>
-                      <p className="text-xs text-muted-foreground">By {ev.evaluator_name} · {(ev.submitted_at || ev.updated_at || "").slice(0, 10)}</p>
+                      <p className="text-sm font-semibold text-foreground">{[ev.station_name, ev.event_name].filter(Boolean).join(" — ") || "Evaluation"}</p>
+                      <p className="text-xs text-muted-foreground">By {ev.evaluator_name || "Staff"} · {(ev.submitted_at || ev.updated_at || "").slice(0, 10)} · tap for full scores</p>
                     </div>
                     <p className="font-mono-num font-bold text-foreground">{ev.computed?.overall_score ?? "—"}</p>
                     <StatusBadge status={ev.status} />
+                    <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
                   </CardContent>
                 </Card>
               ))}
