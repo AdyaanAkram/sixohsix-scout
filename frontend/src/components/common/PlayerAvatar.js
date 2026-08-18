@@ -10,7 +10,7 @@ const COLORS = [
   "bg-success text-white",
 ];
 
-function resolvePhotoSrc(photoUrl) {
+export function resolvePhotoSrc(photoUrl) {
   if (!photoUrl) return null;
   if (photoUrl.startsWith("http://") || photoUrl.startsWith("https://") || photoUrl.startsWith("data:")) {
     return photoUrl;

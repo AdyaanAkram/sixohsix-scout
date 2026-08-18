@@ -252,7 +252,7 @@ const OrgMark = ({ name, logoUrl, className }) => {
   );
 };
 
-const OrgSwitcher = ({ compact }) => {
+export const OrgSwitcher = ({ compact }) => {
   const { user, switchOrganization } = useAuth();
   const [orgs, setOrgs] = useState(user?.memberships || []);
   const [busy, setBusy] = useState(false);

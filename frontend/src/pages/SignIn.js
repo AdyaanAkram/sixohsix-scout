@@ -23,7 +23,7 @@ export default function SignIn() {
   const [busy, setBusy] = useState(false);
 
   if (!loading && user) {
-    const home = nextPath || ((user.role === "athlete" || user.role === "parent") ? "/my-id" : "/dashboard");
+    const home = nextPath || ((user.role === "athlete" || user.role === "parent") ? "/my-id" : "/workspace");
     return <Navigate to={home} replace />;
   }
 
@@ -32,8 +32,8 @@ export default function SignIn() {
     setBusy(true);
     try {
       const u = await login(email.trim(), password);
-      // AuthProvider sets user; Navigate above / location replace via hard nav keeps SPA clean
-      const home = nextPath || ((u?.role === "athlete" || u?.role === "parent") ? "/my-id" : "/dashboard");
+      // AuthProvider sets user; staff land on the role-based mode picker.
+      const home = nextPath || ((u?.role === "athlete" || u?.role === "parent") ? "/my-id" : "/workspace");
       window.location.href = home;
     } catch (err) {
       toast.error(errMsg(err, "Sign in failed."));
@@ -51,7 +51,7 @@ export default function SignIn() {
         navigate("/signup", { state: { google: { credential, email: data.email, name: data.name } } });
         return;
       }
-      const home = (data.user?.role === "athlete" || data.user?.role === "parent") ? "/my-id" : "/dashboard";
+      const home = (data.user?.role === "athlete" || data.user?.role === "parent") ? "/my-id" : "/workspace";
       window.location.href = home;
     } catch (err) {
       toast.error(errMsg(err, "Google sign-in failed."));

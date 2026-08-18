@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { PlayerAvatar } from "@/components/common/PlayerAvatar";
+import { PlayerAvatar, resolvePhotoSrc } from "@/components/common/PlayerAvatar";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -342,22 +342,53 @@ const pct = (x, total) => (total ? Math.round((x / total) * 100) : 0);
 const CardStatusPill = ({ statuses }) => {
   const s = statuses || {};
   let label = "EVALUATED";
-  let cls = "bg-success/15 text-success";
+  let cls = "bg-success text-white";
   let trending = false;
   if (s.follow_up) {
     label = "FOLLOW-UP";
-    cls = "bg-warning/15 text-warning";
+    cls = "bg-warning text-black";
   } else if (!s.evaluated) {
     label = "NEEDS EVAL";
-    cls = "bg-warning/15 text-warning";
+    cls = "bg-warning text-black";
   } else if (s.improving) {
     trending = true;
   }
   return (
-    <span className={cn("inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide", cls)}>
+    <span className={cn("inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide shadow-md", cls)}>
       {trending ? <TrendingUp className="h-3 w-3" /> : <span aria-hidden="true">•</span>}
       {label}
     </span>
+  );
+};
+
+/* Photo header for the roster card. Real photo when the athlete has one;
+   otherwise a branded monogram panel with a faded position watermark, so a
+   photo-less roster still looks intentional rather than broken. */
+const CardPhoto = ({ p }) => {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { setFailed(false); }, [p.photo_url]);
+  const src = !failed ? resolvePhotoSrc(p.photo_url) : null;
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={`${p.first_name || ""} ${p.last_name || ""}`.trim() || "Player"}
+        className="h-full w-full object-cover object-top"
+        loading="lazy"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  const initials = `${(p.first_name || "?")[0] || ""}${(p.last_name || "")[0] || ""}`.toUpperCase();
+  return (
+    <div className="relative flex h-full w-full items-center justify-center bg-gradient-to-br from-brand-tertiary via-secondary to-background">
+      {p.primary_position && (
+        <span className="absolute -right-2 bottom-0 select-none font-display text-7xl font-extrabold leading-none text-foreground/[0.06]">
+          {p.primary_position}
+        </span>
+      )}
+      <span className="select-none font-display text-5xl text-brand/70">{initials}</span>
+    </div>
   );
 };
 
@@ -801,7 +832,7 @@ export default function PlayersList() {
       {loading ? (
         view === "card" ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-44 rounded-2xl" />)}
+            {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-80 rounded-2xl" />)}
           </div>
         ) : (
           <div className="space-y-2">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-16 rounded-2xl" />)}</div>
@@ -826,59 +857,61 @@ export default function PlayersList() {
                 className="text-left cursor-pointer h-full"
                 data-testid={`players-card-${p.id}`}
               >
-                <Card className="h-full rounded-2xl border-border transition-all hover:border-brand/50 hover:shadow-lg hover:-translate-y-0.5">
-                  <CardContent className="p-4 space-y-3">
-                    {(snapshot || watchedIds) && (
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-                          {snapshot && <CardStatusPill statuses={p.statuses} />}
-                          {snapshot && p.statuses?.new_video && (
-                            <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-[hsl(var(--info)_/_0.15)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-info">
+                <Card className="h-full overflow-hidden rounded-2xl border-border transition-all hover:border-brand/50 hover:shadow-lg hover:-translate-y-0.5">
+                    {/* Photo header — the athlete's face is the card. Status,
+                        watchlist star and the overall score live on the image. */}
+                    <div className="relative aspect-[4/3] w-full overflow-hidden">
+                      <CardPhoto p={p} />
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/55 to-transparent" />
+                      {snapshot && (
+                        <div className="absolute left-2.5 top-2.5 flex max-w-[70%] flex-wrap items-center gap-1.5">
+                          <CardStatusPill statuses={p.statuses} />
+                          {p.statuses?.new_video && (
+                            <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-[hsl(var(--info))] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-md">
                               <span aria-hidden="true">•</span> NEW VIDEO
                             </span>
                           )}
                         </div>
-                        {watchedIds && (
-                          <button
-                            type="button"
-                            onClick={(e) => toggleWatch(e, p)}
-                            className="shrink-0 rounded-lg p-1 -m-1 transition-colors hover:bg-secondary"
-                            title={watched ? "Remove from watchlist" : "Add to watchlist"}
-                            aria-label={watched ? "Remove from watchlist" : "Add to watchlist"}
-                            aria-pressed={!!watched}
-                            data-testid={`players-watch-${p.id}`}
-                          >
-                            <Star className={cn("h-4 w-4", watched ? "fill-current text-warning" : "text-muted-foreground")} />
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    <div className="flex items-start gap-3">
-                      <PlayerAvatar firstName={p.first_name} lastName={p.last_name} photoUrl={p.photo_url} size="lg" />
-                      <div className="min-w-0 flex-1">
-                        <p className="font-display text-lg leading-tight text-foreground truncate">{p.first_name} {p.last_name}</p>
+                      )}
+                      {watchedIds && (
+                        <button
+                          type="button"
+                          onClick={(e) => toggleWatch(e, p)}
+                          className="absolute right-2 top-2 rounded-full bg-black/40 p-1.5 backdrop-blur-sm transition-colors hover:bg-black/60"
+                          title={watched ? "Remove from watchlist" : "Add to watchlist"}
+                          aria-label={watched ? "Remove from watchlist" : "Add to watchlist"}
+                          aria-pressed={!!watched}
+                          data-testid={`players-watch-${p.id}`}
+                        >
+                          <Star className={cn("h-4 w-4", watched ? "fill-current text-warning" : "text-white/85")} />
+                        </button>
+                      )}
+                      {hasScore && (
+                        <span className="absolute bottom-2.5 left-2.5 rounded-lg bg-success px-2.5 py-1.5 font-mono-num text-xl font-bold leading-none text-white shadow-lg">
+                          {fmtScore(p.latest_overall)}
+                        </span>
+                      )}
+                    </div>
+                  <CardContent className="p-4 pt-3 space-y-2.5">
+                    <div className="min-w-0">
+                      <p className="font-display text-lg leading-tight text-foreground truncate">{p.first_name} {p.last_name}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {p.primary_position || "—"} · {p.bats || "—"}/{p.throws || "—"} · {p.current_team || "No team"}
+                      </p>
+                      {(p.graduation_year || p.age_group) && (
                         <p className="text-xs text-muted-foreground truncate">
-                          {p.primary_position || "—"} · {p.bats || "—"}/{p.throws || "—"} · {p.current_team || "No team"}
+                          {[p.graduation_year ? `Class of ${p.graduation_year}` : null, p.age_group || null].filter(Boolean).join(" · ")}
                         </p>
-                        {(p.graduation_year || p.age_group) && (
-                          <p className="text-xs text-muted-foreground truncate">
-                            {[p.graduation_year ? `Class of ${p.graduation_year}` : null, p.age_group || null].filter(Boolean).join(" · ")}
-                          </p>
-                        )}
-                      </div>
+                      )}
                     </div>
                     {snapshot && (
                       <>
                         {hasScore ? (
-                          <div className="flex min-h-[52px] items-center justify-between gap-2 rounded-xl bg-secondary px-3 py-2">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="rounded-lg bg-success/15 px-2.5 py-1 font-mono-num text-2xl font-bold text-success">
-                                {fmtScore(p.latest_overall)}
-                              </span>
-                              <span className="text-[10px] font-semibold uppercase tracking-wide leading-tight text-muted-foreground">
-                                Overall Eval Score
-                              </span>
-                            </div>
+                          /* The score itself sits on the photo — this row carries the trend. */
+                          <div className="flex min-h-[44px] items-center justify-between gap-2 rounded-xl bg-secondary px-3 py-2">
+                            <span className="text-[10px] font-semibold uppercase tracking-wide leading-tight text-muted-foreground">
+                              Overall Eval Score
+                            </span>
                             <ChangeSince change={p.score_change} />
                           </div>
                         ) : p.statuses?.evaluated ? (
