@@ -457,7 +457,6 @@ export default function Dashboard() {
       {orgSummary && (
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <StatCard label="Athletes" value={orgSummary.athletes} icon={Users} testId="stat-org-athletes" to="/players" />
-          <StatCard label="Teams" value={orgSummary.teams} icon={Shield} testId="stat-org-teams" to="/teams" />
           <StatCard label="Coaches" value={orgSummary.coaches} sub={`${orgSummary.evaluators ?? 0} evaluators`} icon={UsersRound} testId="stat-org-coaches" to="/staff" />
           <StatCard label="Awaiting Review" value={orgSummary.evaluations?.awaiting_review} icon={ClipboardList} accent="hsl(var(--warning))" testId="stat-org-awaiting-review" to="/review" />
           <StatCard label="Upcoming Events" value={orgSummary.events?.upcoming} sub={`${orgSummary.events?.total ?? 0} total`} icon={CalendarDays} accent="hsl(var(--info))" testId="stat-org-upcoming-events" to={ev ? `/events/${ev.id}` : "/events"} />
