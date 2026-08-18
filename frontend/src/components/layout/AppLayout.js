@@ -504,7 +504,23 @@ export const AppLayout = ({ children }) => {
 
       <Sheet open={notifOpen} onOpenChange={setNotifOpen}>
         <SheetContent side="right" className="w-full sm:max-w-md bg-surface-2 border-border">
-          <p className="font-display text-2xl text-foreground mb-4">Notifications</p>
+          <div className="flex items-center justify-between mb-4">
+            <p className="font-display text-2xl text-foreground">Notifications</p>
+            {notifs.length > 0 && (
+              <Button size="sm" variant="outline" className="h-8 rounded-lg text-xs"
+                data-testid="notifications-clear-all"
+                onClick={async () => {
+                  try {
+                    await api.delete("/notifications");
+                    setNotifs([]);
+                    setUnread(0);
+                    toast.success("Notifications cleared.");
+                  } catch (e) { toast.error(errMsg(e)); }
+                }}>
+                Clear all
+              </Button>
+            )}
+          </div>
           <div className="space-y-2 max-h-[80vh] overflow-y-auto">
             {notifs.length === 0 ? (
               <p className="text-sm text-muted-foreground">You&apos;re all caught up.</p>

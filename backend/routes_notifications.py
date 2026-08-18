@@ -25,6 +25,13 @@ class ReadBody(BaseModel):
     ids: list[str] | None = None  # None = mark all
 
 
+@router.delete("/notifications")
+async def clear_notifications(user=Depends(get_current_user)):
+    """Delete all of the caller's notifications."""
+    res = await db.notifications.delete_many({"user_id": user["id"]})
+    return {"message": "Notifications cleared.", "deleted": res.deleted_count}
+
+
 @router.post("/notifications/read")
 async def mark_read(body: ReadBody, user=Depends(get_current_user)):
     q = {"user_id": user["id"], "read": False}
