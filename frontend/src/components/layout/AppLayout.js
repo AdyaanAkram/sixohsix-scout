@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate, Navigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { api, signedUrl } from "@/lib/api";
+import { api, errMsg, signedUrl } from "@/lib/api";
+import { toast } from "sonner";
 import {
   LayoutDashboard, CalendarDays, Users, ClipboardList, BarChart3, TrendingUp,
   UserCog, FileSpreadsheet, Settings, LogOut, Home, ClipboardCheck,
@@ -400,6 +401,7 @@ export const AppLayout = ({ children }) => {
   const { user, logout } = useAuth();
   const [moreOpen, setMoreOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [approvedNotifs, setApprovedNotifs] = useState({}); // notif id -> approved via the sheet
   const [notifs, setNotifs] = useState([]);
   const [unread, setUnread] = useState(0);
   const location = useLocation();
@@ -525,10 +527,12 @@ export const AppLayout = ({ children }) => {
                       return null;
                   }
                 })();
+                const canApprove = n.kind === "signup_pending" && (n.payload?.athlete_ids || []).length > 0 && !approvedNotifs[n.id];
                 return (
-                  <button
+                  <div
                     key={n.id}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     onClick={() => { if (dest) { setNotifOpen(false); navigate(dest); } }}
                     className={cn("w-full text-left rounded-xl border border-border px-3 py-2.5 transition-colors",
                       !n.read && "bg-secondary/50", dest && "hover:border-brand/50 cursor-pointer")}
@@ -536,8 +540,32 @@ export const AppLayout = ({ children }) => {
                   >
                     <p className="text-sm font-semibold text-foreground">{n.title}</p>
                     <p className="text-xs text-muted-foreground mt-0.5">{n.body}</p>
-                    <p className="text-[10px] text-muted-foreground mt-1">{(n.created_at || "").slice(0, 16).replace("T", " ")}{dest ? " · tap to open" : ""}</p>
-                  </button>
+                    <div className="flex items-center justify-between gap-2 mt-1">
+                      <p className="text-[10px] text-muted-foreground">{(n.created_at || "").slice(0, 16).replace("T", " ")}{dest ? " · tap to open" : ""}</p>
+                      {canApprove && (
+                        <Button
+                          size="sm"
+                          className="h-7 rounded-lg text-xs bg-primary hover:bg-brand-secondary shrink-0"
+                          data-testid={`notification-approve-${n.id}`}
+                          onClick={async (ev) => {
+                            ev.stopPropagation();
+                            let ok = 0, already = 0;
+                            for (const aid of n.payload.athlete_ids) {
+                              try { await api.post(`/athletes/${aid}/approve`); ok += 1; }
+                              catch (e2) { if (e2?.response?.status === 404) already += 1; else toast.error(errMsg(e2)); }
+                            }
+                            setApprovedNotifs((m) => ({ ...m, [n.id]: true }));
+                            toast.success(ok > 0 ? `Approved ${ok} athlete${ok > 1 ? "s" : ""}.` : already > 0 ? "Already approved." : "Nothing to approve.");
+                          }}
+                        >
+                          Approve
+                        </Button>
+                      )}
+                      {n.kind === "signup_pending" && approvedNotifs[n.id] && (
+                        <span className="text-xs font-semibold text-success shrink-0">Approved ✓</span>
+                      )}
+                    </div>
+                  </div>
                 );
               })
             )}
