@@ -785,6 +785,117 @@ async def autosave(evaluation_id: str, body: AutosaveBody, user=Depends(require_
     return {"status": "saved", "updated_at": updates["updated_at"], "computed": computed, "evaluation_id": evaluation_id}
 
 
+# NOTE: registered before /evaluations/{evaluation_id} so the literal path matches first.
+@router.get("/evaluations/insights")
+async def evaluations_insights(user=Depends(require_roles(*REVIEW_ROLES))):
+    """Evaluations hub header: totals, top performers, position mix, team
+    averages and the latest evaluations — five batched queries, never a
+    per-evaluation lookup. Scores reuse the same per-event checkpoint logic
+    the roster overview uses so the two pages can never disagree."""
+    from routes_players import _latest_and_change
+    org = user["organization_id"]
+    evals = await db.evaluations.find(
+        {"organization_id": org, "status": {"$in": ["submitted", "approved"]}},
+        {"_id": 0, "id": 1, "athlete_id": 1, "event_id": 1, "station_id": 1,
+         "status": 1, "submitted_at": 1, "created_at": 1,
+         "computed.overall_score": 1, "computed.category_scores": 1},
+    ).sort("submitted_at", 1).to_list(20000)
+
+    athlete_ids = sorted({e["athlete_id"] for e in evals if e.get("athlete_id")})
+    athletes = await db.athletes.find(
+        {"organization_id": org, "id": {"$in": athlete_ids}},
+        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "photo_url": 1,
+         "primary_position": 1, "graduation_year": 1, "age_group": 1,
+         "bats": 1, "throws": 1, "current_team": 1},
+    ).to_list(len(athlete_ids) or 1)
+    amap = {a["id"]: a for a in athletes}
+
+    event_ids = sorted({e.get("event_id") for e in evals if e.get("event_id")})
+    events = await db.events.find(
+        {"id": {"$in": event_ids}, "organization_id": org},
+        {"_id": 0, "id": 1, "name": 1, "date": 1}).to_list(len(event_ids) or 1)
+    emap = {e["id"]: e for e in events}
+    event_dates = {e["id"]: e.get("date") for e in events}
+
+    station_ids = sorted({e.get("station_id") for e in evals if e.get("station_id")})
+    stations = await db.stations.find(
+        {"id": {"$in": station_ids}, "organization_id": org},
+        {"_id": 0, "id": 1, "name": 1}).to_list(len(station_ids) or 1)
+    smap = {s["id"]: s.get("name") for s in stations}
+
+    by_athlete: dict = {}
+    for e in evals:
+        by_athlete.setdefault(e.get("athlete_id"), []).append(e)
+
+    performers = []
+    for aid, a_evals in by_athlete.items():
+        a = amap.get(aid)
+        if not a:
+            continue  # athlete deleted/archived out of the org — skip, don't fabricate
+        latest, change = _latest_and_change(a_evals, event_dates)
+        if latest is None:
+            continue
+        performers.append({**a, "athlete_id": aid, "latest_overall": latest,
+                           "score_change": change, "evaluation_count": len(a_evals)})
+    performers.sort(key=lambda p: p["latest_overall"], reverse=True)
+
+    total_evals = len(evals)
+    pos_counts: dict = {}
+    for e in evals:
+        pos = (amap.get(e.get("athlete_id")) or {}).get("primary_position") or "Other"
+        pos_counts[pos] = pos_counts.get(pos, 0) + 1
+    by_position = sorted(
+        [{"position": p, "count": c,
+          "pct": round(c * 100 / total_evals) if total_evals else 0}
+         for p, c in pos_counts.items()],
+        key=lambda x: -x["count"])
+
+    team_scores: dict = {}
+    for p in performers:
+        team = p.get("current_team") or "Unassigned"
+        team_scores.setdefault(team, []).append(p["latest_overall"])
+    top_teams = sorted(
+        [{"team": t, "avg_score": round(sum(v) / len(v), 1), "athletes": len(v)}
+         for t, v in team_scores.items()],
+        key=lambda x: -x["avg_score"])
+
+    recent = []
+    newest_first = sorted(
+        evals, key=lambda x: x.get("submitted_at") or x.get("created_at") or "",
+        reverse=True)
+    for e in newest_first[:10]:
+        cats = (e.get("computed") or {}).get("category_scores") or {}
+        top_categories = sorted(
+            [{"name": k, "score": v.get("score")}
+             for k, v in cats.items() if v.get("score") is not None],
+            key=lambda c: -c["score"])[:2]
+        recent.append({
+            "id": e["id"], "athlete_id": e.get("athlete_id"),
+            "athlete": amap.get(e.get("athlete_id")),
+            "overall_score": (e.get("computed") or {}).get("overall_score"),
+            "status": e.get("status"), "submitted_at": e.get("submitted_at"),
+            "event_name": (emap.get(e.get("event_id")) or {}).get("name"),
+            "station_name": smap.get(e.get("station_id")),
+            "top_categories": top_categories,
+        })
+
+    season_start = f"{datetime.now().year}-01-01"
+    return {
+        "totals": {
+            "evaluations": total_evals,
+            "verified": sum(1 for e in evals if e["status"] == "approved"),
+            "athletes_evaluated": len(by_athlete),
+            "events": len(event_ids),
+            "events_this_season": sum(1 for e in events if (e.get("date") or "") >= season_start),
+            "teams": len([t for t in team_scores if t != "Unassigned"]),
+        },
+        "top_performers": performers[:8],
+        "by_position": by_position,
+        "top_teams": top_teams[:6],
+        "recent": recent,
+    }
+
+
 @router.get("/evaluations/{evaluation_id}")
 async def get_evaluation(evaluation_id: str, user=Depends(require_roles(*STAFF_ROLES))):
     org = user["organization_id"]
@@ -1139,116 +1250,6 @@ async def my_evaluations(user=Depends(require_roles(*STAFF_ROLES))):
 
 
 # ---------------- Head Scout review ----------------
-
-@router.get("/evaluations/insights")
-async def evaluations_insights(user=Depends(require_roles(*REVIEW_ROLES))):
-    """Evaluations hub header: totals, top performers, position mix, team
-    averages and the latest evaluations — five batched queries, never a
-    per-evaluation lookup. Scores reuse the same per-event checkpoint logic
-    the roster overview uses so the two pages can never disagree."""
-    from routes_players import _latest_and_change
-    org = user["organization_id"]
-    evals = await db.evaluations.find(
-        {"organization_id": org, "status": {"$in": ["submitted", "approved"]}},
-        {"_id": 0, "id": 1, "athlete_id": 1, "event_id": 1, "station_id": 1,
-         "status": 1, "submitted_at": 1, "created_at": 1,
-         "computed.overall_score": 1, "computed.category_scores": 1},
-    ).sort("submitted_at", 1).to_list(20000)
-
-    athlete_ids = sorted({e["athlete_id"] for e in evals if e.get("athlete_id")})
-    athletes = await db.athletes.find(
-        {"organization_id": org, "id": {"$in": athlete_ids}},
-        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "photo_url": 1,
-         "primary_position": 1, "graduation_year": 1, "age_group": 1,
-         "bats": 1, "throws": 1, "current_team": 1},
-    ).to_list(len(athlete_ids) or 1)
-    amap = {a["id"]: a for a in athletes}
-
-    event_ids = sorted({e.get("event_id") for e in evals if e.get("event_id")})
-    events = await db.events.find(
-        {"id": {"$in": event_ids}, "organization_id": org},
-        {"_id": 0, "id": 1, "name": 1, "date": 1}).to_list(len(event_ids) or 1)
-    emap = {e["id"]: e for e in events}
-    event_dates = {e["id"]: e.get("date") for e in events}
-
-    station_ids = sorted({e.get("station_id") for e in evals if e.get("station_id")})
-    stations = await db.stations.find(
-        {"id": {"$in": station_ids}, "organization_id": org},
-        {"_id": 0, "id": 1, "name": 1}).to_list(len(station_ids) or 1)
-    smap = {s["id"]: s.get("name") for s in stations}
-
-    by_athlete: dict = {}
-    for e in evals:
-        by_athlete.setdefault(e.get("athlete_id"), []).append(e)
-
-    performers = []
-    for aid, a_evals in by_athlete.items():
-        a = amap.get(aid)
-        if not a:
-            continue  # athlete deleted/archived out of the org — skip, don't fabricate
-        latest, change = _latest_and_change(a_evals, event_dates)
-        if latest is None:
-            continue
-        performers.append({**a, "athlete_id": aid, "latest_overall": latest,
-                           "score_change": change, "evaluation_count": len(a_evals)})
-    performers.sort(key=lambda p: p["latest_overall"], reverse=True)
-
-    total_evals = len(evals)
-    pos_counts: dict = {}
-    for e in evals:
-        pos = (amap.get(e.get("athlete_id")) or {}).get("primary_position") or "Other"
-        pos_counts[pos] = pos_counts.get(pos, 0) + 1
-    by_position = sorted(
-        [{"position": p, "count": c,
-          "pct": round(c * 100 / total_evals) if total_evals else 0}
-         for p, c in pos_counts.items()],
-        key=lambda x: -x["count"])
-
-    team_scores: dict = {}
-    for p in performers:
-        team = p.get("current_team") or "Unassigned"
-        team_scores.setdefault(team, []).append(p["latest_overall"])
-    top_teams = sorted(
-        [{"team": t, "avg_score": round(sum(v) / len(v), 1), "athletes": len(v)}
-         for t, v in team_scores.items()],
-        key=lambda x: -x["avg_score"])
-
-    recent = []
-    newest_first = sorted(
-        evals, key=lambda x: x.get("submitted_at") or x.get("created_at") or "",
-        reverse=True)
-    for e in newest_first[:10]:
-        cats = (e.get("computed") or {}).get("category_scores") or {}
-        top_categories = sorted(
-            [{"name": k, "score": v.get("score")}
-             for k, v in cats.items() if v.get("score") is not None],
-            key=lambda c: -c["score"])[:2]
-        recent.append({
-            "id": e["id"], "athlete_id": e.get("athlete_id"),
-            "athlete": amap.get(e.get("athlete_id")),
-            "overall_score": (e.get("computed") or {}).get("overall_score"),
-            "status": e.get("status"), "submitted_at": e.get("submitted_at"),
-            "event_name": (emap.get(e.get("event_id")) or {}).get("name"),
-            "station_name": smap.get(e.get("station_id")),
-            "top_categories": top_categories,
-        })
-
-    season_start = f"{datetime.now().year}-01-01"
-    return {
-        "totals": {
-            "evaluations": total_evals,
-            "verified": sum(1 for e in evals if e["status"] == "approved"),
-            "athletes_evaluated": len(by_athlete),
-            "events": len(event_ids),
-            "events_this_season": sum(1 for e in events if (e.get("date") or "") >= season_start),
-            "teams": len([t for t in team_scores if t != "Unassigned"]),
-        },
-        "top_performers": performers[:8],
-        "by_position": by_position,
-        "top_teams": top_teams[:6],
-        "recent": recent,
-    }
-
 
 @router.get("/review/queue")
 async def review_queue(event_id: str | None = None, user=Depends(require_roles(*REVIEW_ROLES))):
