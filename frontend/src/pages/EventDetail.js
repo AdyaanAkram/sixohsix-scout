@@ -2296,6 +2296,28 @@ export default function EventDetail() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [event, setEvent] = useState(null);
+  const [editEventOpen, setEditEventOpen] = useState(false);
+  const [editEvent, setEditEvent] = useState({});
+  const openEditEvent = () => {
+    setEditEvent({ name: event.name || "", date: event.date || "", start_time: event.start_time || "",
+                   end_time: event.end_time || "", location: event.location || "" });
+    setEditEventOpen(true);
+  };
+  const saveEditEvent = async () => {
+    try {
+      await api.patch(`/events/${eventId}`, {
+        name: editEvent.name, event_type: event.event_type || "Evaluation",
+        date: editEvent.date, start_time: editEvent.start_time || null,
+        end_time: editEvent.end_time || null, location: editEvent.location || null,
+        description: event.description || null, age_groups: event.age_groups || [],
+        status: event.status || "Draft",
+      });
+      toast.success("Event updated.");
+      setEditEventOpen(false);
+      load();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+
   const isAdmin = ["owner", "admin"].includes(user?.role);
   const isStaffView = ["owner", "admin", "head_scout", "coach"].includes(user?.role);
 
@@ -2334,7 +2356,14 @@ export default function EventDetail() {
         </button>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="font-display text-3xl sm:text-4xl text-foreground">{event.name}</h1>
+            <span className="flex items-center gap-2">
+              <h1 className="font-display text-3xl sm:text-4xl text-foreground">{event.name}</h1>
+              {isAdmin && (
+                <button type="button" onClick={openEditEvent} className="text-muted-foreground hover:text-foreground p-1" title="Edit event details" data-testid="event-edit-button">
+                  <Pencil className="h-4 w-4" />
+                </button>
+              )}
+            </span>
             <p className="text-sm text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
               <span className="inline-flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" /> {event.date} {event.start_time && `· ${event.start_time}–${event.end_time}`}</span>
               {event.location && <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" /> {event.location}</span>}
@@ -2360,6 +2389,30 @@ export default function EventDetail() {
         </div>
       </div>
 
+      {isAdmin && (
+        <Dialog open={editEventOpen} onOpenChange={setEditEventOpen}>
+          <DialogContent className="rounded-2xl max-w-sm">
+            <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Edit Event</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1"><Label className="text-xs">Name</Label>
+                <Input value={editEvent.name || ""} onChange={(e) => setEditEvent((f) => ({ ...f, name: e.target.value }))} className="h-10 rounded-lg" data-testid="event-edit-name" /></div>
+              <div className="space-y-1"><Label className="text-xs">Date</Label>
+                <Input type="date" value={editEvent.date || ""} onChange={(e) => setEditEvent((f) => ({ ...f, date: e.target.value }))} className="h-10 rounded-lg" /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1"><Label className="text-xs">Start</Label>
+                  <Input type="time" value={editEvent.start_time || ""} onChange={(e) => setEditEvent((f) => ({ ...f, start_time: e.target.value }))} className="h-10 rounded-lg" /></div>
+                <div className="space-y-1"><Label className="text-xs">End</Label>
+                  <Input type="time" value={editEvent.end_time || ""} onChange={(e) => setEditEvent((f) => ({ ...f, end_time: e.target.value }))} className="h-10 rounded-lg" /></div>
+              </div>
+              <div className="space-y-1"><Label className="text-xs">Location</Label>
+                <Input value={editEvent.location || ""} onChange={(e) => setEditEvent((f) => ({ ...f, location: e.target.value }))} className="h-10 rounded-lg" /></div>
+            </div>
+            <DialogFooter>
+              <Button onClick={saveEditEvent} disabled={!editEvent.name || !editEvent.date} className="w-full rounded-xl bg-primary h-11" data-testid="event-edit-save">Save Event</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
       <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
         <div className="relative">
           <div className="overflow-x-auto -mx-4 px-4 scroll-smooth" ref={(el) => {
