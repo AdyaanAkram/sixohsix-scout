@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from auth import (ADMIN_ROLES, REVIEW_ROLES, STAFF_ROLES,
+from auth import (ADMIN_ROLES, COACH_ROLES, REVIEW_ROLES, STAFF_ROLES,
                   active_assignment_filter, get_current_user, require_roles)
 from db import clean, db, log_audit, new_id, now_iso
 from positions import (AGE_BANDS, POSITION_TAXONOMY, normalize_position,
