@@ -31,6 +31,7 @@ TEMPLATES = {
             "released by {org}.\n"
             "Sign in to read it:\n\n"
             "{link}\n\n"
+            "{profile_note}\n\n"
             "\u2014 60'6\" Athletics\n"
         ),
     },

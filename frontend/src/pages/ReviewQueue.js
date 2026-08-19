@@ -317,6 +317,8 @@ const PublishAllDialog = ({
   confirmText,
   onConfirmTextChange,
   onlyWithEmail,
+  includeProfileNote,
+  onIncludeProfileNoteChange,
   onOnlyWithEmailChange,
   publishing,
   onConfirm,
@@ -361,6 +363,21 @@ const PublishAllDialog = ({
             {noEmail > 0 && <span className="text-muted-foreground"> (hold back the other {noEmail})</span>}
           </span>
         </label>
+        <label className="flex items-start gap-2 rounded-xl border border-border bg-secondary/40 px-3 py-2 text-sm text-foreground">
+          <Checkbox
+            checked={includeProfileNote}
+            onCheckedChange={(v) => onIncludeProfileNoteChange(v === true)}
+            disabled={publishing}
+            className="mt-0.5"
+            data-testid="assessments-include-profile-note"
+          />
+          <span>
+            Add a note asking families to finish their athlete&apos;s profile
+            <span className="block text-xs text-muted-foreground">
+              One-off for this send — a photo, height and weight help coaches. Future assessment emails stay clean.
+            </span>
+          </span>
+        </label>
         <div className="space-y-1.5">
           <p className="text-xs font-semibold text-foreground">Type PUBLISH to confirm</p>
           <Input
@@ -399,6 +416,8 @@ const AssessmentsPublishCard = ({ onPublished }) => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [onlyWithEmail, setOnlyWithEmail] = useState(false);
+  // Defaults on: the first big release is exactly when the ask lands best.
+  const [includeProfileNote, setIncludeProfileNote] = useState(true);
   const [publishing, setPublishing] = useState(false);
 
   const loadReadiness = useCallback(() => {
@@ -418,6 +437,7 @@ const AssessmentsPublishCard = ({ onPublished }) => {
       const r = await api.post("/assessments/publish-all", {
         confirm: "PUBLISH",
         only_with_email: onlyWithEmail,
+        include_profile_note: includeProfileNote,
         event_id: null,
       });
       const published = r.data?.published ?? 0;
@@ -538,6 +558,8 @@ const AssessmentsPublishCard = ({ onPublished }) => {
           confirmText={confirmText}
           onConfirmTextChange={setConfirmText}
           onlyWithEmail={onlyWithEmail}
+          includeProfileNote={includeProfileNote}
+          onIncludeProfileNoteChange={setIncludeProfileNote}
           onOnlyWithEmailChange={setOnlyWithEmail}
           publishing={publishing}
           onConfirm={publishAll}

@@ -450,8 +450,20 @@ def _family_emails(athlete: dict) -> list[str]:
     return out
 
 
-async def _send_assessment_email(athlete: dict, event_name: str, org_name: str) -> int:
-    """Best-effort family email. Returns how many addresses were attempted."""
+PROFILE_NOTE = (
+    "While you are signed in, please take a minute to finish their profile — a photo, "
+    "height and weight help coaches see the full picture at the next camp."
+)
+
+
+async def _send_assessment_email(athlete: dict, event_name: str, org_name: str,
+                                 profile_note: str = "") -> int:
+    """Best-effort family email. Returns how many addresses were attempted.
+
+    `profile_note` is opt-in per send so a one-off ask (e.g. "finish your
+    profile" alongside the first big release) never becomes permanent
+    boilerplate on every future assessment email.
+    """
     link = f"{settings.app_public_url}/my-id"
     sent = 0
     for to in _family_emails(athlete):
@@ -460,6 +472,7 @@ async def _send_assessment_email(athlete: dict, event_name: str, org_name: str) 
             "athlete_name": f"{athlete.get('first_name', '')} {athlete.get('last_name', '')}".strip(),
             "org": org_name,
             "event": event_name, "link": link,
+            "profile_note": profile_note,
         })
         sent += 1
     return sent
@@ -510,6 +523,7 @@ class PublishAllBody(BaseModel):
     event_id: str | None = None
     confirm: str
     only_with_email: bool = False
+    include_profile_note: bool = False
 
 
 @router.post("/assessments/publish-all")
@@ -558,7 +572,9 @@ async def publish_all_assessments(body: PublishAllBody,
             f"Your development assessment from {event_name} has been released.",
             {"assessment_id": d["id"]})
         if addresses:
-            await _send_assessment_email(athlete, event_name, org_name)
+            await _send_assessment_email(
+                athlete, event_name, org_name,
+                PROFILE_NOTE if body.include_profile_note else "")
             emailed += 1
     await log_audit(org, user, "assessments_bulk_published", "organization", org,
                     {"published": published, "emailed": emailed,
@@ -598,7 +614,7 @@ async def publish_assessment(assessment_id: str, user=Depends(require_roles(*ADM
                     "name": athlete.get("guardian_name") or athlete.get("first_name") or "there",
                     "athlete_name": f"{athlete.get('first_name', '')} {athlete.get('last_name', '')}".strip(),
                     "org": user.get("organization_name") or "60'6\" Athletics",
-                    "event": event_name, "link": link,
+                    "event": event_name, "link": link, "profile_note": "",
                 })
     await log_audit(org, user, "assessment_published", "assessment", assessment_id,
                     {"athlete_id": a["athlete_id"], "event_id": a["event_id"]})
