@@ -197,13 +197,16 @@ const ProspectCard = ({ athlete, score, payload, wl, watched, onToggleWatch }) =
         {chips.length > 0 ? (
           <div className={cn("grid gap-2", chips.length === 1 ? "grid-cols-1" : chips.length === 2 ? "grid-cols-2" : "grid-cols-3")}>
             {chips.map((m) => (
-              <div key={m.metric_key} className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground truncate" title={m.label}>
+              <div key={m.metric_key} className="min-w-0 rounded-lg bg-secondary/60 px-2.5 py-2">
+                <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground truncate" title={m.label}>
                   {m.label}
                 </p>
-                <p className="flex items-center gap-1 font-mono-num text-sm font-bold text-foreground">
-                  {m.value != null ? `${m.value}${m.unit ? ` ${m.unit}` : ""}` : "–"}
-                  <VerificationBadge source={m.source} compact />
+                <p className="flex items-baseline gap-1 whitespace-nowrap">
+                  <span className="truncate font-mono-num text-base font-bold leading-tight text-foreground">
+                    {m.value != null ? m.value : "–"}
+                  </span>
+                  {m.unit && <span className="shrink-0 text-[10px] text-muted-foreground">{m.unit}</span>}
+                  <VerificationBadge source={m.source} iconOnly className="ml-auto self-center" />
                 </p>
               </div>
             ))}

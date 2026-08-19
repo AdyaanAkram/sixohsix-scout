@@ -121,15 +121,31 @@ export const isVerifiedSource = (source) => Boolean(VERIFICATION_SOURCES[source]
 export const verificationLabel = (source) =>
   (VERIFICATION_SOURCES[source] || UNKNOWN_VERIFICATION).label;
 
-export const VerificationBadge = ({ source, compact, className, testId }) => {
+export const VerificationBadge = ({ source, compact, iconOnly, className, testId }) => {
   const cfg = VERIFICATION_SOURCES[source] || UNKNOWN_VERIFICATION;
   const { Icon } = cfg;
+  const title = cfg.verified ? `${cfg.label} measurement` : `${cfg.label} — not independently verified`;
+  if (iconOnly) {
+    // Tight layouts (metric mini-grids): just the mark, full meaning on hover.
+    return (
+      <span
+        data-testid={testId || "verification-badge"}
+        data-source={VERIFICATION_SOURCES[source] ? source : "unknown"}
+        data-verified={cfg.verified ? "true" : "false"}
+        title={title}
+        aria-label={title}
+        className={cn("inline-flex shrink-0", cfg.verified ? "text-success" : "text-muted-foreground", className)}
+      >
+        <Icon className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
   return (
     <span
       data-testid={testId || "verification-badge"}
       data-source={VERIFICATION_SOURCES[source] ? source : "unknown"}
       data-verified={cfg.verified ? "true" : "false"}
-      title={cfg.verified ? `${cfg.label} measurement` : `${cfg.label} — not independently verified`}
+      title={title}
       className={cn(
         "inline-flex items-center gap-1 whitespace-nowrap rounded-full border font-semibold uppercase tracking-wide",
         compact ? "px-1.5 py-0 text-[10px]" : "px-2.5 py-0.5 text-xs",

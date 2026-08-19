@@ -341,9 +341,9 @@ export default function PlayerCompare() {
                           return (
                             <td key={c.id} className={numCell(i, winners)}>
                               {m?.value != null ? (
-                                <span className="inline-flex items-center gap-1.5">
+                                <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
                                   {m.value}{m.unit ? ` ${m.unit}` : ""}
-                                  <VerificationBadge source={m.source} compact />
+                                  <VerificationBadge source={m.source} iconOnly />
                                 </span>
                               ) : (
                                 <span className="font-sans text-xs text-muted-foreground">–</span>
