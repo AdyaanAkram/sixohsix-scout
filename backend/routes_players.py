@@ -1778,13 +1778,19 @@ async def _export_rows(org: str) -> tuple[list[str], list[list]]:
         missing = _missing_profile_fields(a)
         # Anything a human should look at, in the spirit of the master sheet's
         # follow-up column.
+        # Per-athlete problems a coach can actually act on. Deliberately NOT
+        # "missing a photo/height" (the family reminder email covers those) and
+        # NOT "evaluated but unscored" — that is currently true org-wide, so it
+        # would flag everyone and make the follow-up sheet meaningless.
         flags = []
         if a.get("date_of_birth") and (a.get("age") in (0, None)):
             flags.append("DOB looks wrong")
         if not _family_addresses(a):
             flags.append("No email on file")
-        if a_evals and not scored:
-            flags.append("Evaluated, not scored")
+        if not a.get("graduation_year"):
+            flags.append("No grad year")
+        if not a.get("primary_position"):
+            flags.append("No position")
 
         row += [
             len(a_evals) or "",
@@ -1854,7 +1860,7 @@ async def export_athletes_xlsx(user=Depends(require_roles(*ADMIN_ROLES, "head_sc
     ws2.append(keep)
     idx = [headers.index(k) for k in keep]
     for r in rows:
-        if r[flag_i] or r[missing_i]:
+        if r[flag_i]:                      # only genuine, actionable problems
             ws2.append([r[i] for i in idx])
     for cell in ws2[1]:
         cell.fill = head_fill
