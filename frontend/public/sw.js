@@ -17,7 +17,7 @@
  * index.html, which references the new content-hashed /static/ bundles.
  */
 
-const SW_VERSION = "2026-08-04.1";
+const SW_VERSION = "2026-08-19.1";
 const SHELL_CACHE = `pbg-shell-${SW_VERSION}`;
 const ASSET_CACHE = `pbg-assets-${SW_VERSION}`;
 
@@ -90,14 +90,28 @@ self.addEventListener("fetch", (event) => {
   }
 
   // ---- Content-hashed build output: cache-first (filename changes per deploy) ----
+  //
+  // POISON GUARD. The host serves the SPA fallback for unknown paths as
+  // "200 text/html" (see public/_redirects). During the seconds between a new
+  // index.html going live and its /static/ bundles propagating, a request for
+  // main.<hash>.js can therefore return HTML *with a 200 status*. Caching that
+  // cache-first pinned HTML in place of the bundle forever: the browser then
+  // refuses to execute it ("MIME type text/html is not executable") and the app
+  // renders a permanently blank page that only clearing site data fixes.
+  // So: never store, and never serve, an HTML response for a /static/ asset.
   if (url.pathname.startsWith("/static/")) {
+    const isHtml = (res) => (res.headers.get("content-type") || "").includes("text/html");
     event.respondWith((async () => {
       try {
         const cache = await caches.open(ASSET_CACHE);
         const hit = await cache.match(req);
-        if (hit) return hit;
+        // A previously poisoned entry is treated as a miss and replaced.
+        if (hit && !isHtml(hit)) return hit;
+        if (hit) { try { await cache.delete(req); } catch (e) { /* ignore */ } }
         const res = await fetch(req);
-        if (res && res.status === 200) { try { await cache.put(req, res.clone()); } catch (e) { /* ignore */ } }
+        if (res && res.status === 200 && !isHtml(res)) {
+          try { await cache.put(req, res.clone()); } catch (e) { /* ignore */ }
+        }
         return res;
       } catch (e) {
         return Response.error();
