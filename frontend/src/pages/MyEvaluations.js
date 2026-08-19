@@ -21,7 +21,7 @@ export default function MyEvaluations() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="font-display text-4xl text-foreground">My Evaluations</h1>
+        <h1 className="font-display text-3xl sm:text-4xl text-foreground">My Evaluations</h1>
         <p className="text-sm text-muted-foreground">{evals.filter((e) => e.status === "draft").length} drafts · {evals.filter((e) => e.status !== "draft").length} submitted</p>
       </div>
       {evals.length === 0 ? (

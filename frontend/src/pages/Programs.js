@@ -92,7 +92,7 @@ export default function Programs() {
     <div className="space-y-4" data-testid="programs-page">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-display text-4xl text-foreground">Programs</h1>
+          <h1 className="font-display text-3xl sm:text-4xl text-foreground">Programs</h1>
           <p className="text-sm text-muted-foreground">
             Long-term training for this organization — seasons, blocks, and ongoing development (not one-day camps).
           </p>

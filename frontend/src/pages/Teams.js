@@ -76,7 +76,7 @@ export default function Teams() {
     <div className="space-y-4" data-testid="teams-page">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-display text-4xl text-foreground">Teams</h1>
+          <h1 className="font-display text-3xl sm:text-4xl text-foreground">Teams</h1>
           <p className="text-sm text-muted-foreground">
             {loading
               ? "Loading…"

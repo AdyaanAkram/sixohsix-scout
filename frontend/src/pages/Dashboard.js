@@ -287,7 +287,7 @@ export default function Dashboard() {
     return (
       <div className="space-y-5" data-testid="evaluator-dashboard">
         <div>
-          <h1 className="font-display text-4xl text-foreground">My Evaluations</h1>
+          <h1 className="font-display text-3xl sm:text-4xl text-foreground">My Evaluations</h1>
           <p className="text-sm text-muted-foreground">
             Welcome back, {user?.full_name?.split(" ")[0]}.{" "}
             {assignments.length > 0 && (
@@ -355,7 +355,7 @@ export default function Dashboard() {
     return (
       <div className="space-y-5" data-testid="head-scout-dashboard">
         <div>
-          <h1 className="font-display text-4xl text-foreground">Review Desk</h1>
+          <h1 className="font-display text-3xl sm:text-4xl text-foreground">Review Desk</h1>
           <p className="text-sm text-muted-foreground">Approve evaluations and track who&apos;s developing.</p>
         </div>
 
@@ -483,7 +483,7 @@ export default function Dashboard() {
     return (
       <div className="space-y-5" data-testid="coach-dashboard">
         <div>
-          <h1 className="font-display text-4xl text-foreground">My Athletes</h1>
+          <h1 className="font-display text-3xl sm:text-4xl text-foreground">My Athletes</h1>
           <p className="text-sm text-muted-foreground">Welcome back, {user?.full_name?.split(" ")[0]}. Here&apos;s today&apos;s work.</p>
         </div>
 

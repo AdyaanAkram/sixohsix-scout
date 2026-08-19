@@ -71,7 +71,7 @@ export default function Development() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="font-display text-4xl text-foreground">Development</h1>
+        <h1 className="font-display text-3xl sm:text-4xl text-foreground">Development</h1>
         <p className="text-sm text-muted-foreground">Active goals and recent coach assessments across the program.</p>
       </div>
 

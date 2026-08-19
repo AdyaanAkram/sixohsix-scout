@@ -133,7 +133,7 @@ export default function Drills() {
     <div className="space-y-4" data-testid="drills-page">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-display text-4xl text-foreground">Drill library</h1>
+          <h1 className="font-display text-3xl sm:text-4xl text-foreground">Drill library</h1>
           <p className="text-sm text-muted-foreground">Position-tagged drills used in development plans.</p>
         </div>
         <div className="flex gap-2">

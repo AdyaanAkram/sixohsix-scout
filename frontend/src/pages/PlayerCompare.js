@@ -307,7 +307,7 @@ export default function PlayerCompare() {
           <p className="text-[10px] uppercase tracking-[0.16em] text-brand font-semibold flex items-center gap-1">
             <GitCompare className="h-3 w-3" /> Scout Mode
           </p>
-          <h1 className="font-display text-4xl text-foreground">Compare Players</h1>
+          <h1 className="font-display text-3xl sm:text-4xl text-foreground">Compare Players</h1>
           <p className="text-sm text-muted-foreground">Select up to four athletes for a visual side-by-side.</p>
         </div>
       </div>

@@ -243,7 +243,7 @@ export default function Templates() {
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="font-display text-4xl text-foreground">Evaluation Templates</h1>
+          <h1 className="font-display text-3xl sm:text-4xl text-foreground">Evaluation Templates</h1>
           <p className="text-sm text-muted-foreground">Forms resolve by the station\u2019s kind + the athlete\u2019s age band first, then position/age, then the org default.</p>
         </div>
         {canEdit && (

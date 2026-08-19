@@ -57,7 +57,7 @@ export default function ImportPlayers() {
         <button onClick={() => navigate("/players")} className="inline-flex items-center gap-1 text-sm text-info hover:underline mb-2" data-testid="import-back-button">
           <ArrowLeft className="h-3.5 w-3.5" /> Back to Players
         </button>
-        <h1 className="font-display text-4xl text-foreground">Import Athletes</h1>
+        <h1 className="font-display text-3xl sm:text-4xl text-foreground">Import Athletes</h1>
         <p className="text-sm text-muted-foreground">Upload a roster as CSV, Excel or Word. Invalid rows are never imported silently.</p>
       </div>
 

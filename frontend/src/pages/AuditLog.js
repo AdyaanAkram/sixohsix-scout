@@ -34,7 +34,7 @@ export default function AuditLog() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="font-display text-4xl text-foreground">Audit Log</h1>
+        <h1 className="font-display text-3xl sm:text-4xl text-foreground">Audit Log</h1>
         <p className="text-sm text-muted-foreground">Record of sensitive actions across the organization.</p>
       </div>
       {logs.length === 0 ? (

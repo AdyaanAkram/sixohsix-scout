@@ -217,7 +217,7 @@ export default function TeamDetail() {
           <span className="select-none font-display text-2xl text-brand/70">{teamInitials(summary.team || displayName)}</span>
         </div>
         <div className="min-w-0">
-          <h1 className="font-display text-4xl text-foreground">{summary.team || displayName}</h1>
+          <h1 className="font-display text-3xl sm:text-4xl text-foreground">{summary.team || displayName}</h1>
           <p className="text-sm text-muted-foreground">
             Team Overview · {total} athlete{total === 1 ? "" : "s"} on this team
           </p>

@@ -139,7 +139,7 @@ export default function EventsList() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-display text-4xl text-foreground">Events</h1>
+          <h1 className="font-display text-3xl sm:text-4xl text-foreground">Events</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Short-term camps, clinics, and evaluation days for this organization.
           </p>
@@ -156,9 +156,9 @@ export default function EventsList() {
           {events.map((ev) => (
             <Link key={ev.id} to={`/events/${ev.id}`} data-testid={`event-card-${ev.id}`}>
               <Card className="rounded-2xl border-border hover:border-brand/50 transition-colors h-full">
-                <CardContent className="pt-5 pb-5">
+                <CardContent className="pt-4 pb-4 sm:pt-5 sm:pb-5">
                   <div className="flex items-start justify-between gap-2">
-                    <p className="font-display text-2xl text-foreground leading-tight">{ev.name}</p>
+                    <p className="font-display text-lg sm:text-2xl text-foreground leading-tight [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden">{ev.name}</p>
                     <StatusBadge status={ev.status} className={LIFECYCLE_BADGE_CLS[ev.status]} />
                   </div>
                   <div className="mt-2 space-y-1 text-sm text-muted-foreground">

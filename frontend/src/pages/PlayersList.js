@@ -177,10 +177,10 @@ const RegistrySearchDialog = ({ onAdded }) => {
   return (
     <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setQ(""); setResults([]); } }}>
       <DialogTrigger asChild>
-        <Button variant="outline" className="rounded-xl h-10 sm:h-11" data-testid="registry-search-button">
+        <Button variant="outline" className="rounded-xl h-10 w-10 p-0 sm:h-11 sm:w-auto sm:px-4" data-testid="registry-search-button">
           <UserSearch className="h-4 w-4 sm:mr-1" />
           <span className="hidden sm:inline">Find registered athletes</span>
-          <span className="sm:hidden ml-1">Registry</span>
+          <span className="sr-only sm:hidden">Find registered athletes</span>
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-lg max-h-[85vh] flex flex-col rounded-2xl" data-testid="registry-search-dialog">
@@ -426,12 +426,12 @@ const SnapshotStat = ({ icon: Icon, tint, label, value, sub, onClick, active, te
       onClick={onClick}
       data-testid={testId}
       className={cn(
-        "flex items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
+        "flex items-center gap-2 rounded-xl px-2 py-1.5 text-left transition-colors sm:gap-3 sm:px-3 sm:py-2",
         onClick && "cursor-pointer hover:bg-secondary",
         active && "bg-secondary ring-1 ring-brand/40"
       )}
     >
-      <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", tint)}>
+      <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg sm:h-9 sm:w-9", tint)}>
         <Icon className="h-4 w-4" />
       </span>
       <span className="min-w-0">
@@ -652,19 +652,19 @@ export default function PlayersList() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-display text-4xl text-foreground">Athletes</h1>
+          <h1 className="font-display text-3xl sm:text-4xl text-foreground">Athletes</h1>
           <p className="text-sm text-muted-foreground">{visible.length} player{visible.length === 1 ? "" : "s"} in the directory</p>
         </div>
         {isAdmin && (
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" className="rounded-xl h-10 sm:h-11" onClick={() => navigate("/players/import")} data-testid="import-players-button">
+            <Button variant="outline" className="rounded-xl h-10 w-10 p-0 sm:h-11 sm:w-auto sm:px-4" onClick={() => navigate("/players/import")} data-testid="import-players-button">
               <Upload className="h-4 w-4 sm:mr-1" />
               <span className="hidden sm:inline">Import Roster (CSV · Excel · Word)</span>
-              <span className="sm:hidden ml-1">Import</span>
+              <span className="sr-only sm:hidden">Import roster</span>
             </Button>
             <RegistrySearchDialog onAdded={() => { load(); loadPending(); }} />
-            <Button variant="outline" className="rounded-xl h-10 sm:h-11" onClick={() => window.open(signedUrl("/athletes-export/csv"), "_blank")} data-testid="export-players-button">
-              <FileDown className="h-4 w-4 sm:mr-1" /> <span className="ml-1 sm:ml-0">Export</span>
+            <Button variant="outline" className="rounded-xl h-10 w-10 p-0 sm:h-11 sm:w-auto sm:px-4" onClick={() => window.open(signedUrl("/athletes-export/csv"), "_blank")} data-testid="export-players-button">
+              <FileDown className="h-4 w-4 sm:mr-1" /><span className="hidden sm:inline">Export</span><span className="sr-only sm:hidden">Export roster</span>
             </Button>
             <AddPlayerDialog onCreated={load} />
           </div>
@@ -730,9 +730,9 @@ export default function PlayersList() {
         </div>
       )}
 
-      <div className="rounded-2xl border border-border bg-card px-4 py-4 sm:px-6" data-testid="players-snapshot">
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
-          <div className="min-w-[120px]">
+      <div className="rounded-2xl border border-border bg-card px-3 py-3 sm:px-6 sm:py-4" data-testid="players-snapshot">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:gap-x-6 sm:gap-y-4">
+          <div className="min-w-[104px]">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Class of</p>
             <Select value={gradYear} onValueChange={setGradYear}>
               <SelectTrigger
@@ -740,7 +740,7 @@ export default function PlayersList() {
                 data-testid="players-gradyear-select"
               >
                 <SelectValue placeholder="Grad Year">
-                  <span className={cn("font-display text-4xl leading-none", gradYear === "all" ? "text-foreground" : "text-primary")}>
+                  <span className={cn("font-display text-3xl sm:text-4xl leading-none", gradYear === "all" ? "text-foreground" : "text-primary")}>
                     {gradYear === "all" ? "All" : gradYear}
                   </span>
                 </SelectValue>
@@ -795,8 +795,8 @@ export default function PlayersList() {
                 testId="players-snapshot-follow-up"
               />
               <div className="ml-auto">
-                <Button variant="outline" className="rounded-xl h-10" onClick={() => navigate("/reports")} data-testid="players-view-class-report">
-                  <BarChart3 className="h-4 w-4 mr-1.5" /> View Class Report
+                <Button variant="outline" className="rounded-xl h-9 px-3 text-xs sm:h-10 sm:px-4 sm:text-sm" onClick={() => navigate("/reports")} data-testid="players-view-class-report">
+                  <BarChart3 className="h-4 w-4 mr-1.5" /> <span className="hidden sm:inline">View Class Report</span><span className="sm:hidden">Class report</span>
                 </Button>
               </div>
             </>

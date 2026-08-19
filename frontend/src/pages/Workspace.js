@@ -169,7 +169,7 @@ export default function Workspace() {
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
             Welcome{firstName ? ` back, ${firstName}` : " to 60'6\" ID"}
           </p>
-          <h1 className="mt-2 font-display text-4xl text-foreground sm:text-5xl">
+          <h1 className="mt-2 font-display text-3xl text-foreground sm:text-5xl">
             How would you like to continue?
           </h1>
           <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">

@@ -482,7 +482,7 @@ const ScoutHeader = () => (
   <div className="flex flex-wrap items-end justify-between gap-3">
     <div>
       <p className="text-[10px] uppercase tracking-[0.16em] text-brand font-semibold">60&apos;6&quot; Scout Mode</p>
-      <h1 className="font-display text-4xl text-foreground mt-1">Prospect Board</h1>
+      <h1 className="font-display text-3xl sm:text-4xl text-foreground mt-1">Prospect Board</h1>
       <p className="text-sm text-muted-foreground mt-1 max-w-xl">
         Every active athlete with verified metrics, evaluation history and trend — filter by class and position.
       </p>

@@ -21,7 +21,7 @@ export default function NotFound() {
           <Compass className="h-7 w-7 text-brand" />
         </div>
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Page not found</p>
-        <h1 className="mt-2 font-display text-4xl text-foreground">This page doesn&apos;t exist.</h1>
+        <h1 className="mt-2 font-display text-3xl sm:text-4xl text-foreground">This page doesn&apos;t exist.</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           The link may be out of date, or the address has a typo. Nothing is wrong with your account.
         </p>

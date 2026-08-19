@@ -412,7 +412,7 @@ export default function ReviewQueue() {
       {/* A — Header + queue filters */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="font-display text-4xl text-foreground">Evaluations</h1>
+          <h1 className="font-display text-3xl sm:text-4xl text-foreground">Evaluations</h1>
           <p className="text-sm text-muted-foreground">Discover. Compare. Elevate.</p>
         </div>
         <div className="flex flex-col items-start sm:items-end gap-1">
