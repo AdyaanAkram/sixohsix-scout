@@ -11,7 +11,7 @@ import { StatusBadge } from "@/components/common/StatusBadge";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { AlertTriangle, BarChart3, Calendar, CheckCircle2, ChevronDown, ChevronUp, ClipboardList, Clock, Undo2, Users } from "lucide-react";
+import { AlertTriangle, BarChart3, Calendar, CheckCircle2, ChevronDown, ChevronUp, ClipboardList, Clock, Undo2, Unlock, Users, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /* ---------------------------------- helpers ---------------------------------- */
@@ -37,6 +37,14 @@ const DONUT_COLORS = [
   "hsl(var(--brand-secondary))",
 ];
 const DONUT_OTHER_COLOR = "hsl(var(--muted-foreground))";
+
+// Review actions all POST { note } to /evaluations/{id}/{action}; only the
+// confirmation copy differs, so keep the wording in one place.
+const ACT_TOASTS = {
+  approve: "Evaluation approved.",
+  return: "Returned to evaluator for revision.",
+  unlock: "Approval withdrawn — the evaluation is a draft again.",
+};
 
 /* ------------------------------ existing detail ------------------------------ */
 
@@ -303,8 +311,12 @@ export default function ReviewQueue() {
   const [statusFilter, setStatusFilter] = useState("submitted");
   const [expanded, setExpanded] = useState({});
   const [templates, setTemplates] = useState({});
-  const [returnFor, setReturnFor] = useState(null);
-  const [returnNote, setReturnNote] = useState("");
+  // One reason dialog serves both review actions: "return" and "unlock".
+  const [reviewFor, setReviewFor] = useState(null);
+  const [reviewAction, setReviewAction] = useState("return");
+  const [reviewNote, setReviewNote] = useState("");
+  const [pendingAwards, setPendingAwards] = useState([]);
+  const [awardAthletes, setAwardAthletes] = useState({});
   const [disagreements, setDisagreements] = useState(null);
   const [insights, setInsights] = useState(null);
   const [insightsLoading, setInsightsLoading] = useState(true);
@@ -330,6 +342,25 @@ export default function ReviewQueue() {
       .catch(() => setInsights(null))
       .finally(() => setInsightsLoading(false));
   }, []);
+  const loadPendingAwards = useCallback(() => {
+    // Review-only endpoint — a 403 for other roles simply hides the section.
+    api.get("/awards/pending")
+      .then(async (r) => {
+        const rows = r.data || [];
+        setPendingAwards(rows);
+        if (rows.length === 0) return;
+        // /awards/pending returns bare award docs with no athlete embedded, so
+        // pull the directory once to put a face and a name on each row.
+        try {
+          const dir = await api.get("/athletes", { params: { limit: 500 } });
+          const map = {};
+          (dir.data || []).forEach((a) => { map[a.id] = a; });
+          setAwardAthletes(map);
+        } catch { /* names are a nicety — rows still render and still act */ }
+      })
+      .catch(() => setPendingAwards([]));
+  }, []);
+  useEffect(() => { loadPendingAwards(); }, [loadPendingAwards]);
   useEffect(() => {
     if (eventFilter !== "all") {
       api.get(`/reports/disagreement/${eventFilter}`).then((r) => setDisagreements(r.data)).catch(() => setDisagreements(null));
@@ -339,10 +370,26 @@ export default function ReviewQueue() {
   const act = async (evId, action, note) => {
     try {
       await api.post(`/evaluations/${evId}/${action}`, { note: note || null });
-      toast.success(action === "approve" ? "Evaluation approved." : "Returned to evaluator for revision.");
-      setReturnFor(null);
-      setReturnNote("");
+      toast.success(ACT_TOASTS[action] || "Evaluation updated.");
+      setReviewFor(null);
+      setReviewNote("");
       load();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+
+  const openReview = (ev, action) => {
+    // Reasons are per-action — never carry a return note into an unlock, or back.
+    if (action !== reviewAction) setReviewNote("");
+    setReviewAction(action);
+    setReviewFor(ev);
+  };
+
+  const decideAward = async (awardId, approve) => {
+    try {
+      if (approve) await api.post(`/awards/${awardId}/approve`);
+      else await api.post(`/awards/${awardId}/reject`, { reason: "Not verified" });
+      toast.success(approve ? "Award approved." : "Award rejected.");
+      loadPendingAwards();
     } catch (e) { toast.error(errMsg(e)); }
   };
 
@@ -436,6 +483,53 @@ export default function ReviewQueue() {
         </div>
       )}
 
+      {/* D2 — Pending awards. Nothing renders when the queue is empty (or when
+          the role can't review awards) — this page is already dense. */}
+      {pendingAwards.length > 0 && (
+        <Card className="rounded-2xl border-border bg-card" data-testid="evals-pending-awards">
+          <CardContent className="pt-4 pb-4">
+            <div className="flex items-center justify-between gap-2">
+              <PanelLabel>Pending awards</PanelLabel>
+              <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[11px] font-mono-num font-bold text-warning">
+                {pendingAwards.length}
+              </span>
+            </div>
+            <div className="mt-2 space-y-1">
+              {pendingAwards.map((aw) => {
+                const a = awardAthletes[aw.athlete_id];
+                const submitted = shortDate(aw.created_at);
+                const sub = [aw.category, aw.submitted_by_name && `by ${aw.submitted_by_name}`].filter(Boolean).join(" · ");
+                return (
+                  <div key={aw.id} className="flex flex-wrap items-center gap-3 rounded-lg px-2 py-2">
+                    <PlayerAvatar firstName={a?.first_name} lastName={a?.last_name} photoUrl={a?.photo_url} size="sm" />
+                    <div className="flex-1 min-w-[160px]">
+                      <Link to={`/players/${aw.athlete_id}`} className="text-sm font-semibold text-foreground hover:underline">
+                        {a ? `${a.first_name} ${a.last_name}` : "Athlete"}
+                      </Link>
+                      <p className="text-sm text-foreground truncate">{aw.title}</p>
+                      {sub && <p className="text-xs text-muted-foreground capitalize truncate">{sub}</p>}
+                    </div>
+                    {submitted !== "—" && (
+                      <span className="flex items-center gap-1 text-[11px] text-muted-foreground shrink-0">
+                        <Calendar className="h-3 w-3" /> {submitted}
+                      </span>
+                    )}
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button size="sm" variant="outline" className="rounded-lg h-9" onClick={() => decideAward(aw.id, false)} data-testid={`award-reject-${aw.id}`}>
+                        <XCircle className="h-3.5 w-3.5 mr-1" /> Reject
+                      </Button>
+                      <Button size="sm" className="rounded-lg h-9 bg-success hover:bg-[hsl(var(--success))]" onClick={() => decideAward(aw.id, true)} data-testid={`award-approve-${aw.id}`}>
+                        <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Approve
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* E — Review queue */}
       <div id="review-queue" className="space-y-3 scroll-mt-4">
         <div className="flex items-center gap-2.5">
@@ -501,13 +595,18 @@ export default function ReviewQueue() {
                     <div className="flex-1" />
                     {ev.status === "submitted" && (
                       <>
-                        <Button size="sm" variant="outline" className="rounded-lg h-9" onClick={() => setReturnFor(ev)} data-testid="review-return-button">
+                        <Button size="sm" variant="outline" className="rounded-lg h-9" onClick={() => openReview(ev, "return")} data-testid="review-return-button">
                           <Undo2 className="h-3.5 w-3.5 mr-1" /> Return
                         </Button>
                         <Button size="sm" className="rounded-lg h-9 bg-success hover:bg-[hsl(var(--success))]" onClick={() => act(ev.id, "approve")} data-testid="review-approve-button">
                           <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Approve
                         </Button>
                       </>
+                    )}
+                    {ev.status === "approved" && (
+                      <Button size="sm" variant="outline" className="rounded-lg h-9" onClick={() => openReview(ev, "unlock")} data-testid="review-unlock-button">
+                        <Unlock className="h-3.5 w-3.5 mr-1" /> Unlock
+                      </Button>
                     )}
                   </div>
                   {expanded[ev.id] && <EvalDetail ev={{ ...ev, template_metrics: Object.values(templates).filter((m) => (ev.computed?.metric_results || {})[m.id]) }} />}
@@ -518,13 +617,37 @@ export default function ReviewQueue() {
         )}
       </div>
 
-      <Dialog open={!!returnFor} onOpenChange={(v) => !v && setReturnFor(null)}>
+      <Dialog open={!!reviewFor} onOpenChange={(v) => !v && setReviewFor(null)}>
         <DialogContent className="rounded-2xl max-w-sm">
-          <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Return for Revision</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">The evaluation will be unlocked and sent back to {returnFor?.evaluator_name}. Add a note explaining what needs revision.</p>
-          <Textarea value={returnNote} onChange={(e) => setReturnNote(e.target.value)} rows={3} className="rounded-xl" placeholder="Reason for return…" data-testid="review-return-reason-textarea" />
+          <DialogHeader>
+            <DialogTitle className="font-display text-2xl text-foreground">
+              {reviewAction === "unlock" ? "Unlock evaluation" : "Return for Revision"}
+            </DialogTitle>
+          </DialogHeader>
+          {reviewAction === "unlock" ? (
+            <p className="text-sm text-muted-foreground">
+              This evaluation goes back to {reviewFor?.evaluator_name} as a draft and its approval is withdrawn. Add a reason — it is recorded in the audit log.
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">The evaluation will be unlocked and sent back to {reviewFor?.evaluator_name}. Add a note explaining what needs revision.</p>
+          )}
+          <Textarea
+            value={reviewNote}
+            onChange={(e) => setReviewNote(e.target.value)}
+            rows={3}
+            className="rounded-xl"
+            placeholder={reviewAction === "unlock" ? "Reason for unlocking…" : "Reason for return…"}
+            data-testid="review-return-reason-textarea"
+          />
           <DialogFooter>
-            <Button className="w-full rounded-xl bg-primary h-11" onClick={() => act(returnFor.id, "return", returnNote)} disabled={!returnNote.trim()} data-testid="review-return-confirm">Return Evaluation</Button>
+            <Button
+              className="w-full rounded-xl bg-primary h-11"
+              onClick={() => act(reviewFor.id, reviewAction, reviewNote)}
+              disabled={!reviewNote.trim()}
+              data-testid={reviewAction === "unlock" ? "review-unlock-confirm" : "review-return-confirm"}
+            >
+              {reviewAction === "unlock" ? "Unlock evaluation" : "Return Evaluation"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
