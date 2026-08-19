@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/context/AuthContext";
+import { LayoutDashboard } from "lucide-react";
 
 /* ————— shared marketing chrome for the public pages (/ and /store) ————— */
 
@@ -25,7 +27,9 @@ const NAV_LINKS = [
 ];
 
 export function PublicNav({ onLanding = false }) {
+  const { user } = useAuth();
   const [scrolled, setScrolled] = useState(false);
+  const appHome = user?.role === "athlete" || user?.role === "parent" ? "/my-id" : "/workspace";
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 12);
@@ -66,22 +70,43 @@ export function PublicNav({ onLanding = false }) {
         </nav>
 
         <div className="flex items-center gap-2">
-          <Button
-            asChild
-            variant="outline"
-            className="rounded-full h-10 px-4 sm:px-5 border-border bg-surface-2/40 text-foreground hover:bg-surface-3 hover:text-foreground"
-          >
-            <Link to={`/signin?next=${encodeURIComponent(window.location.pathname)}`} data-testid="landing-signin-link">Sign in</Link>
-          </Button>
-          <Button
-            asChild
-            className="rounded-full h-10 px-4 sm:px-5 font-bold bg-brand hover:bg-brand-secondary text-primary-foreground"
-          >
-            <Link to="/signup" data-testid="landing-nav-signup">
-              <span className="hidden sm:inline">Get your athlete&apos;s ID</span>
-              <span className="sm:hidden">Get an ID</span>
-            </Link>
-          </Button>
+          {user ? (
+            /* Already signed in — one button back into the app. */
+            <>
+              <span className="hidden sm:inline text-xs text-muted-foreground" data-testid="landing-signedin-name">
+                Signed in as <span className="font-semibold text-foreground">{(user.full_name || user.email || "").split(" ")[0]}</span>
+              </span>
+              <Button
+                asChild
+                className="rounded-full h-10 px-4 sm:px-5 font-bold bg-brand hover:bg-brand-secondary text-primary-foreground"
+              >
+                <Link to={appHome} data-testid="landing-back-to-app">
+                  <LayoutDashboard className="h-4 w-4 mr-1.5" />
+                  <span className="hidden sm:inline">Back to dashboard</span>
+                  <span className="sm:hidden">Dashboard</span>
+                </Link>
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                asChild
+                variant="outline"
+                className="rounded-full h-10 px-4 sm:px-5 border-border bg-surface-2/40 text-foreground hover:bg-surface-3 hover:text-foreground"
+              >
+                <Link to={`/signin?next=${encodeURIComponent(window.location.pathname)}`} data-testid="landing-signin-link">Sign in</Link>
+              </Button>
+              <Button
+                asChild
+                className="rounded-full h-10 px-4 sm:px-5 font-bold bg-brand hover:bg-brand-secondary text-primary-foreground"
+              >
+                <Link to="/signup" data-testid="landing-nav-signup">
+                  <span className="hidden sm:inline">Get your athlete&apos;s ID</span>
+                  <span className="sm:hidden">Get an ID</span>
+                </Link>
+              </Button>
+            </>
+          )}
         </div>
       </div>
     </header>
@@ -89,6 +114,8 @@ export function PublicNav({ onLanding = false }) {
 }
 
 export function PublicFooter() {
+  const { user } = useAuth();
+  const appHome = user?.role === "athlete" || user?.role === "parent" ? "/my-id" : "/workspace";
   return (
     <footer className="border-t border-border bg-surface">
       <div className="max-w-6xl mx-auto px-5 sm:px-8 py-12">
@@ -100,7 +127,11 @@ export function PublicFooter() {
             </p>
           </div>
           <nav className="grid grid-cols-2 gap-x-12 gap-y-2 text-sm" aria-label="Footer">
-            <Link to={`/signin?next=${encodeURIComponent(window.location.pathname)}`} className="text-muted-foreground hover:text-foreground transition-colors">Sign in</Link>
+            {user ? (
+              <Link to={appHome} className="text-muted-foreground hover:text-foreground transition-colors">Back to dashboard</Link>
+            ) : (
+              <Link to={`/signin?next=${encodeURIComponent(window.location.pathname)}`} className="text-muted-foreground hover:text-foreground transition-colors">Sign in</Link>
+            )}
             <Link to="/signup" className="text-muted-foreground hover:text-foreground transition-colors">Register</Link>
             <Link to="/store" className="text-muted-foreground hover:text-foreground transition-colors">Store</Link>
             <a href="/guide" className="text-muted-foreground hover:text-foreground transition-colors">Guide</a>
