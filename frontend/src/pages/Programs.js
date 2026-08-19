@@ -10,14 +10,43 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/common/EmptyState";
 import { toast } from "sonner";
-import { Plus, CalendarRange } from "lucide-react";
+import { ArrowRight, CalendarRange, ClipboardList, Dumbbell, GraduationCap, Plus, Tent, Users } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const TYPES = [
-  { value: "camp", label: "Camp" },
-  { value: "clinic", label: "Clinic" },
-  { value: "training_block", label: "Training block" },
-  { value: "coaching_clinic", label: "Coaching clinic" },
+  { value: "camp", label: "Camp", icon: Tent, tint: "bg-brand/15 text-brand" },
+  { value: "clinic", label: "Clinic", icon: ClipboardList, tint: "bg-info/15 text-info" },
+  { value: "training_block", label: "Training block", icon: Dumbbell, tint: "bg-success/15 text-success" },
+  { value: "coaching_clinic", label: "Coaching clinic", icon: GraduationCap, tint: "bg-warning/15 text-warning" },
 ];
+
+const STATUS_TINT = {
+  open: "bg-success/15 text-success",
+  active: "bg-success/15 text-success",
+  full: "bg-warning/15 text-warning",
+  closed: "bg-secondary text-muted-foreground",
+  completed: "bg-secondary text-muted-foreground",
+  cancelled: "bg-destructive/15 text-destructive",
+};
+
+const fmtPrice = (cents) => {
+  const dollars = (cents || 0) / 100;
+  return `$${Number.isInteger(dollars) ? dollars : dollars.toFixed(2)}`;
+};
+
+const dateRange = (start, end) => {
+  if (!start && !end) return null;
+  if (start && end) return `${start} – ${end}`;
+  return start || end;
+};
+
+/* One chip of program metadata. Only rendered when the payload actually has
+   the field — nothing here is invented. */
+const Chip = ({ children }) => (
+  <span className="rounded-full bg-secondary px-2 py-0.5 text-[11px] font-semibold text-muted-foreground whitespace-nowrap">
+    {children}
+  </span>
+);
 
 export default function Programs() {
   const [rows, setRows] = useState(null);
@@ -114,26 +143,60 @@ export default function Programs() {
           hint="Create a camp or clinic to enroll athletes across multiple sessions — this is how you show growth over time."
         />
       ) : (
-        <div className="space-y-2">
-          {rows.map((p) => (
-            <Card key={p.id} className="rounded-2xl border-border bg-card">
-              <CardContent className="py-4 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="font-semibold text-foreground">{p.name}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {TYPES.find((t) => t.value === p.type)?.label || p.type}
-                    {p.start_date ? ` · ${p.start_date}` : ""}
-                    {p.end_date ? ` → ${p.end_date}` : ""}
-                    {p.capacity ? ` · cap ${p.capacity}` : ""}
-                    {` · ${p.status}`}
-                  </p>
-                </div>
-                <Button asChild variant="outline" className="rounded-xl h-9">
-                  <Link to={`/programs/${p.id}`} data-testid={`program-open-${p.id}`}>Open</Link>
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
+        <div className="grid gap-3 sm:grid-cols-2">
+          {rows.map((p) => {
+            const type = TYPES.find((t) => t.value === p.type);
+            const Icon = type?.icon || CalendarRange;
+            const range = dateRange(p.start_date, p.end_date);
+            const ages = Array.isArray(p.age_groups) ? p.age_groups.filter(Boolean) : [];
+            return (
+              <Link key={p.id} to={`/programs/${p.id}`} className="block h-full" data-testid={`program-open-${p.id}`}>
+                <Card className="h-full rounded-2xl border-border bg-card transition-all hover:border-brand/50 hover:shadow-lg hover:-translate-y-0.5">
+                  <CardContent className="pt-4 pb-4">
+                    <div className="flex items-start gap-3">
+                      <span className={cn("h-10 w-10 rounded-lg grid place-items-center shrink-0", type?.tint || "bg-secondary text-muted-foreground")}>
+                        <Icon className="h-5 w-5" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-display text-lg leading-tight text-foreground truncate">{p.name}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                          {type?.label || p.type} · {p.status}
+                        </p>
+                      </div>
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-brand shrink-0">
+                        Open <ArrowRight className="h-3.5 w-3.5" />
+                      </span>
+                    </div>
+
+                    {p.description && (
+                      <p className="mt-2.5 text-xs text-muted-foreground line-clamp-2">{p.description}</p>
+                    )}
+
+                    <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                      {p.status && (
+                        <span className={cn(
+                          "rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap",
+                          STATUS_TINT[p.status] || "bg-secondary text-muted-foreground"
+                        )}>
+                          {p.status}
+                        </span>
+                      )}
+                      {range && <Chip><span className="font-mono-num">{range}</span></Chip>}
+                      {p.price_cents ? <Chip><span className="font-mono-num">{fmtPrice(p.price_cents)}</span></Chip> : null}
+                      {p.capacity ? (
+                        <Chip>
+                          <span className="inline-flex items-center gap-1">
+                            <Users className="h-3 w-3" /> <span className="font-mono-num">{p.capacity}</span> cap
+                          </span>
+                        </Chip>
+                      ) : null}
+                      {ages.length > 0 && <Chip>{ages.join(" · ")}</Chip>}
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
+            );
+          })}
         </div>
       )}
     </div>
