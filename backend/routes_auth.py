@@ -67,8 +67,21 @@ async def _user_payload(user_doc: dict, membership: dict) -> dict:
         {"_id": 0, "id": 1, "name": 1, "tagline": 1, "logo_url": 1},
     ).to_list(100)
     omap = {o["id"]: o for o in orgs}
+    # A person is not one role. A coach can also be a parent, and a parent can be
+    # invited to coach. Ownership of an athlete profile is a FACT about the
+    # account (user_id / guardian_user_id on the athlete), independent of the
+    # membership role, so the app can offer both lenses instead of forcing one.
+    linked_athletes = await db.athletes.count_documents({
+        "status": {"$ne": "merged"},
+        "$or": [{"user_id": user_doc["id"]}, {"guardian_user_id": user_doc["id"]}],
+    })
+    staff_roles = sorted({m["role"] for m in memberships
+                          if m.get("role") in ("owner", "admin", "head_scout", "coach", "evaluator")})
     return {
         "id": user_doc["id"],
+        "linked_athlete_count": linked_athletes,
+        "has_athlete_profile": linked_athletes > 0,
+        "staff_roles": staff_roles,
         "email": user_doc["email"],
         "full_name": user_doc.get("full_name"),
         "role": membership["role"],

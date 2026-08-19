@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import { api, errMsg } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -11,7 +13,7 @@ import { StatusBadge } from "@/components/common/StatusBadge";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { AlertTriangle, BarChart3, Calendar, CheckCircle2, ChevronDown, ChevronUp, ClipboardList, Clock, Undo2, Unlock, Users, XCircle } from "lucide-react";
+import { AlertTriangle, BarChart3, Calendar, CheckCircle2, ChevronDown, ChevronUp, ClipboardList, Clock, Loader2, Mail, MailWarning, Send, Undo2, Unlock, Users, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /* ---------------------------------- helpers ---------------------------------- */
@@ -302,6 +304,248 @@ const RecentEvalCard = ({ r }) => {
   );
 };
 
+/* ------------------------- bulk assessment publishing ------------------------ */
+
+// Module-level on purpose: this dialog owns an <Input>, and an inline component
+// would be a new type on every parent render, remounting the field and losing
+// focus after each keystroke. State lives in the card and comes down as props.
+const PublishAllDialog = ({
+  open,
+  onOpenChange,
+  readiness,
+  confirmText,
+  onConfirmTextChange,
+  onlyWithEmail,
+  onOnlyWithEmailChange,
+  publishing,
+  onConfirm,
+}) => {
+  const drafts = readiness?.drafts ?? 0;
+  const willEmail = readiness?.will_email ?? 0;
+  const noEmail = readiness?.no_email ?? 0;
+  const canConfirm = confirmText.trim() === "PUBLISH" && !publishing;
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!publishing) onOpenChange(v); }}>
+      <DialogContent className="rounded-2xl max-w-md">
+        <DialogHeader>
+          <DialogTitle className="font-display text-2xl text-foreground">Publish assessments &amp; email families</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-2 text-sm text-muted-foreground">
+          {onlyWithEmail ? (
+            <p>
+              Only athletes with an email on file will publish — <span className="font-semibold text-foreground font-mono-num">{willEmail}</span> families receive an email immediately.
+              {noEmail > 0 ? ` The ${noEmail} athletes with no email on file are held back and stay as drafts.` : ""}
+            </p>
+          ) : (
+            <p>
+              All <span className="font-semibold text-foreground font-mono-num">{drafts}</span> assessments publish now and <span className="font-semibold text-foreground font-mono-num">{willEmail}</span> families receive an email immediately.
+              {noEmail > 0 ? ` The ${noEmail} athletes with no email on file are released in-app only — nobody is notified.` : ""}
+            </p>
+          )}
+          {readiness?.mail_configured === false && (
+            <p className="font-semibold text-destructive">Email is not configured — assessments are released in-app but no message is sent.</p>
+          )}
+          <p className="font-semibold text-destructive">This cannot be undone. Published assessments cannot be edited, regenerated or recalled, and the emails go to real parents.</p>
+        </div>
+        <label className="flex items-start gap-2 rounded-xl border border-border bg-secondary/40 px-3 py-2 text-sm text-foreground">
+          <Checkbox
+            checked={onlyWithEmail}
+            onCheckedChange={(v) => onOnlyWithEmailChange(v === true)}
+            disabled={publishing}
+            className="mt-0.5"
+            data-testid="assessments-only-with-email"
+          />
+          <span>
+            Only publish athletes who have an email on file
+            {noEmail > 0 && <span className="text-muted-foreground"> (hold back the other {noEmail})</span>}
+          </span>
+        </label>
+        <div className="space-y-1.5">
+          <p className="text-xs font-semibold text-foreground">Type PUBLISH to confirm</p>
+          <Input
+            value={confirmText}
+            onChange={(e) => onConfirmTextChange(e.target.value)}
+            placeholder="PUBLISH"
+            autoComplete="off"
+            spellCheck={false}
+            disabled={publishing}
+            className="rounded-xl h-11"
+            data-testid="assessments-publish-input"
+          />
+        </div>
+        <DialogFooter>
+          <Button
+            className="w-full rounded-xl bg-primary h-11"
+            onClick={onConfirm}
+            disabled={!canConfirm}
+            data-testid="assessments-publish-confirm"
+          >
+            {publishing ? (
+              <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Publishing…</>
+            ) : (
+              <><Send className="h-4 w-4 mr-2" /> Publish &amp; notify families</>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+const AssessmentsPublishCard = ({ onPublished }) => {
+  const [readiness, setReadiness] = useState(null);
+  const [showMissing, setShowMissing] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [onlyWithEmail, setOnlyWithEmail] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+
+  const loadReadiness = useCallback(() => {
+    // Owner/admin only — a 403 (or any failure) simply hides the whole card.
+    api.get("/assessments/publish-readiness")
+      .then((r) => setReadiness(r.data))
+      .catch(() => setReadiness(null));
+  }, []);
+  useEffect(() => { loadReadiness(); }, [loadReadiness]);
+
+  const publishAll = async () => {
+    // Guard as well as disable: 75 records take a while and a second POST would
+    // be a second irreversible release.
+    if (publishing || confirmText.trim() !== "PUBLISH") return;
+    setPublishing(true);
+    try {
+      const r = await api.post("/assessments/publish-all", {
+        confirm: "PUBLISH",
+        only_with_email: onlyWithEmail,
+        event_id: null,
+      });
+      const published = r.data?.published ?? 0;
+      const emailed = r.data?.families_emailed ?? 0;
+      const skipped = r.data?.skipped_no_email ?? 0;
+      toast.success(
+        `Published ${published} ${published === 1 ? "assessment" : "assessments"} · ${emailed} ${emailed === 1 ? "family" : "families"} emailed · ${skipped} skipped with no email on file`
+      );
+      setDialogOpen(false);
+      setConfirmText("");
+      loadReadiness();
+      if (onPublished) onPublished();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const drafts = readiness?.drafts ?? 0;
+  const willEmail = readiness?.will_email ?? 0;
+  const noEmail = readiness?.no_email ?? 0;
+  const missing = readiness?.missing_email_athletes || [];
+  const mailConfigured = readiness?.mail_configured !== false;
+
+  // Every hook above this line. Nothing renders when readiness failed (or the
+  // role can't publish) and nothing renders when there is no draft left.
+  if (!readiness || drafts === 0) return null;
+
+  return (
+    <Card className="rounded-2xl border-border bg-card" data-testid="assessments-publish-card">
+      <CardContent className="pt-4 pb-4">
+        <div className="flex items-center justify-between gap-2">
+          <PanelLabel>Assessments ready to publish</PanelLabel>
+          {readiness.athletes !== null && readiness.athletes !== undefined && (
+            <span className="rounded-full bg-brand/15 px-2 py-0.5 text-[11px] font-mono-num font-bold text-brand">
+              {readiness.athletes} athletes
+            </span>
+          )}
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-lg grid place-items-center shrink-0 bg-brand/15 text-brand">
+              <Send className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="font-mono-num font-bold text-3xl text-foreground leading-none">{drafts}</p>
+              <p className="mt-1 text-xs font-semibold text-foreground">assessments ready</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-lg bg-success/15 px-2.5 py-1.5 text-xs font-semibold text-success">
+              <Mail className="h-3.5 w-3.5" />
+              <span className="font-mono-num font-bold">{willEmail}</span> families will be emailed
+            </span>
+            {noEmail > 0 && (
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-warning/15 px-2.5 py-1.5 text-xs font-semibold text-warning">
+                <MailWarning className="h-3.5 w-3.5" />
+                <span className="font-mono-num font-bold">{noEmail}</span> have no email on file
+              </span>
+            )}
+          </div>
+          <div className="flex-1" />
+          <Button
+            className="rounded-xl bg-primary hover:bg-brand-secondary h-11"
+            onClick={() => setDialogOpen(true)}
+            disabled={publishing}
+            data-testid="assessments-publish-button"
+          >
+            {publishing ? (
+              <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Publishing…</>
+            ) : (
+              <><Send className="h-4 w-4 mr-2" /> Publish all &amp; notify families</>
+            )}
+          </Button>
+        </div>
+
+        {!mailConfigured && (
+          <div className="mt-3 flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-sm font-semibold text-destructive">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+            <span>Email is not configured — publishing will release assessments in-app but send nothing.</span>
+          </div>
+        )}
+
+        {missing.length > 0 && (
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={() => setShowMissing((v) => !v)}
+              className="inline-flex items-center gap-1 text-xs font-semibold text-info"
+              data-testid="assessments-missing-toggle"
+            >
+              {showMissing ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              {showMissing ? "Hide who has no email" : `Who has no email (${missing.length})`}
+            </button>
+            {showMissing && (
+              <div className="mt-2 max-h-64 overflow-y-auto rounded-xl border border-border">
+                {missing.map((m) => (
+                  <Link
+                    key={m.athlete_id}
+                    to={`/players/${m.athlete_id}`}
+                    className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 last:border-b-0 hover:bg-secondary transition-colors"
+                  >
+                    <span className="text-sm text-foreground truncate">{m.name || "Athlete"}</span>
+                    <span className="text-[11px] font-semibold text-primary shrink-0">Add an email →</span>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <PublishAllDialog
+          open={dialogOpen}
+          onOpenChange={(v) => { setDialogOpen(v); if (!v) setConfirmText(""); }}
+          readiness={readiness}
+          confirmText={confirmText}
+          onConfirmTextChange={setConfirmText}
+          onlyWithEmail={onlyWithEmail}
+          onOnlyWithEmailChange={setOnlyWithEmail}
+          publishing={publishing}
+          onConfirm={publishAll}
+        />
+      </CardContent>
+    </Card>
+  );
+};
+
 /* ----------------------------------- page ----------------------------------- */
 
 export default function ReviewQueue() {
@@ -482,6 +726,10 @@ export default function ReviewQueue() {
           </div>
         </div>
       )}
+
+      {/* D1.5 — Bulk assessment publishing. Renders nothing unless the role can
+          read readiness and there is at least one draft waiting. */}
+      <AssessmentsPublishCard onPublished={load} />
 
       {/* D2 — Pending awards. Nothing renders when the queue is empty (or when
           the role can't review awards) — this page is already dense. */}
