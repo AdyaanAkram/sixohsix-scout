@@ -20,7 +20,7 @@ import {
   Search, Plus, Upload, FileDown, Users, ChevronRight, LayoutGrid, List,
   SlidersHorizontal, Eye, TrendingUp, TrendingDown, Minus, ArrowRight,
   UserSearch, UserCheck, ClipboardCheck, AlertTriangle, BarChart3, Star,
-  CalendarPlus,
+  CalendarPlus, Flag,
 } from "lucide-react";
 
 const AGE_GROUPS = ["8U", "9U", "10U", "11U", "12U", "13U", "14U", "15U", "16U", "17U", "18U"];
@@ -706,6 +706,24 @@ export default function PlayersList() {
       {/* Class snapshot band — class selector + development at a glance,
           reflecting current filters. Improving / Needs Follow-Up stats toggle a
           quick filter. Legacy fallback (snapshot null) keeps only the selector. */}
+      {/* Arriving from a "Flagged" card previously filtered the roster with no
+          on-screen sign it was filtered — and no way back to everyone. */}
+      {searchParams.get("flagged") === "true" && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-destructive/40 bg-destructive/10 px-4 py-3" data-testid="players-flagged-banner">
+          <span className="inline-flex items-center gap-2 text-sm font-semibold text-destructive">
+            <Flag className="h-4 w-4 fill-current" /> Showing athletes flagged for follow-up
+          </span>
+          <Button
+            variant="outline"
+            className="h-9 rounded-lg text-xs"
+            onClick={() => { const next = new URLSearchParams(searchParams); next.delete("flagged"); setSearchParams(next, { replace: true }); }}
+            data-testid="players-flagged-clear"
+          >
+            Show all athletes
+          </Button>
+        </div>
+      )}
+
       <div className="rounded-2xl border border-border bg-card px-4 py-4 sm:px-6" data-testid="players-snapshot">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
           <div className="min-w-[120px]">

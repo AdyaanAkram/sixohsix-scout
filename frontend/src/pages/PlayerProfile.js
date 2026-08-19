@@ -983,6 +983,17 @@ export default function PlayerProfile() {
     } catch (e) { toast.error(errMsg(e)); }
   };
 
+  // The follow-up flag drives the roster's "Need Follow-Up" tile and the
+  // /players?flagged=true view — both were built to read a flag nothing could set.
+  const toggleFlag = async () => {
+    const next = !a?.flagged_follow_up;
+    try {
+      await api.post(`/athletes/${athleteId}/flag`, { flagged: next });
+      toast.success(next ? "Flagged for follow-up." : "Follow-up flag cleared.");
+      loadSummary();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+
   // Search the org roster for the duplicate record to fold into this one.
   const searchDuplicates = async (q) => {
     setMergeQuery(q);
@@ -1220,6 +1231,19 @@ export default function PlayerProfile() {
                       </DialogFooter>
                     </DialogContent>
                   </Dialog>
+                )}
+                {canReview && (
+                  <Button
+                    variant="outline"
+                    className={cn("rounded-xl h-10", a.flagged_follow_up
+                      ? "border-destructive/40 text-destructive hover:bg-destructive/10"
+                      : "text-muted-foreground")}
+                    onClick={toggleFlag}
+                    data-testid="profile-flag-button"
+                  >
+                    <Flag className={cn("h-4 w-4 mr-1", a.flagged_follow_up && "fill-current")} />
+                    {a.flagged_follow_up ? "Clear follow-up" : "Flag for follow-up"}
+                  </Button>
                 )}
                 {canReview && <Button variant="outline" className="rounded-xl h-10" onClick={() => window.open(signedUrl(`/reports/player/${athleteId}/pdf`), "_blank")} data-testid="profile-pdf-button"><FileDown className="h-4 w-4 mr-1" /> PDF</Button>}
                 {isAdmin && a.status === "active" && <Button variant="outline" className="rounded-xl h-10 text-muted-foreground" onClick={archive} data-testid="profile-archive-button"><Archive className="h-4 w-4 mr-1" /> Archive</Button>}
