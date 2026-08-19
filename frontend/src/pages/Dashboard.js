@@ -644,7 +644,7 @@ export default function Dashboard() {
 
       <div className="grid gap-4 lg:grid-cols-3">
         {/* MAIN COLUMN */}
-        <div className="space-y-4 lg:col-span-2">
+        <div className="min-w-0 space-y-4 lg:col-span-2">
           {ev ? (
             <Card className="rounded-2xl border-border bg-card overflow-hidden">
               <div className="hero-sweep px-5 py-4 border-b flex flex-wrap items-center justify-between gap-2">
@@ -710,7 +710,7 @@ export default function Dashboard() {
         </div>
 
         {/* RIGHT RAIL */}
-        <div className="space-y-4 lg:col-span-1">
+        <div className="min-w-0 space-y-4 lg:col-span-1">
           {evalInsights && (
             <Card className="rounded-2xl border-border bg-card">
               <CardContent className="pt-4 pb-4">

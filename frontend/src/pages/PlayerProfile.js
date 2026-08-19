@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
@@ -26,7 +27,7 @@ import {
   ArrowLeft, FileDown, Flag, Plus, TrendingUp, TrendingDown, Minus,
   ClipboardList, Image as ImageIcon, StickyNote, CalendarClock, Target, Archive, Camera, Mail,
   Gauge, Trophy, Sparkles, ChevronDown, ChevronRight, Check, X, Trash2,
-  Timer, Zap, User, ArchiveRestore, GitMerge,
+  Timer, Zap, User, ArchiveRestore, GitMerge, MoreHorizontal,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -1246,55 +1247,29 @@ export default function PlayerProfile() {
                   </Button>
                 )}
                 {canReview && <Button variant="outline" className="rounded-xl h-10" onClick={() => window.open(signedUrl(`/reports/player/${athleteId}/pdf`), "_blank")} data-testid="profile-pdf-button"><FileDown className="h-4 w-4 mr-1" /> PDF</Button>}
-                {isAdmin && a.status === "active" && <Button variant="outline" className="rounded-xl h-10 text-muted-foreground" onClick={archive} data-testid="profile-archive-button"><Archive className="h-4 w-4 mr-1" /> Archive</Button>}
-                {isAdmin && a.status === "archived" && <Button variant="outline" className="rounded-xl h-10 border-success/40 text-success hover:bg-success/10" onClick={restore} data-testid="profile-restore-button"><ArchiveRestore className="h-4 w-4 mr-1" /> Restore to roster</Button>}
-                {isAdmin && a.status !== "merged" && (
-                  <Dialog open={mergeOpen} onOpenChange={(o) => { setMergeOpen(o); if (!o) { setMergeQuery(""); setMergeResults([]); } }}>
-                    <Button variant="outline" className="rounded-xl h-10 text-muted-foreground" onClick={() => setMergeOpen(true)} data-testid="profile-merge-button">
-                      <GitMerge className="h-4 w-4 mr-1" /> Merge duplicate
-                    </Button>
-                    <DialogContent className="max-w-lg rounded-2xl" data-testid="merge-duplicate-dialog">
-                      <DialogHeader>
-                        <DialogTitle className="font-display text-2xl text-foreground">Merge a duplicate record</DialogTitle>
-                      </DialogHeader>
-                      <p className="text-sm text-muted-foreground">
-                        Find the duplicate of <span className="font-semibold text-foreground">{a.first_name} {a.last_name}</span>. Its
-                        evaluations, metrics, notes and event history move here, and this profile keeps its own details — blanks fill in from the duplicate.
-                      </p>
-                      <Input
-                        value={mergeQuery}
-                        onChange={(e) => searchDuplicates(e.target.value)}
-                        placeholder="Search by name…"
-                        className="h-11 rounded-xl"
-                        data-testid="merge-search-input"
-                      />
-                      <div className="max-h-64 space-y-1.5 overflow-y-auto">
-                        {mergeQuery.trim().length >= 2 && mergeResults.length === 0 && (
-                          <p className="py-4 text-center text-sm text-muted-foreground">No other athlete matches that name.</p>
-                        )}
-                        {mergeResults.map((d) => (
-                          <button
-                            key={d.id}
-                            type="button"
-                            disabled={mergeBusy}
-                            onClick={() => mergeDuplicate(d)}
-                            className="flex w-full items-center gap-3 rounded-xl border border-border bg-background px-3 py-2.5 text-left hover:border-brand/50 hover:bg-secondary disabled:opacity-50"
-                            data-testid={`merge-candidate-${d.id}`}
-                          >
-                            <PlayerAvatar firstName={d.first_name} lastName={d.last_name} photoUrl={d.photo_url} size="sm" />
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-sm font-semibold text-foreground">{d.first_name} {d.last_name}</span>
-                              <span className="block truncate text-xs text-muted-foreground">
-                                {[d.graduation_year ? `Class of ${d.graduation_year}` : null, d.age_group, d.primary_position, d.status !== "active" ? d.status : null].filter(Boolean).join(" · ") || "—"}
-                              </span>
-                            </span>
-                            <GitMerge className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          </button>
-                        ))}
-                      </div>
-                    </DialogContent>
-                  </Dialog>
+                {isAdmin && (
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="rounded-xl h-10 w-10 p-0 text-muted-foreground" aria-label="More actions" data-testid="profile-more-actions">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="end" className="w-56 rounded-xl p-1.5">
+                      {a.status === "active" && (
+                        <button type="button" onClick={archive} data-testid="profile-archive-button"
+                          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-foreground hover:bg-secondary">
+                          <Archive className="h-4 w-4 text-muted-foreground" /> Archive athlete
+                        </button>
+                      )}
+                      <button type="button" onClick={() => setMergeOpen(true)} data-testid="profile-merge-button"
+                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-foreground hover:bg-secondary">
+                        <GitMerge className="h-4 w-4 text-muted-foreground" /> Merge duplicate
+                      </button>
+                    </PopoverContent>
+                  </Popover>
                 )}
+
+                {isAdmin && a.status === "archived" && <Button variant="outline" className="rounded-xl h-10 border-success/40 text-success hover:bg-success/10" onClick={restore} data-testid="profile-restore-button"><ArchiveRestore className="h-4 w-4 mr-1" /> Restore to roster</Button>}
               </div>
             </div>
             {/* Full bio detail stays available — presentation changes, depth doesn't. */}
@@ -1414,6 +1389,51 @@ export default function PlayerProfile() {
           testId="kpi-profile-complete"
         />
       </div>
+
+                {isAdmin && a.status !== "merged" && (
+                  <Dialog open={mergeOpen} onOpenChange={(o) => { setMergeOpen(o); if (!o) { setMergeQuery(""); setMergeResults([]); } }}>
+                    <DialogContent className="max-w-lg rounded-2xl" data-testid="merge-duplicate-dialog">
+                      <DialogHeader>
+                        <DialogTitle className="font-display text-2xl text-foreground">Merge a duplicate record</DialogTitle>
+                      </DialogHeader>
+                      <p className="text-sm text-muted-foreground">
+                        Find the duplicate of <span className="font-semibold text-foreground">{a.first_name} {a.last_name}</span>. Its
+                        evaluations, metrics, notes and event history move here, and this profile keeps its own details — blanks fill in from the duplicate.
+                      </p>
+                      <Input
+                        value={mergeQuery}
+                        onChange={(e) => searchDuplicates(e.target.value)}
+                        placeholder="Search by name…"
+                        className="h-11 rounded-xl"
+                        data-testid="merge-search-input"
+                      />
+                      <div className="max-h-64 space-y-1.5 overflow-y-auto">
+                        {mergeQuery.trim().length >= 2 && mergeResults.length === 0 && (
+                          <p className="py-4 text-center text-sm text-muted-foreground">No other athlete matches that name.</p>
+                        )}
+                        {mergeResults.map((d) => (
+                          <button
+                            key={d.id}
+                            type="button"
+                            disabled={mergeBusy}
+                            onClick={() => mergeDuplicate(d)}
+                            className="flex w-full items-center gap-3 rounded-xl border border-border bg-background px-3 py-2.5 text-left hover:border-brand/50 hover:bg-secondary disabled:opacity-50"
+                            data-testid={`merge-candidate-${d.id}`}
+                          >
+                            <PlayerAvatar firstName={d.first_name} lastName={d.last_name} photoUrl={d.photo_url} size="sm" />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm font-semibold text-foreground">{d.first_name} {d.last_name}</span>
+                              <span className="block truncate text-xs text-muted-foreground">
+                                {[d.graduation_year ? `Class of ${d.graduation_year}` : null, d.age_group, d.primary_position, d.status !== "active" ? d.status : null].filter(Boolean).join(" · ") || "—"}
+                              </span>
+                            </span>
+                            <GitMerge className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          </button>
+                        ))}
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                )}
 
       <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
         <div className="relative">

@@ -894,7 +894,7 @@ export default function PlayersList() {
         /* Card view — premium scouting card: status + watchlist on top, identity,
            score block, then focus / last-eval meta. Whole card opens Quick View
            (div+role, not <button>, so the star and CTA can be real buttons). */
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3" data-testid="players-card-grid">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 sm:gap-3" data-testid="players-card-grid">
           {visible.map((p) => {
             const hasScore = p.latest_overall !== null && p.latest_overall !== undefined;
             const watched = watchedIds?.has(p.id);
@@ -911,7 +911,7 @@ export default function PlayersList() {
                 <Card className="h-full overflow-hidden rounded-2xl border-border transition-all hover:border-brand/50 hover:shadow-lg hover:-translate-y-0.5">
                     {/* Photo header — the athlete's face is the card. Status,
                         watchlist star and the overall score live on the image. */}
-                    <div className="relative aspect-[4/3] w-full overflow-hidden">
+                    <div className="relative aspect-square sm:aspect-[4/3] w-full overflow-hidden">
                       <CardPhoto p={p} />
                       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/55 to-transparent" />
                       {snapshot && (

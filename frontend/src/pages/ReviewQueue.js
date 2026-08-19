@@ -78,9 +78,9 @@ const EvalDetail = ({ ev }) => {
 
 /* -------------------------------- analytics UI ------------------------------- */
 
-const StatCard = ({ icon: Icon, tint, value, label, sub, onClick, testId }) => {
+const StatCard = ({ icon: Icon, tint, value, label, sub, onClick, to, testId }) => {
   const body = (
-    <Card className={cn("rounded-2xl border-border bg-card h-full", onClick && "transition-colors hover:bg-secondary/50")} data-testid={testId}>
+    <Card className={cn("rounded-2xl border-border bg-card h-full", (onClick || to) && "transition-colors hover:bg-secondary/50 hover:border-brand/40")} data-testid={testId}>
       <CardContent className="pt-4 pb-4 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
         <div className={cn("h-10 w-10 rounded-lg grid place-items-center shrink-0", tint)}>
           <Icon className="h-5 w-5" />
@@ -94,6 +94,7 @@ const StatCard = ({ icon: Icon, tint, value, label, sub, onClick, testId }) => {
       </CardContent>
     </Card>
   );
+  if (to) return <Link to={to} className="block h-full">{body}</Link>;
   if (onClick) return <button type="button" onClick={onClick} className="block w-full h-full text-left cursor-pointer">{body}</button>;
   return body;
 };
@@ -685,12 +686,18 @@ export default function ReviewQueue() {
         </div>
       )}
       {totals && (
-        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-2" data-testid="evals-stat-row">
-          <StatCard icon={ClipboardList} tint="bg-brand/15 text-brand" value={totals.evaluations} label="Evaluations" sub="Total completed" />
-          <StatCard icon={CheckCircle2} tint="bg-success/15 text-success" value={totals.verified} label="Verified" sub={`${verifiedPct}% verified`} />
-          <StatCard icon={Users} tint="bg-warning/15 text-warning" value={totals.athletes_evaluated} label="Athletes" sub="Evaluated" />
-          <StatCard icon={Calendar} tint="bg-info/15 text-info" value={totals.events_this_season} label="Events" sub="This season" />
-          <StatCard icon={Clock} tint="bg-warning/15 text-warning" value={awaiting} label="Awaiting review" sub="In the queue" onClick={scrollToQueue} />
+        {/* Four tiles, not five: Verified folded into Evaluations as its own
+            sub-line, so the row stays balanced (2-up on phones, 4-up on desktop)
+            and every tile goes somewhere. */}
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-2" data-testid="evals-stat-row">
+          <StatCard icon={ClipboardList} tint="bg-brand/15 text-brand" value={totals.evaluations}
+            label="Evaluations" sub={`${totals.verified} verified · ${verifiedPct}%`} onClick={scrollToQueue} />
+          <StatCard icon={Clock} tint="bg-warning/15 text-warning" value={awaiting}
+            label="Awaiting review" sub="In the queue" onClick={scrollToQueue} />
+          <StatCard icon={Users} tint="bg-success/15 text-success" value={totals.athletes_evaluated}
+            label="Athletes" sub="Evaluated" to="/players" />
+          <StatCard icon={Calendar} tint="bg-info/15 text-info" value={totals.events_this_season}
+            label="Events" sub="This season" to="/events" />
         </div>
       )}
 
@@ -698,10 +705,9 @@ export default function ReviewQueue() {
           render: Top Teams disappears when no athlete has a team, and a fixed
           3-col grid would leave the survivors squeezed beside dead space. */}
       {insights && (
-        <div className={cn(
-          "grid grid-cols-1 gap-3",
-          panelCount === 3 ? "lg:grid-cols-3" : panelCount === 2 ? "md:grid-cols-2" : "max-w-xl"
-        )}>
+        {/* Performers and teams sit together (both are "who is doing well"),
+            with the position mix beside them. */}
+        <div className={cn("grid grid-cols-1 gap-3", panelCount === 3 ? "md:grid-cols-2 xl:grid-cols-3" : "md:grid-cols-2")}>
           <TopPerformersCard performers={insights.top_performers || []} />
           <TopTeamsCard teams={insights.top_teams || []} />
           <PositionDonutCard byPosition={insights.by_position || []} />
