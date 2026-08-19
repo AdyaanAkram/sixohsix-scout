@@ -14,6 +14,11 @@ from db import clean, db, log_audit, new_id, now_iso
 from mailer import safe_send, send_template
 from storage import media_object_key, storage
 
+# Staff roles outrank family roles: accepting a staff invitation on an account
+# that already belongs to the org promotes it rather than being ignored.
+ROLE_RANK = {"athlete": 1, "parent": 1, "evaluator": 2, "coach": 3,
+             "head_scout": 4, "admin": 5, "owner": 6}
+
 router = APIRouter()
 
 ROLES = ["owner", "admin", "head_scout", "coach", "evaluator", "athlete", "parent"]
@@ -408,11 +413,30 @@ async def accept_invitation(body: AcceptInviteBody):
                 detail="An account with this email already exists. Enter that account's "
                        "current password to claim this invitation (or reset it first).")
         uid = existing["id"]
-        if not await db.memberships.find_one({"user_id": uid, "organization_id": inv["organization_id"]}):
+        member = await db.memberships.find_one(
+            {"user_id": uid, "organization_id": inv["organization_id"]}, {"_id": 0})
+        if not member:
             await db.memberships.insert_one({
                 "id": new_id(), "user_id": uid, "organization_id": inv["organization_id"],
                 "role": inv["role"], "active": True, "created_at": now_iso(),
             })
+        else:
+            # A parent of an athlete here who is now invited to COACH kept their
+            # parent role and got no staff access at all — the invitation was
+            # silently a no-op. One membership per org still holds; the role is
+            # promoted to whichever is stronger. The family lens is unaffected:
+            # it comes from the athlete record's guardian/user link, not from
+            # this row, so they keep both hats.
+            if ROLE_RANK.get(inv["role"], 0) > ROLE_RANK.get(member.get("role"), 0):
+                await db.memberships.update_one(
+                    {"id": member["id"]},
+                    {"$set": {"role": inv["role"], "active": True, "updated_at": now_iso()}})
+                await log_audit(inv["organization_id"], None, "membership_role_promoted",
+                                "membership", member["id"],
+                                {"from": member.get("role"), "to": inv["role"], "user_id": uid})
+            elif not member.get("active"):
+                await db.memberships.update_one(
+                    {"id": member["id"]}, {"$set": {"active": True, "updated_at": now_iso()}})
     else:
         uid = new_id()
         await db.users.insert_one({

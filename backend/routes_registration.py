@@ -286,6 +286,12 @@ async def _resolve_registering_user(body: RegistrationBody,
 
 
 async def _ensure_membership(uid: str, org: str, role: str):
+    """Give a registering family an org membership — but NEVER overwrite one.
+
+    A coach registering their own child must stay a coach: the family lens comes
+    from the athlete's guardian_user_id link, not from this row, so downgrading
+    the membership to "parent" here would silently strip their staff access.
+    """
     if not await db.memberships.find_one({"user_id": uid, "organization_id": org}):
         await db.memberships.insert_one({
             "id": new_id(), "user_id": uid, "organization_id": org,
