@@ -150,7 +150,7 @@ export default function Programs() {
             const range = dateRange(p.start_date, p.end_date);
             const ages = Array.isArray(p.age_groups) ? p.age_groups.filter(Boolean) : [];
             return (
-              <Link key={p.id} to={`/programs/${p.id}`} className="block h-full" data-testid={`program-open-${p.id}`}>
+              <Link key={p.id} to={`/programs/${p.id}`} className="block h-full min-w-0" data-testid={`program-open-${p.id}`}>
                 <Card className="h-full rounded-2xl border-border bg-card transition-all hover:border-brand/50 hover:shadow-lg hover:-translate-y-0.5">
                   <CardContent className="pt-4 pb-4">
                     <div className="flex items-start gap-3">
