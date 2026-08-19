@@ -80,6 +80,26 @@ const DevTrendStrip = ({ trend, testId }) => {
   );
 };
 
+/** HQ header variant of the development pulse: compact inline chips, no card. */
+const DevTrendChips = ({ trend, testId }) => {
+  if (!trend) return null;
+  const chip = "inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-semibold font-mono-num";
+  return (
+    <div className="flex flex-wrap items-center gap-2" data-testid={testId}>
+      <span className={`${chip} text-success`}>
+        <TrendingUp className="h-3.5 w-3.5" /> {trend.improving ?? 0} improving
+      </span>
+      <span className={`${chip} text-warning`}>
+        <TrendingDown className="h-3.5 w-3.5" /> {trend.declining ?? 0} declining
+      </span>
+      <span className={`${chip} text-muted-foreground`}>
+        <Minus className="h-3.5 w-3.5" /> {trend.flat ?? 0} holding
+      </span>
+      <Link to="/development" className="text-xs text-info hover:underline">Open Progress</Link>
+    </div>
+  );
+};
+
 const fmtChange = (v) => {
   const n = Number(v);
   if (!Number.isFinite(n)) return null;
@@ -578,128 +598,142 @@ export default function Dashboard() {
             <span className="font-display text-lg font-extrabold text-brand leading-none">{(orgName || "HQ").charAt(0)}</span>
           </div>
         )}
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <PanelLabel>Organization HQ</PanelLabel>
           <h1 className="font-display text-3xl sm:text-4xl text-foreground truncate" data-testid="org-hq-name">{orgName || "Dashboard"}</h1>
           <p className="text-sm text-muted-foreground">Welcome back, {user?.full_name?.split(" ")[0]}.</p>
         </div>
+        {orgSummary && <DevTrendChips trend={orgSummary.development_trend} testId="dev-trend-strip" />}
       </div>
 
-      {orgSummary && <DevTrendStrip trend={orgSummary.development_trend} testId="dev-trend-strip" />}
-
       {orgSummary && (
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-          <StatCard label="Athletes" value={orgSummary.athletes} icon={Users} tint="bg-brand/15 text-brand" testId="stat-org-athletes" to="/players" />
-          <StatCard label="Coaches" value={orgSummary.coaches} sub={`${orgSummary.evaluators ?? 0} evaluators`} icon={UsersRound} testId="stat-org-coaches" to="/staff" />
-          <StatCard label="Awaiting Review" value={orgSummary.evaluations?.awaiting_review} icon={ClipboardList} tint="bg-warning/15 text-warning" testId="stat-org-awaiting-review" to="/review" />
-          <StatCard label="Upcoming Events" value={orgSummary.events?.upcoming} sub={`${orgSummary.events?.total ?? 0} total`} icon={CalendarDays} tint="bg-info/15 text-info" testId="stat-org-upcoming-events" to={ev ? `/events/${ev.id}` : "/events"} />
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatCard label="Athletes" value={orgSummary.athletes} icon={Users} tint="bg-brand/15 text-brand" testId="stat-org-athletes" to="/players" />
+            <StatCard label="Coaches" value={orgSummary.coaches} sub={`${orgSummary.evaluators ?? 0} evaluators`} icon={UsersRound} testId="stat-org-coaches" to="/staff" />
+            <StatCard label="Awaiting Review" value={orgSummary.evaluations?.awaiting_review} icon={ClipboardList} tint="bg-warning/15 text-warning" testId="stat-org-awaiting-review" to="/review" />
+            <StatCard label="Upcoming Events" value={orgSummary.events?.upcoming} sub={`${orgSummary.events?.total ?? 0} total`} icon={CalendarDays} tint="bg-info/15 text-info" testId="stat-org-upcoming-events" to={ev ? `/events/${ev.id}` : "/events"} />
+          </div>
+          {gradClasses.length > 0 && (
+            <div className="flex flex-wrap items-center justify-end gap-2" data-testid="grad-class-strip">
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+                <GraduationCap className="h-3.5 w-3.5" /> Grad Classes
+              </span>
+              <Select onValueChange={(year) => navigate(`/players?graduation_year=${year}`)}>
+                <SelectTrigger className="h-9 w-[230px] rounded-xl bg-card text-sm font-semibold" data-testid="grad-class-select">
+                  <SelectValue placeholder="Class of…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {gradClasses.map((g) => (
+                    <SelectItem key={g.year} value={String(g.year)} data-testid={`grad-class-${g.year}`}>
+                      <span className="font-mono-num">Class of {g.year} · {g.count} athlete{g.count === 1 ? "" : "s"}</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </div>
       )}
 
-      {gradClasses.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2" data-testid="grad-class-strip">
-          <span className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1.5 mr-1">
-            <GraduationCap className="h-3.5 w-3.5" /> Grad Classes
-          </span>
-          <Select onValueChange={(year) => navigate(`/players?graduation_year=${year}`)}>
-            <SelectTrigger className="h-9 w-[230px] rounded-xl bg-card text-sm font-semibold" data-testid="grad-class-select">
-              <SelectValue placeholder="Class of…" />
-            </SelectTrigger>
-            <SelectContent>
-              {gradClasses.map((g) => (
-                <SelectItem key={g.year} value={String(g.year)} data-testid={`grad-class-${g.year}`}>
-                  <span className="font-mono-num">Class of {g.year} · {g.count} athlete{g.count === 1 ? "" : "s"}</span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      <div className="grid gap-4 lg:grid-cols-3">
+        {/* MAIN COLUMN */}
+        <div className="space-y-4 lg:col-span-2">
+          {ev ? (
+            <Card className="rounded-2xl border-border bg-card overflow-hidden">
+              <div className="hero-sweep px-5 py-4 border-b flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <PanelLabel>Upcoming / Active Event</PanelLabel>
+                  <Link to={`/events/${ev.id}`} className="font-display text-2xl text-foreground hover:underline" data-testid="dashboard-event-link">{ev.name}</Link>
+                  <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5"><CalendarDays className="h-3.5 w-3.5" /> {ev.date} · {ev.location}</p>
+                </div>
+                <StatusBadge status={ev.status} testId="event-status-badge" />
+              </div>
+              <CardContent className="pt-4 pb-5">
+                <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+                  <StatCard label="Registered Players" value={stats.registered} icon={Users} testId="stat-registered" to={`/events/${ev.id}?tab=checkin`} />
+                  <StatCard label="Checked In" value={stats.checked_in} icon={CheckCircle2} tint="bg-success/15 text-success" testId="stat-checked-in" to={`/events/${ev.id}?tab=checkin`} />
+                  <StatCard label="Evaluations Completed" value={stats.evaluations_completed} icon={ClipboardCheck} tint="bg-info/15 text-info" testId="stat-evals-completed" to={`/events/${ev.id}?tab=progress`} />
+                  <StatCard label="Drafts In Progress" value={stats.evaluations_draft} icon={Activity} tint="bg-warning/15 text-warning" testId="stat-evals-draft" to={`/events/${ev.id}?tab=progress`} />
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <EmptyState icon={CalendarDays} title="No events yet" hint="Create your first evaluation event to get started."
+              action={isAdmin && <Button onClick={() => navigate("/events")} className="rounded-xl bg-primary">Create Event</Button>} />
+          )}
+
+          {evalInsights && (
+            <Card className="rounded-2xl border-border bg-card" data-testid="hq-performance-snapshot">
+              <CardContent className="pt-4 pb-4">
+                <PanelLabel>Performance snapshot</PanelLabel>
+                <div className="mt-3">
+                  <StatusDonut totals={evalInsights.totals} />
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {evalInsights && (evalInsights.recent || []).length > 0 && (
+            <div data-testid="hq-recent-rail">
+              <div className="flex items-center justify-between gap-2">
+                <PanelLabel>Recent evaluations</PanelLabel>
+                <Link to="/review" className="text-xs font-semibold text-primary hover:underline">View all →</Link>
+              </div>
+              <div className="mt-2 flex gap-3 overflow-x-auto pb-2 snap-x">
+                {evalInsights.recent.map((r) => <HqRecentEvalCard key={r.id} r={r} />)}
+              </div>
+            </div>
+          )}
+
+          {isAdmin && (
+            <Card className="rounded-2xl border-border bg-card">
+              <CardContent className="pt-4 pb-4">
+                <PanelLabel>Quick actions</PanelLabel>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <QuickAction to="/events" icon={CalendarPlus} label="Create Event" testId="quick-action-create-event" />
+                  <QuickAction to="/players/import" icon={Upload} label="Import Athletes" testId="quick-action-import-players" />
+                  {ev && <QuickAction to={`/events/${ev.id}?tab=evaluators`} icon={UserCog} label="Assign Evaluators" testId="quick-action-assign-evaluators" />}
+                  {ev && <QuickAction to={`/events/${ev.id}?tab=checkin`} icon={ClipboardCheck} label="Open Check-In" testId="quick-action-open-checkin" />}
+                  {ev && <QuickAction to={`/events/${ev.id}?tab=progress`} icon={Activity} label="View Live Progress" testId="quick-action-live-progress" />}
+                  {ev && <QuickAction onClick={() => window.open(signedUrl(`/reports/event-results/${ev.id}/csv`), "_blank")} icon={FileDown} label="Export Results" testId="quick-action-export-results" />}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
-      )}
 
-      {ev ? (
-        <Card className="rounded-2xl border-border bg-card overflow-hidden">
-          <div className="hero-sweep px-5 py-4 border-b flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <PanelLabel>Upcoming / Active Event</PanelLabel>
-              <Link to={`/events/${ev.id}`} className="font-display text-2xl text-foreground hover:underline" data-testid="dashboard-event-link">{ev.name}</Link>
-              <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5"><CalendarDays className="h-3.5 w-3.5" /> {ev.date} · {ev.location}</p>
-            </div>
-            <StatusBadge status={ev.status} testId="event-status-badge" />
-          </div>
-          <CardContent className="pt-4 pb-5">
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <StatCard label="Registered Players" value={stats.registered} icon={Users} testId="stat-registered" to={`/events/${ev.id}?tab=checkin`} />
-              <StatCard label="Checked In" value={stats.checked_in} icon={CheckCircle2} tint="bg-success/15 text-success" testId="stat-checked-in" to={`/events/${ev.id}?tab=checkin`} />
-              <StatCard label="Evaluations Completed" value={stats.evaluations_completed} icon={ClipboardCheck} tint="bg-info/15 text-info" testId="stat-evals-completed" to={`/events/${ev.id}?tab=progress`} />
-              <StatCard label="Drafts In Progress" value={stats.evaluations_draft} icon={Activity} tint="bg-warning/15 text-warning" testId="stat-evals-draft" to={`/events/${ev.id}?tab=progress`} />
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <EmptyState icon={CalendarDays} title="No events yet" hint="Create your first evaluation event to get started."
-          action={isAdmin && <Button onClick={() => navigate("/events")} className="rounded-xl bg-primary">Create Event</Button>} />
-      )}
+        {/* RIGHT RAIL */}
+        <div className="space-y-4 lg:col-span-1">
+          {evalInsights && (
+            <Card className="rounded-2xl border-border bg-card">
+              <CardContent className="pt-4 pb-4">
+                <HqTopPerformers performers={evalInsights.top_performers} />
+              </CardContent>
+            </Card>
+          )}
 
-      {evalInsights && (
-        <Card className="rounded-2xl border-border bg-card" data-testid="hq-performance-snapshot">
-          <CardContent className="pt-4 pb-4">
-            <PanelLabel>Performance snapshot</PanelLabel>
-            <div className="mt-3 grid gap-6 lg:grid-cols-2">
-              <StatusDonut totals={evalInsights.totals} />
-              <HqTopPerformers performers={evalInsights.top_performers} />
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {evalInsights && (evalInsights.recent || []).length > 0 && (
-        <div data-testid="hq-recent-rail">
-          <div className="flex items-center justify-between gap-2">
-            <PanelLabel>Recent evaluations</PanelLabel>
-            <Link to="/review" className="text-xs font-semibold text-primary hover:underline">View all →</Link>
-          </div>
-          <div className="mt-2 flex gap-3 overflow-x-auto pb-2 snap-x">
-            {evalInsights.recent.map((r) => <HqRecentEvalCard key={r.id} r={r} />)}
-          </div>
-        </div>
-      )}
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        {isAdmin && (
           <Card className="rounded-2xl border-border bg-card">
             <CardContent className="pt-4 pb-4">
-              <PanelLabel>Quick actions</PanelLabel>
-              <div className="mt-2 space-y-2">
-                <QuickAction to="/events" icon={CalendarPlus} label="Create Event" testId="quick-action-create-event" />
-                <QuickAction to="/players/import" icon={Upload} label="Import Athletes" testId="quick-action-import-players" />
-                {ev && <QuickAction to={`/events/${ev.id}?tab=evaluators`} icon={UserCog} label="Assign Evaluators" testId="quick-action-assign-evaluators" />}
-                {ev && <QuickAction to={`/events/${ev.id}?tab=checkin`} icon={ClipboardCheck} label="Open Check-In" testId="quick-action-open-checkin" />}
-                {ev && <QuickAction to={`/events/${ev.id}?tab=progress`} icon={Activity} label="View Live Progress" testId="quick-action-live-progress" />}
-                {ev && <QuickAction onClick={() => window.open(signedUrl(`/reports/event-results/${ev.id}/csv`), "_blank")} icon={FileDown} label="Export Results" testId="quick-action-export-results" />}
+              <div className="flex items-center justify-between gap-2">
+                <PanelLabel>Recently added players</PanelLabel>
+                <Link to="/players" className="text-xs font-semibold text-primary hover:underline">View all ({data?.total_players})</Link>
+              </div>
+              <div className="mt-2 space-y-1.5">
+                {(data?.recent_players || []).map((p) => (
+                  <Link key={p.id} to={`/players/${p.id}`} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-secondary transition-colors">
+                    <PlayerAvatar firstName={p.first_name} lastName={p.last_name} photoUrl={p.photo_url} size="sm" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-foreground truncate">{p.first_name} {p.last_name}</p>
+                      <p className="text-xs text-muted-foreground">{p.age_group} · {p.primary_position}</p>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  </Link>
+                ))}
               </div>
             </CardContent>
           </Card>
-        )}
-        <Card className="rounded-2xl border-border bg-card">
-          <CardContent className="pt-4 pb-4">
-            <div className="flex items-center justify-between gap-2">
-              <PanelLabel>Recently added players</PanelLabel>
-              <Link to="/players" className="text-xs font-semibold text-primary hover:underline">View all ({data?.total_players})</Link>
-            </div>
-            <div className="mt-2 space-y-1.5">
-              {(data?.recent_players || []).map((p) => (
-                <Link key={p.id} to={`/players/${p.id}`} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-secondary transition-colors">
-                  <PlayerAvatar firstName={p.first_name} lastName={p.last_name} photoUrl={p.photo_url} size="sm" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-foreground truncate">{p.first_name} {p.last_name}</p>
-                    <p className="text-xs text-muted-foreground">{p.age_group} · {p.primary_position}</p>
-                  </div>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                </Link>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+        </div>
       </div>
     </div>
   );

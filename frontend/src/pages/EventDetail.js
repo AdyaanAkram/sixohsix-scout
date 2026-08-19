@@ -21,9 +21,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import {
   ArrowLeft, CalendarDays, MapPin, Users, Plus, Trash2, Search, UserPlus,
-  CheckCircle2, XCircle, FileDown, Layers, Trophy, ClipboardList,
+  CheckCircle2, XCircle, FileDown, Layers, LayoutGrid, Trophy,
   Clock, Video, AlertTriangle, Activity, RefreshCw, ExternalLink, ChevronRight,
-  FileUp, Wand2, Pencil, GitMerge, ListChecks, Circle, ChevronUp, ChevronDown,
+  FileUp, Wand2, Pencil, GitMerge, Circle, ChevronUp, ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -66,6 +66,34 @@ const ActionChip = ({ active, onClick, children, testid }) => (
   >
     {children}
   </button>
+);
+
+// Tiny uppercase section label used above each Overview block.
+const SectionLabel = ({ children }) => (
+  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{children}</p>
+);
+
+// Overview tap-target card: tinted icon square, big font-mono-num value,
+// muted label/hint sub-line, chevron affordance, hover lift.
+const OverviewStatCard = ({ icon: Icon, tint, value, label, hint, onClick, testId }) => (
+  <Card
+    className="rounded-2xl border-border bg-card cursor-pointer transition-all hover:border-brand/50 hover:shadow-lg hover:-translate-y-0.5"
+    onClick={onClick}
+    data-testid={testId}
+  >
+    <CardContent className="py-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className={cn("h-9 w-9 rounded-lg grid place-items-center shrink-0", tint)}>
+          <Icon className="h-5 w-5" />
+        </div>
+        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+      </div>
+      <p className="font-mono-num text-3xl font-bold text-foreground mt-3">{value}</p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        <span className="font-semibold text-foreground">{label}</span> · {hint}
+      </p>
+    </CardContent>
+  </Card>
 );
 
 const ImportRosterWizard = ({ eventId, onDone, onUnavailable }) => {
@@ -2210,25 +2238,33 @@ const SetupProgressStrip = ({ event, onGo }) => {
     { id: "evaluators", label: "Evaluators", done: (event.evaluator_count ?? 0) > 0, tab: "evaluators" },
     { id: "activated", label: "Activated", done: curIdx >= activeIdx && curIdx !== -1, tab: "overview" },
   ];
+  // The first unfinished step is where the event-runner should look next.
+  const currentIdx = steps.findIndex((s) => !s.done);
   return (
-    <div className="flex flex-wrap items-center gap-y-1 rounded-xl border border-border bg-card px-3 py-2" data-testid="event-setup-progress">
-      {steps.map((s, i) => (
-        <span key={s.id} className="inline-flex items-center">
-          {i > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground mx-0.5" />}
-          <button
-            type="button"
-            onClick={() => onGo(s.tab)}
-            className={cn(
-              "inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold hover:bg-secondary",
-              s.done ? "text-success" : "text-muted-foreground"
-            )}
-            data-testid={`event-setup-step-${s.id}`}
-          >
-            {s.done ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
-            {s.label}
-          </button>
-        </span>
-      ))}
+    <div className="overflow-x-auto">
+      <div className="flex w-max items-center rounded-xl border border-border bg-card px-3 py-2" data-testid="event-setup-progress">
+        {steps.map((s, i) => (
+          <span key={s.id} className="inline-flex items-center">
+            {i > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground mx-0.5 shrink-0" />}
+            <button
+              type="button"
+              onClick={() => onGo(s.tab)}
+              className={cn(
+                "inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors hover:bg-secondary",
+                s.done
+                  ? "bg-success/15 text-success"
+                  : i === currentIdx
+                    ? "ring-1 ring-brand text-foreground"
+                    : "text-muted-foreground"
+              )}
+              data-testid={`event-setup-step-${s.id}`}
+            >
+              {s.done ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
+              {s.label}
+            </button>
+          </span>
+        ))}
+      </div>
     </div>
   );
 };
@@ -2504,33 +2540,40 @@ export default function EventDetail() {
         </div>
 
         <TabsContent value="overview" className="mt-4">
-          {isAdmin && <div className="mb-3"><SetupProgressStrip event={event} onGo={(t) => setParams({ tab: t })} /></div>}
           {isAdmin && (
-            <Card className="rounded-2xl border-border mb-3" data-testid="event-registration-share">
-              <CardContent className="py-4 flex flex-wrap items-center gap-4">
-                <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(`${window.location.origin}/register/${eventId}`)}`}
-                  alt="Registration QR"
-                  className="rounded-xl border border-border bg-white p-1.5 w-32 h-32"
-                  data-testid="event-registration-qr"
-                />
-                <div className="flex-1 min-w-[200px] space-y-1.5">
-                  <p className="font-semibold text-foreground">Family registration</p>
-                  <p className="text-xs text-muted-foreground">
-                    Parents scan (or tap the link) to register — the athlete lands on this
-                    roster grouped by age, evaluation-ready. Print the QR for the check-in table.
-                  </p>
-                  <p className="text-xs font-mono break-all text-info">{`${window.location.origin}/register/${eventId}`}</p>
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="outline" className="h-8 rounded-lg text-xs"
-                      onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/register/${eventId}`); toast.success("Registration link copied."); }}
-                      data-testid="event-registration-copy">
-                      Copy link
-                    </Button>
-                    <Button size="sm" variant="outline" className="h-8 rounded-lg text-xs"
-                      onClick={() => window.open(`https://api.qrserver.com/v1/create-qr-code/?size=800x800&data=${encodeURIComponent(`${window.location.origin}/register/${eventId}`)}`, "_blank")}>
-                      Open big QR (print)
-                    </Button>
+            <div className="mb-3 space-y-1.5">
+              <SectionLabel>Setup</SectionLabel>
+              <SetupProgressStrip event={event} onGo={(t) => setParams({ tab: t })} />
+            </div>
+          )}
+          {isAdmin && (
+            <Card className="rounded-2xl border-border bg-card mb-3" data-testid="event-registration-share">
+              <CardContent className="py-4">
+                <SectionLabel>Family registration</SectionLabel>
+                <div className="mt-3 flex flex-wrap items-center gap-4">
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(`${window.location.origin}/register/${eventId}`)}`}
+                    alt="Registration QR"
+                    className="rounded-xl border border-border bg-white p-1.5 w-32 h-32"
+                    data-testid="event-registration-qr"
+                  />
+                  <div className="flex-1 min-w-[200px] space-y-1.5">
+                    <p className="text-xs text-muted-foreground">
+                      Parents scan (or tap the link) to register — the athlete lands on this
+                      roster grouped by age, evaluation-ready. Print the QR for the check-in table.
+                    </p>
+                    <p className="text-xs font-mono break-all text-info">{`${window.location.origin}/register/${eventId}`}</p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" variant="outline" className="h-10 rounded-xl text-xs"
+                        onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/register/${eventId}`); toast.success("Registration link copied."); }}
+                        data-testid="event-registration-copy">
+                        Copy link
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-10 rounded-xl text-xs"
+                        onClick={() => window.open(`https://api.qrserver.com/v1/create-qr-code/?size=800x800&data=${encodeURIComponent(`${window.location.origin}/register/${eventId}`)}`, "_blank")}>
+                        Open big QR (print)
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </CardContent>
@@ -2538,43 +2581,39 @@ export default function EventDetail() {
           )}
           {/* The three things an event-runner touches constantly — big, direct,
               one tap each. Staffing math moved out of the way (Evaluators tab). */}
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Card className="rounded-2xl border-border hover:border-brand/50 transition-colors cursor-pointer" onClick={() => setParams({ tab: "roster" })} data-testid="overview-athletes-card">
-              <CardContent className="py-4">
-                <div className="flex items-center justify-between">
-                  <p className="font-semibold text-foreground flex items-center gap-2"><Users className="h-4 w-4 text-brand" /> Athletes</p>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                </div>
-                <p className="text-3xl font-bold font-mono-num mt-2">{event.player_count ?? 0}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">on the roster · tap to manage &amp; approve</p>
-              </CardContent>
-            </Card>
-            <Card className="rounded-2xl border-border hover:border-brand/50 transition-colors cursor-pointer" onClick={() => setParams({ tab: "checkin" })} data-testid="overview-checkin-card">
-              <CardContent className="py-4">
-                <div className="flex items-center justify-between">
-                  <p className="font-semibold text-foreground flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-success" /> Check-In</p>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                </div>
-                <p className="text-3xl font-bold font-mono-num mt-2">
-                  {event.checked_in_count ?? 0}<span className="text-lg text-muted-foreground">/{event.player_count ?? 0}</span>
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {(event.player_count ?? 0) - (event.checked_in_count ?? 0) > 0
-                    ? `${(event.player_count ?? 0) - (event.checked_in_count ?? 0)} still to check in`
-                    : "everyone is in"}
-                </p>
-              </CardContent>
-            </Card>
-            <Card className="rounded-2xl border-border hover:border-brand/50 transition-colors cursor-pointer" onClick={() => setParams({ tab: "groups" })} data-testid="overview-groups-card">
-              <CardContent className="py-4">
-                <div className="flex items-center justify-between">
-                  <p className="font-semibold text-foreground flex items-center gap-2"><Layers className="h-4 w-4 text-info" /> Groups</p>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                </div>
-                <p className="text-3xl font-bold font-mono-num mt-2">{event.group_count ?? 0}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">tap to balance with drag &amp; drop</p>
-              </CardContent>
-            </Card>
+          <div className="space-y-1.5">
+            <SectionLabel>Event snapshot</SectionLabel>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <OverviewStatCard
+                icon={Users}
+                tint="bg-info/15 text-info"
+                value={event.player_count ?? 0}
+                label="Athletes"
+                hint="on the roster · tap to manage & approve"
+                onClick={() => setParams({ tab: "roster" })}
+                testId="overview-athletes-card"
+              />
+              <OverviewStatCard
+                icon={CheckCircle2}
+                tint="bg-success/15 text-success"
+                value={<>{event.checked_in_count ?? 0}<span className="text-lg text-muted-foreground">/{event.player_count ?? 0}</span></>}
+                label="Check-In"
+                hint={(event.player_count ?? 0) - (event.checked_in_count ?? 0) > 0
+                  ? `${(event.player_count ?? 0) - (event.checked_in_count ?? 0)} still to check in`
+                  : "everyone is in"}
+                onClick={() => setParams({ tab: "checkin" })}
+                testId="overview-checkin-card"
+              />
+              <OverviewStatCard
+                icon={LayoutGrid}
+                tint="bg-warning/15 text-warning"
+                value={event.group_count ?? 0}
+                label="Groups"
+                hint="tap to balance with drag & drop"
+                onClick={() => setParams({ tab: "groups" })}
+                testId="overview-groups-card"
+              />
+            </div>
           </div>
           {event.description && <Card className="rounded-2xl border-border mt-3"><CardContent className="py-4 text-sm text-muted-foreground">{event.description}</CardContent></Card>}
           {(event.age_groups || []).length > 0 && (
