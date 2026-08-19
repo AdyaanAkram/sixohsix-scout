@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errMsg } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,18 +9,61 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogT
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/common/EmptyState";
 import { toast } from "sonner";
-import { Plus, Dumbbell } from "lucide-react";
+import { Dumbbell, Pencil, Plus } from "lucide-react";
+
+const EMPTY_DRILL = { name: "", category: "defense", description: "", positions: "", video_url: "" };
+
+const ADMIN_ROLES = ["owner", "admin"];
+
+/* Module level so the <Input>s are never remounted mid-typing — an inline
+   component definition rebuilds them each keystroke and the field loses focus.
+   Shared by the create and the edit dialog so both stay in step. */
+const DrillForm = ({ form, onField, idPrefix }) => (
+  <div className="space-y-3">
+    <div className="space-y-1">
+      <Label className="text-xs">Name</Label>
+      <Input value={form.name} onChange={(e) => onField("name", e.target.value)} className="h-10 rounded-lg" data-testid={`${idPrefix}-name`} />
+    </div>
+    <div className="space-y-1">
+      <Label className="text-xs">Category</Label>
+      <Input value={form.category} onChange={(e) => onField("category", e.target.value)} className="h-10 rounded-lg" data-testid={`${idPrefix}-category`} />
+    </div>
+    <div className="space-y-1">
+      <Label className="text-xs">Positions (comma-separated)</Label>
+      <Input value={form.positions} onChange={(e) => onField("positions", e.target.value)} placeholder="SS, HIT" className="h-10 rounded-lg" data-testid={`${idPrefix}-positions`} />
+    </div>
+    <div className="space-y-1">
+      <Label className="text-xs">Description</Label>
+      <Input value={form.description} onChange={(e) => onField("description", e.target.value)} className="h-10 rounded-lg" data-testid={`${idPrefix}-description`} />
+    </div>
+    <div className="space-y-1">
+      <Label className="text-xs">Video URL</Label>
+      <Input value={form.video_url} onChange={(e) => onField("video_url", e.target.value)} className="h-10 rounded-lg" data-testid={`${idPrefix}-video_url`} />
+    </div>
+  </div>
+);
+
+const toPositions = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
 
 export default function Drills() {
+  const { user } = useAuth();
   const [rows, setRows] = useState(null);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", category: "defense", description: "", positions: "", video_url: "" });
+  const [form, setForm] = useState(EMPTY_DRILL);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [editForm, setEditForm] = useState(EMPTY_DRILL);
+  const [editBusy, setEditBusy] = useState(false);
 
   const load = useCallback(() => {
     api.get("/drills").then((r) => setRows(r.data)).catch((e) => { toast.error(errMsg(e)); setRows([]); });
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  const onField = useCallback((field, value) => setForm((f) => ({ ...f, [field]: value })), []);
+  const onEditField = useCallback((field, value) => setEditForm((f) => ({ ...f, [field]: value })), []);
+
+  const isAdmin = ADMIN_ROLES.includes(user?.role);
 
   const create = async () => {
     setBusy(true);
@@ -28,17 +72,51 @@ export default function Drills() {
         name: form.name.trim(),
         category: form.category,
         description: form.description || null,
-        positions: form.positions.split(",").map((s) => s.trim()).filter(Boolean),
+        positions: toPositions(form.positions),
         video_url: form.video_url || null,
         metric_tags: [],
         active: true,
       });
       toast.success("Drill added.");
       setOpen(false);
-      setForm({ name: "", category: "defense", description: "", positions: "", video_url: "" });
+      setForm(EMPTY_DRILL);
       load();
     } catch (e) { toast.error(errMsg(e)); }
     finally { setBusy(false); }
+  };
+
+  const openEdit = (d) => {
+    setEditing(d);
+    setEditForm({
+      name: d.name || "",
+      category: d.category || "general",
+      description: d.description || "",
+      positions: (d.positions || []).join(", "),
+      video_url: d.video_url || "",
+    });
+  };
+
+  // PATCH /drills/{id} takes the full DrillBody and $sets every field, so this
+  // must send the whole document — metric_tags and active come from the saved
+  // drill or editing a name would silently wipe them.
+  const saveEdit = async () => {
+    if (!editing) return;
+    setEditBusy(true);
+    try {
+      await api.patch(`/drills/${editing.id}`, {
+        name: editForm.name.trim(),
+        category: editForm.category.trim() || "general",
+        description: editForm.description || null,
+        positions: toPositions(editForm.positions),
+        video_url: editForm.video_url || null,
+        metric_tags: editing.metric_tags || [],
+        active: editing.active !== false,
+      });
+      toast.success("Drill updated.");
+      setEditing(null);
+      load();
+    } catch (e) { toast.error(errMsg(e)); }
+    finally { setEditBusy(false); }
   };
 
   const seedDefaults = async () => {
@@ -66,13 +144,7 @@ export default function Drills() {
             </DialogTrigger>
             <DialogContent className="rounded-2xl">
               <DialogHeader><DialogTitle className="font-display text-2xl">New drill</DialogTitle></DialogHeader>
-              <div className="space-y-3">
-                <div className="space-y-1"><Label className="text-xs">Name</Label><Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="h-10 rounded-lg" /></div>
-                <div className="space-y-1"><Label className="text-xs">Category</Label><Input value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} className="h-10 rounded-lg" /></div>
-                <div className="space-y-1"><Label className="text-xs">Positions (comma-separated)</Label><Input value={form.positions} onChange={(e) => setForm((f) => ({ ...f, positions: e.target.value }))} placeholder="SS, HIT" className="h-10 rounded-lg" /></div>
-                <div className="space-y-1"><Label className="text-xs">Description</Label><Input value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} className="h-10 rounded-lg" /></div>
-                <div className="space-y-1"><Label className="text-xs">Video URL</Label><Input value={form.video_url} onChange={(e) => setForm((f) => ({ ...f, video_url: e.target.value }))} className="h-10 rounded-lg" /></div>
-              </div>
+              <DrillForm form={form} onField={onField} idPrefix="drill-create" />
               <DialogFooter>
                 <Button className="w-full rounded-xl bg-primary h-11" disabled={busy || !form.name.trim()} onClick={create}>Save</Button>
               </DialogFooter>
@@ -95,14 +167,44 @@ export default function Drills() {
                   </p>
                   {d.description && <p className="text-xs text-muted-foreground mt-1">{d.description}</p>}
                 </div>
-                {d.video_url && (
-                  <a href={d.video_url} target="_blank" rel="noreferrer" className="text-xs text-info hover:underline">Video</a>
-                )}
+                <div className="flex items-center gap-3 shrink-0">
+                  {d.video_url && (
+                    <a href={d.video_url} target="_blank" rel="noreferrer" className="text-xs text-info hover:underline">Video</a>
+                  )}
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => openEdit(d)}
+                      className="text-muted-foreground hover:text-foreground p-1"
+                      title="Edit drill"
+                      data-testid={`drill-edit-${d.id}`}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
               </CardContent>
             </Card>
           ))}
         </div>
       )}
+
+      <Dialog open={!!editing} onOpenChange={(v) => { if (!v) setEditing(null); }}>
+        <DialogContent className="rounded-2xl" data-testid="drill-edit-dialog">
+          <DialogHeader><DialogTitle className="font-display text-2xl">Edit drill</DialogTitle></DialogHeader>
+          <DrillForm form={editForm} onField={onEditField} idPrefix="drill-edit-field" />
+          <DialogFooter>
+            <Button
+              className="w-full rounded-xl bg-primary h-11"
+              disabled={editBusy || !editForm.name.trim()}
+              onClick={saveEdit}
+              data-testid="drill-edit-save"
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

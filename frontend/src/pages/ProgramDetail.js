@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, errMsg } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PlayerAvatar } from "@/components/common/PlayerAvatar";
 import { toast } from "sonner";
-import { ArrowLeft, ArrowRight, CalendarDays, CalendarPlus, Check, Clock, DollarSign, Loader2, Plus, Search, Users, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, CalendarPlus, Check, Clock, DollarSign, Loader2, Pencil, Plus, Search, Users, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /* ---------------------------------- helpers ---------------------------------- */
@@ -23,6 +26,25 @@ const fmtPrice = (cents) => {
 const fullName = (a, fallback) => (a ? `${a.first_name} ${a.last_name}` : fallback);
 
 const MARKS = ["present", "late", "absent", "excused"];
+
+/* Mirrors PROGRAM_TYPES / PROGRAM_STATUSES on the backend — anything else is a
+   422 from PATCH /programs/{id}. Labels match the Programs list page. */
+const PROGRAM_TYPES = [
+  { value: "camp", label: "Camp" },
+  { value: "clinic", label: "Clinic" },
+  { value: "training_block", label: "Training block" },
+  { value: "coaching_clinic", label: "Coaching clinic" },
+];
+
+const PROGRAM_STATUSES = [
+  { value: "draft", label: "Draft" },
+  { value: "open", label: "Open" },
+  { value: "in_progress", label: "In progress" },
+  { value: "completed", label: "Completed" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
+const EDIT_ROLES = ["owner", "admin", "head_scout", "coach"];
 
 /* --------------------------------- primitives -------------------------------- */
 
@@ -119,12 +141,120 @@ const EnrollSearch = ({ query, onQueryChange, searchBusy, candidates, enrollingI
   </div>
 );
 
+/* Module level for the same reason as the forms above: an inline definition
+   remounts every <Input> on each keystroke and the field loses focus. */
+const EditProgramForm = ({ form, onField }) => (
+  <div className="space-y-3">
+    <div className="space-y-1">
+      <Label className="text-xs">Name</Label>
+      <Input
+        value={form.name}
+        onChange={(e) => onField("name", e.target.value)}
+        className="h-10 rounded-lg"
+        data-testid="program-edit-name"
+      />
+    </div>
+    <div className="grid grid-cols-2 gap-3">
+      <div className="space-y-1">
+        <Label className="text-xs">Type</Label>
+        <Select value={form.type} onValueChange={(v) => onField("type", v)}>
+          <SelectTrigger className="h-10 rounded-lg" data-testid="program-edit-type"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {!PROGRAM_TYPES.some((t) => t.value === form.type) && form.type && (
+              <SelectItem value={form.type}>{form.type}</SelectItem>
+            )}
+            {PROGRAM_TYPES.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">Status</Label>
+        <Select value={form.status} onValueChange={(v) => onField("status", v)}>
+          <SelectTrigger className="h-10 rounded-lg" data-testid="program-edit-status"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {!PROGRAM_STATUSES.some((s) => s.value === form.status) && form.status && (
+              <SelectItem value={form.status}>{form.status}</SelectItem>
+            )}
+            {PROGRAM_STATUSES.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+    <div className="grid grid-cols-2 gap-3">
+      <div className="space-y-1">
+        <Label className="text-xs">Start date</Label>
+        <Input
+          type="date"
+          value={form.start_date}
+          onChange={(e) => onField("start_date", e.target.value)}
+          className="h-10 rounded-lg"
+          data-testid="program-edit-start_date"
+        />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">End date</Label>
+        <Input
+          type="date"
+          value={form.end_date}
+          onChange={(e) => onField("end_date", e.target.value)}
+          className="h-10 rounded-lg"
+          data-testid="program-edit-end_date"
+        />
+      </div>
+    </div>
+    <div className="grid grid-cols-2 gap-3">
+      <div className="space-y-1">
+        <Label className="text-xs">Capacity</Label>
+        <Input
+          type="number"
+          min="1"
+          max="5000"
+          value={form.capacity}
+          onChange={(e) => onField("capacity", e.target.value)}
+          placeholder="No limit"
+          className="h-10 rounded-lg"
+          data-testid="program-edit-capacity"
+        />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">Price (USD)</Label>
+        <Input
+          type="number"
+          min="0"
+          step="0.01"
+          value={form.price}
+          onChange={(e) => onField("price", e.target.value)}
+          placeholder="Free"
+          className="h-10 rounded-lg"
+          data-testid="program-edit-price_cents"
+        />
+      </div>
+    </div>
+    <div className="space-y-1">
+      <Label className="text-xs">Description</Label>
+      <Input
+        value={form.description}
+        onChange={(e) => onField("description", e.target.value)}
+        className="h-10 rounded-lg"
+        data-testid="program-edit-description"
+      />
+    </div>
+  </div>
+);
+
 /* ----------------------------------- page ------------------------------------ */
 
 export default function ProgramDetail() {
   const { programId } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [creatingEventFor, setCreatingEventFor] = useState(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editForm, setEditForm] = useState({
+    name: "", type: "camp", status: "draft", start_date: "", end_date: "",
+    capacity: "", price: "", description: "",
+  });
   const [prog, setProg] = useState(null);
   const [enrollments, setEnrollments] = useState([]);
   const [sessionDate, setSessionDate] = useState("");
@@ -186,6 +316,53 @@ export default function ProgramDetail() {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     searchTimer.current = setTimeout(() => searchAthletes(q), 300);
   }, [searchAthletes]);
+
+  const canEdit = EDIT_ROLES.includes(user?.role);
+
+  const onEditField = useCallback((field, value) => {
+    setEditForm((f) => ({ ...f, [field]: value }));
+  }, []);
+
+  const openEditProgram = () => {
+    setEditForm({
+      name: prog?.name || "",
+      type: prog?.type || "camp",
+      status: prog?.status || "draft",
+      start_date: prog?.start_date || "",
+      end_date: prog?.end_date || "",
+      capacity: prog?.capacity == null ? "" : String(prog.capacity),
+      price: prog?.price_cents == null ? "" : String(prog.price_cents / 100),
+      description: prog?.description || "",
+    });
+    setEditOpen(true);
+  };
+
+  // Only the fields this dialog owns are sent — ProgramPatch forbids unknown
+  // keys, and omitting age_groups/location_id leaves them untouched server-side.
+  const saveEditProgram = async () => {
+    const capacity = editForm.capacity === "" ? null : Number.parseInt(editForm.capacity, 10);
+    const priceCents = editForm.price === "" ? null : Math.round(Number.parseFloat(editForm.price) * 100);
+    setEditBusy(true);
+    try {
+      await api.patch(`/programs/${programId}`, {
+        name: editForm.name.trim(),
+        type: editForm.type,
+        status: editForm.status,
+        start_date: editForm.start_date || null,
+        end_date: editForm.end_date || null,
+        capacity: Number.isFinite(capacity) ? capacity : null,
+        price_cents: Number.isFinite(priceCents) ? priceCents : null,
+        description: editForm.description.trim() || null,
+      });
+      toast.success("Program updated.");
+      setEditOpen(false);
+      load();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setEditBusy(false);
+    }
+  };
 
   const addSession = async () => {
     if (!sessionDate) return;
@@ -312,7 +489,20 @@ export default function ProgramDetail() {
         <Link to="/programs" className="inline-flex items-center gap-1 text-sm text-info hover:underline mb-2">
           <ArrowLeft className="h-3.5 w-3.5" /> Programs
         </Link>
-        <h1 className="font-display text-4xl text-foreground">{prog.name}</h1>
+        <span className="flex items-center gap-2">
+          <h1 className="font-display text-4xl text-foreground">{prog.name}</h1>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={openEditProgram}
+              className="text-muted-foreground hover:text-foreground p-1"
+              title="Edit program details"
+              data-testid="program-edit-button"
+            >
+              <Pencil className="h-4 w-4" />
+            </button>
+          )}
+        </span>
         <p className="text-sm text-muted-foreground mt-1">
           {prog.type} · {prog.status} · {activeEnrollments.length} enrolled
         </p>
@@ -320,6 +510,25 @@ export default function ProgramDetail() {
           Take attendance each session. Create a session&apos;s event to run stations, check-in and scoring for that day — enrolled athletes join the event roster automatically.
         </p>
       </div>
+
+      {canEdit && (
+        <Dialog open={editOpen} onOpenChange={setEditOpen}>
+          <DialogContent className="rounded-2xl max-w-md" data-testid="program-edit-dialog">
+            <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Edit program</DialogTitle></DialogHeader>
+            <EditProgramForm form={editForm} onField={onEditField} />
+            <DialogFooter>
+              <Button
+                onClick={saveEditProgram}
+                disabled={editBusy || !editForm.name.trim()}
+                className="w-full rounded-xl bg-primary h-11"
+                data-testid="program-edit-save"
+              >
+                {editBusy ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Saving…</> : "Save program"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Snapshot band */}
       <Card className="rounded-2xl border-border bg-card" data-testid="program-snapshot">
