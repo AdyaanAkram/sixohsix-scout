@@ -1,11 +1,12 @@
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import {
   WORKSPACE_META, WORKSPACE_HOME, getAuthorizedWorkspaces, getActiveWorkspace,
-  persistWorkspace, useWorkspace, OrgSwitcher,
+  getStaffRoles, hasStoredWorkspace, persistWorkspace, useWorkspace, OrgSwitcher,
 } from "@/components/layout/AppLayout";
 import {
-  ArrowRight, ShieldCheck, BadgeCheck, TrendingUp, Trophy,
+  ArrowRight, ShieldCheck, BadgeCheck, TrendingUp, Trophy, X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -15,6 +16,10 @@ import { cn } from "@/lib/utils";
  * (a workspace is a lens, not an access grant — roles the account isn't
  * entitled to are never shown). Tapping Enter persists the choice per user
  * and routes to that workspace's home.
+ *
+ * People hold more than one hat: a coach whose child trains here, a parent
+ * invited to coach. Those accounts see their staff cards AND the My
+ * Development card side by side, and switch between them from this screen.
  *
  * Per-mode accent colors are a deliberate identity system (mirrors the client
  * mockups): HQ red, Coach blue, Evaluator green, Scout purple, Athlete amber.
@@ -55,6 +60,70 @@ const MODE_STYLE = {
   },
 };
 
+/* A staff member with a linked athlete profile is looking at their FAMILY, not
+   at themselves — the same lens, framed honestly. */
+const familyAthleteStyle = (linkedCount) => ({
+  ...MODE_STYLE.athlete,
+  blurb: linkedCount > 1
+    ? "Your athletes' profiles, progress and goals."
+    : "Your athlete's profile, progress and goals.",
+  points: ["Their 60'6\" ID", "Results & recaps", "Goals & milestones"],
+});
+
+/* Card widths per card count. Flex-wrap rather than a fixed 4-up grid: it keeps
+   every row balanced and centres a partial last row, which matters now that the
+   athlete lens can push an account to 5 modes (owner/admin with a child). */
+const CARD_WIDTH_BY_COUNT = {
+  1: "w-full max-w-sm",
+  2: "w-full sm:w-[calc(50%_-_0.5rem)]",
+  3: "w-full sm:w-[calc(50%_-_0.5rem)] lg:w-[calc(33.333%_-_0.667rem)]",
+  4: "w-full sm:w-[calc(50%_-_0.5rem)] lg:w-[calc(25%_-_0.75rem)]",
+  5: "w-full sm:w-[calc(50%_-_0.5rem)] lg:w-[calc(33.333%_-_0.667rem)]",
+};
+
+const STAFF_NOUNS = {
+  owner: "an owner",
+  admin: "an administrator",
+  head_scout: "a head scout",
+  coach: "a coach",
+  evaluator: "an evaluator",
+};
+
+const dualRoleNoticeKey = (userId) => `606_dual_role_notice_dismissed_${userId || "anon"}`;
+
+const readDualRoleNoticeDismissed = (userId) => {
+  try { return localStorage.getItem(dualRoleNoticeKey(userId)) === "1"; } catch { return false; }
+};
+
+/* Quiet one-time strip for someone who just gained a staff hat on an account
+   that already follows an athlete. Not a modal — nothing is required of them. */
+const DualRoleNotice = ({ noun, tools, onDismiss }) => (
+  <div
+    data-testid="dual-role-notice"
+    className="mt-8 flex items-start gap-3 rounded-2xl border border-border bg-card p-4"
+  >
+    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-tertiary ring-1 ring-brand/30">
+      <ShieldCheck className="h-[18px] w-[18px] text-brand" />
+    </div>
+    <div className="min-w-0 flex-1">
+      <p className="text-sm font-semibold text-foreground">You&apos;re set up as {noun} here</p>
+      <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+        There is nothing else to set up. Your {tools} and your athlete&apos;s profile live in this one
+        account — switch between them any time from this screen.
+      </p>
+    </div>
+    <button
+      type="button"
+      onClick={onDismiss}
+      aria-label="Dismiss"
+      data-testid="dual-role-notice-dismiss"
+      className="-mr-1 -mt-1 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+    >
+      <X className="h-4 w-4" />
+    </button>
+  </div>
+);
+
 const TRUST_BADGES = [
   { icon: ShieldCheck, title: "One Athlete ID", sub: "All your data. Always with you." },
   { icon: BadgeCheck, title: "Verified & Trusted", sub: "606 standards. Every time." },
@@ -70,7 +139,7 @@ const ModeCard = ({ wsKey, meta, style, active, onEnter }) => {
       data-testid={`workspace-card-${wsKey}`}
       onClick={onEnter}
       className={cn(
-        "group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border bg-card text-left transition-all",
+        "group relative flex w-full cursor-pointer flex-col overflow-hidden rounded-2xl border bg-card text-left transition-all",
         "hover:-translate-y-1 hover:shadow-xl",
         active ? "border-brand/60 ring-1 ring-brand/40" : "border-border"
       )}
@@ -128,8 +197,26 @@ export default function Workspace() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const wsCtx = useWorkspace();
-  const workspaces = getAuthorizedWorkspaces(user?.role);
+  // Lenses come from the whole account: membership role + every staff role held
+  // anywhere + a linked athlete profile.
+  const workspaces = getAuthorizedWorkspaces(user);
   const current = getActiveWorkspace(user);
+
+  const staffRoles = getStaffRoles(user);
+  const isStaff = staffRoles.length > 0;
+  const hasFamilyLens = isStaff && !!user?.has_athlete_profile;
+
+  // "New staff capability" heuristic: staff roles, a linked athlete profile and
+  // no mode chosen on this device yet.
+  const [noticeDismissed, setNoticeDismissed] = useState(() => readDualRoleNoticeDismissed(user?.id));
+  useEffect(() => { setNoticeDismissed(readDualRoleNoticeDismissed(user?.id)); }, [user?.id]);
+  const showNotice = hasFamilyLens && !noticeDismissed && !hasStoredWorkspace(user);
+  const noticeRole = staffRoles.includes("coach") ? "coach" : staffRoles[0];
+
+  const dismissNotice = () => {
+    try { localStorage.setItem(dualRoleNoticeKey(user?.id), "1"); } catch { /* ignore */ }
+    setNoticeDismissed(true);
+  };
 
   const choose = (key) => {
     if (!workspaces.includes(key)) return;
@@ -177,28 +264,40 @@ export default function Workspace() {
           </p>
         </div>
 
+        {showNotice && (
+          <DualRoleNotice
+            noun={STAFF_NOUNS[noticeRole] || "staff"}
+            tools={noticeRole === "coach" ? "coaching tools" : "staff tools"}
+            onDismiss={dismissNotice}
+          />
+        )}
+
         <div
           className={cn(
-            "mt-8 grid gap-4",
-            workspaces.length >= 4 ? "sm:grid-cols-2 lg:grid-cols-4"
-              : workspaces.length === 3 ? "sm:grid-cols-3"
-              : workspaces.length === 2 ? "mx-auto w-full max-w-2xl sm:grid-cols-2"
-              : "mx-auto w-full max-w-sm"
+            "mt-8 flex flex-wrap justify-center gap-4",
+            workspaces.length === 2 && "mx-auto w-full max-w-2xl"
           )}
+          data-testid="workspace-card-grid"
         >
           {workspaces.map((key) => {
             const meta = WORKSPACE_META[key];
-            const style = MODE_STYLE[key];
+            const style = key === "athlete" && hasFamilyLens
+              ? familyAthleteStyle(user?.linked_athlete_count || 0)
+              : MODE_STYLE[key];
             if (!meta || !style) return null;
             return (
-              <ModeCard
+              <div
                 key={key}
-                wsKey={key}
-                meta={meta}
-                style={style}
-                active={key === current}
-                onEnter={() => choose(key)}
-              />
+                className={cn("flex", CARD_WIDTH_BY_COUNT[workspaces.length] || CARD_WIDTH_BY_COUNT[4])}
+              >
+                <ModeCard
+                  wsKey={key}
+                  meta={meta}
+                  style={style}
+                  active={key === current}
+                  onEnter={() => choose(key)}
+                />
+              </div>
             );
           })}
         </div>

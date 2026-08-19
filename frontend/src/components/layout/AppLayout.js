@@ -34,8 +34,9 @@ import {
  *   athlete   — My Development
  * ------------------------------------------------------------------------- */
 export const WORKSPACES_BY_ROLE = {
-  // Athlete View intentionally omitted for staff: no linked athlete profile
-  // on staff accounts (already flagged to the client).
+  // Staff roles never imply the athlete lens on their own — it is added only
+  // when the ACCOUNT actually owns or guards an athlete profile
+  // (`has_athlete_profile`), see getAuthorizedWorkspaces below.
   owner: ["hq", "coach", "scout", "evaluator"],
   admin: ["hq", "coach", "scout", "evaluator"],
   head_scout: ["scout"], // scout mode already includes Review
@@ -61,14 +62,46 @@ export const WORKSPACE_HOME = {
   athlete: "/my-id",
 };
 
-export const getAuthorizedWorkspaces = (role) =>
-  WORKSPACES_BY_ROLE[role] || WORKSPACES_BY_ROLE.evaluator;
+/** Canonical display order — staff lenses first, the personal lens last. */
+const WORKSPACE_ORDER = ["hq", "coach", "scout", "evaluator", "athlete"];
+
+/** Every staff role the account holds, across all of its active memberships. */
+export const getStaffRoles = (user) =>
+  (Array.isArray(user?.staff_roles) ? user.staff_roles : []).filter((r) => !!WORKSPACES_BY_ROLE[r]);
+
+/**
+ * Authorized workspaces for the WHOLE PERSON, not for one membership row.
+ * People hold more than one hat: a coach who is also a parent, a parent who
+ * gets invited to coach. The lens list is therefore the union of
+ *   1. the workspaces of the current membership role (`user.role`),
+ *   2. the workspaces of every staff role held anywhere (`user.staff_roles`),
+ *   3. the athlete lens when the account owns or guards an athlete profile
+ *      (`user.has_athlete_profile`) — always last.
+ * A workspace is still only a LENS: every route keeps its own role gates.
+ *
+ * Backward compatible: a bare role string is treated as that role with no
+ * extra capabilities, so legacy `getAuthorizedWorkspaces(user?.role)` callers
+ * keep their exact previous result.
+ */
+export const getAuthorizedWorkspaces = (userOrRole) => {
+  if (typeof userOrRole === "string") {
+    return WORKSPACES_BY_ROLE[userOrRole] || WORKSPACES_BY_ROLE.evaluator;
+  }
+  const user = userOrRole || {};
+  const allowed = new Set(WORKSPACES_BY_ROLE[user.role] || WORKSPACES_BY_ROLE.evaluator);
+  getStaffRoles(user).forEach((r) => {
+    (WORKSPACES_BY_ROLE[r] || []).forEach((ws) => allowed.add(ws));
+  });
+  if (user.has_athlete_profile) allowed.add("athlete");
+  const ordered = WORKSPACE_ORDER.filter((ws) => allowed.has(ws));
+  return ordered.length ? ordered : WORKSPACES_BY_ROLE.evaluator;
+};
 
 const workspaceStorageKey = (userId) => `606_workspace_${userId || "anon"}`;
 
-/** True only when a stored choice exists AND it is authorized for the role. */
+/** True only when a stored choice exists AND it is still authorized. */
 export const hasStoredWorkspace = (user) => {
-  const authorized = getAuthorizedWorkspaces(user?.role);
+  const authorized = getAuthorizedWorkspaces(user);
   let stored = null;
   try { stored = localStorage.getItem(workspaceStorageKey(user?.id)); } catch { /* ignore */ }
   return !!stored && authorized.includes(stored);
@@ -76,7 +109,7 @@ export const hasStoredWorkspace = (user) => {
 
 /** Active workspace = stored choice if authorized, else first authorized. */
 export const getActiveWorkspace = (user) => {
-  const authorized = getAuthorizedWorkspaces(user?.role);
+  const authorized = getAuthorizedWorkspaces(user);
   let stored = null;
   try { stored = localStorage.getItem(workspaceStorageKey(user?.id)); } catch { /* ignore */ }
   return stored && authorized.includes(stored) ? stored : authorized[0];
@@ -486,9 +519,14 @@ export const AppLayout = ({ children }) => {
   const role = user?.role || "evaluator";
 
   // Active workspace: stored per user, guarded against unauthorized values.
-  const workspaces = getAuthorizedWorkspaces(role);
+  // Resolved from the whole account (membership role + every staff role held +
+  // a linked athlete profile), so dual-role people keep both sets of lenses.
+  const workspaces = getAuthorizedWorkspaces(user);
+  // Capability signature — re-resolves when the account gains a staff role or a
+  // linked athlete profile without the user id changing (e.g. after /auth/me).
+  const capabilities = `${role}|${getStaffRoles(user).join(",")}|${user?.has_athlete_profile ? 1 : 0}`;
   const [workspace, setWorkspace] = useState(() => getActiveWorkspace(user));
-  useEffect(() => { setWorkspace(getActiveWorkspace(user)); }, [user?.id, role]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setWorkspace(getActiveWorkspace(user)); }, [user?.id, capabilities]); // eslint-disable-line react-hooks/exhaustive-deps
   const activeWorkspace = workspaces.includes(workspace) ? workspace : workspaces[0];
 
   const switchWorkspace = (key) => {
