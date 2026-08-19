@@ -17,7 +17,7 @@ export default function Drills() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
-    api.get("/drills").then((r) => setRows(r.data)).catch((e) => toast.error(errMsg(e)));
+    api.get("/drills").then((r) => setRows(r.data)).catch((e) => { toast.error(errMsg(e)); setRows([]); });
   }, []);
   useEffect(() => { load(); }, [load]);
 

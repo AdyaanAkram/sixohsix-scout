@@ -57,7 +57,7 @@ export default function Programs() {
   });
 
   const load = useCallback(() => {
-    api.get("/programs").then((r) => setRows(r.data)).catch((e) => toast.error(errMsg(e)));
+    api.get("/programs").then((r) => setRows(r.data)).catch(() => setRows([])).catch((e) => toast.error(errMsg(e)));
   }, []);
   useEffect(() => { load(); }, [load]);
 

@@ -96,7 +96,7 @@ const NAV_BY_WORKSPACE = {
 };
 
 const ADMIN_BY_WORKSPACE = {
-  hq: ["review", "scout", "reports", "programs", "store", "staff", "templates", "drills", "audit", "settings"],
+  hq: ["review", "evaluate", "scout", "reports", "programs", "store", "staff", "templates", "drills", "audit", "settings"],
   coach: ["scout", "reports", "programs", "settings"],
   scout: ["players", "reports", "programs", "settings"],
   evaluator: ["settings"], // owner/coach dropping into evaluator mode keep Settings
@@ -131,7 +131,7 @@ const NAV_ITEMS = {
   drills: { to: "/drills", label: "Drills", icon: Dumbbell },
   audit: { to: "/audit-log", label: "Audit Log", icon: ScrollText },
   settings: { to: "/settings", label: "Settings", icon: Settings },
-  store: { to: "/store", label: "Store", icon: ShoppingBag },
+  store: { to: "/manage/store", label: "Store", icon: ShoppingBag },
   "my-id": { to: "/my-id", label: "My Development", icon: IdCard, slug: "my-id" },
 };
 

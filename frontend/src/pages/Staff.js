@@ -28,7 +28,7 @@ export default function Staff() {
   const isAdmin = ["owner", "admin"].includes(user?.role);
 
   const load = useCallback(() => {
-    api.get("/staff").then((r) => setStaff(r.data));
+    api.get("/staff").then((r) => setStaff(r.data)).catch((e) => { toast.error(errMsg(e)); setStaff([]); });
     if (isAdmin) api.get("/invitations").then((r) => setInvitations(r.data.filter((i) => i.status === "pending")));
   }, [isAdmin]);
   useEffect(() => { load(); }, [load]);

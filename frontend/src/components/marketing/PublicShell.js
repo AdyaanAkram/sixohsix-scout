@@ -134,7 +134,7 @@ export function PublicFooter() {
             )}
             <Link to="/signup" className="text-muted-foreground hover:text-foreground transition-colors">Register</Link>
             <Link to="/store" className="text-muted-foreground hover:text-foreground transition-colors">Store</Link>
-            <a href="/guide" className="text-muted-foreground hover:text-foreground transition-colors">Guide</a>
+            <a href="/guide.html" className="text-muted-foreground hover:text-foreground transition-colors">Guide</a>
           </nav>
         </div>
         <p className="mt-10 text-[11px] text-muted-foreground/70 leading-relaxed max-w-2xl">

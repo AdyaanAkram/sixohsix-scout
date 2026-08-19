@@ -990,7 +990,7 @@ export default function RegisterEvent() {
           onChange={(v) => setConsents((c) => ({ ...c, privacy_policy: v }))}
           testid="register-consent-privacy-checkbox"
         >
-          I have read and agree to the <a href="/guide" target="_blank" rel="noreferrer" className="text-info hover:underline">Privacy Policy</a>. <span className="text-destructive">*</span>
+          I have read and agree to the <a href="/guide.html" target="_blank" rel="noreferrer" className="text-info hover:underline">Privacy Policy</a>. <span className="text-destructive">*</span>
         </ConsentCheck>
         <ConsentCheck
           id="register-consent-terms"
@@ -998,7 +998,7 @@ export default function RegisterEvent() {
           onChange={(v) => setConsents((c) => ({ ...c, terms: v }))}
           testid="register-consent-terms-checkbox"
         >
-          I agree to the <a href="/guide" target="_blank" rel="noreferrer" className="text-info hover:underline">Terms of Service</a>. <span className="text-destructive">*</span>
+          I agree to the <a href="/guide.html" target="_blank" rel="noreferrer" className="text-info hover:underline">Terms of Service</a>. <span className="text-destructive">*</span>
         </ConsentCheck>
       </div>
 

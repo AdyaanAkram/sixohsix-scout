@@ -72,6 +72,9 @@ function App() {
             <Route path="/signin" element={<SignIn />} />
             <Route path="/signup" element={<SignUp />} />
             <Route path="/store" element={<Store />} />
+            {/* Same storefront inside the app shell — the sidebar nav must never
+                drop an admin out of the authenticated layout. */}
+            <Route path="/manage/store" element={<Protected><StaffOnly><Store embedded /></StaffOnly></Protected>} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/accept-invitation" element={<AcceptInvitation />} />
           <Route path="/story/:slug" element={<Story />} />

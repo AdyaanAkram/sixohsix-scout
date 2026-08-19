@@ -225,7 +225,7 @@ function ItemDialog({ open, onOpenChange, form, setForm, categories, editing, sa
   );
 }
 
-export default function Store() {
+export default function Store({ embedded = false }) {
   const { user } = useAuth();
   const isAdmin = user?.role === "owner" || user?.role === "admin";
 
@@ -325,11 +325,13 @@ export default function Store() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col" data-testid="store-page">
-      <PublicNav />
+    <div className={embedded ? "flex flex-col" : "min-h-screen bg-background text-foreground flex flex-col"} data-testid="store-page">
+      {!embedded && <PublicNav />}
 
       {/* Hero strip */}
-      <section className="relative overflow-hidden pt-28 sm:pt-32 pb-10 sm:pb-14 border-b border-border">
+      <section className={embedded
+        ? "relative overflow-hidden pb-8 border-b border-border"
+        : "relative overflow-hidden pt-28 sm:pt-32 pb-10 sm:pb-14 border-b border-border"}>
         <div className="absolute inset-0 mk-hero-sweep" aria-hidden />
         <div className="relative max-w-6xl mx-auto px-5 sm:px-8">
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-brand">Affiliate store</p>
@@ -414,7 +416,7 @@ export default function Store() {
         onSave={save}
       />
 
-      <PublicFooter />
+      {!embedded && <PublicFooter />}
     </div>
   );
 }

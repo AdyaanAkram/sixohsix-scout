@@ -52,7 +52,8 @@ export default function Evaluate() {
     // Warm the offline app shell as soon as an evaluator enters the flow, so a
     // cold reload later in the camp still boots. No-op if unsupported.
     registerAppShell();
-    api.get("/my-assignments").then((r) => setAssignments(r.data));
+    api.get("/my-assignments").then((r) => setAssignments(r.data))
+      .catch((e) => { toast.error(errMsg(e)); setAssignments([]); });
   }, []);
 
   useEffect(() => {

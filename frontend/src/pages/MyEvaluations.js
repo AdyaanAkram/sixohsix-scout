@@ -25,7 +25,7 @@ export default function MyEvaluations() {
         <p className="text-sm text-muted-foreground">{evals.filter((e) => e.status === "draft").length} drafts · {evals.filter((e) => e.status !== "draft").length} submitted</p>
       </div>
       {evals.length === 0 ? (
-        <EmptyState icon={ClipboardList} title="No evaluations yet" hint="Start scoring players from the Evaluate tab." />
+        <EmptyState icon={ClipboardList} title="No evaluations yet" hint="Start scoring players from Evaluate in the sidebar." />
       ) : (
         <div className="space-y-2">
           {evals.map((ev) => (
