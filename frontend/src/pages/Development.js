@@ -25,7 +25,7 @@ const StatCard = ({ icon: Icon, tint, value, label, sub, testId }) => (
       </div>
       <div className="min-w-0">
         <p className="font-mono-num font-bold text-2xl text-foreground leading-none">{value ?? "—"}</p>
-        <p className="text-xs font-semibold text-foreground mt-1 truncate">{label}</p>
+        <p className="mt-1 text-xs font-semibold leading-snug text-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden">{label}</p>
         {sub && <p className="text-[10px] text-muted-foreground truncate">{sub}</p>}
       </div>
     </CardContent>
