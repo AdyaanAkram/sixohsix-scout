@@ -496,9 +496,16 @@ async def publish_readiness(event_id: str | None = None,
     athletes = await db.athletes.find(
         {"id": {"$in": ids}, "organization_id": org},
         {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "email": 1,
-         "guardian_email": 1, "guardian_name": 1}).to_list(2000)
+         "guardian_email": 1, "guardian_name": 1, "photo_url": 1,
+         "primary_position": 1, "graduation_year": 1, "age_group": 1}).to_list(2000)
     amap = {a["id"]: a for a in athletes}
-    reachable, unreachable = [], []
+    # One row per athlete with a draft, so the admin can jump straight to any
+    # assessment instead of hunting for it through the roster.
+    first_draft = {}
+    for d in drafts:
+        first_draft.setdefault(d["athlete_id"], d["id"])
+
+    reachable, unreachable, everyone = [], [], []
     for aid in ids:
         a = amap.get(aid)
         if not a:
@@ -507,13 +514,24 @@ async def publish_readiness(event_id: str | None = None,
                  "name": f"{a.get('first_name', '')} {a.get('last_name', '')}".strip(),
                  "emails": _family_emails(a)}
         (reachable if entry["emails"] else unreachable).append(entry)
+        everyone.append({
+            **entry,
+            "assessment_id": first_draft.get(aid),
+            "photo_url": a.get("photo_url"),
+            "primary_position": a.get("primary_position"),
+            "graduation_year": a.get("graduation_year"),
+            "age_group": a.get("age_group"),
+            "draft_count": sum(1 for d in drafts if d["athlete_id"] == aid),
+        })
     unreachable.sort(key=lambda x: x["name"])
+    everyone.sort(key=lambda x: x["name"])
     return {
         "drafts": len(drafts),
         "athletes": len(ids),
         "will_email": len(reachable),
         "no_email": len(unreachable),
         "missing_email_athletes": unreachable,
+        "pending_athletes": everyone,
         "mail_provider": settings.mail_provider,
         "mail_configured": bool(settings.resend_api_key) or settings.mail_provider == "stdout",
     }
