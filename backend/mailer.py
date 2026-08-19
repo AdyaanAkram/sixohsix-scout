@@ -92,39 +92,100 @@ _CODE_FIELDS = ("code",)
 
 
 def _html_wrapper(subject: str, text_body: str, context: dict[str, Any]) -> str:
-    """Minimal branded HTML: 60'6" wordmark, black header, red accent, a CTA
-    button when the context carries a link, and a code chip when it carries a code."""
+    """60'6" branded HTML email.
+
+    Table-based with inline styles on purpose: Gmail, Outlook and the iOS mail
+    app strip <style> blocks and ignore flexbox, so anything fancier degrades
+    into unstyled text for a large share of families. Max width 560px reads
+    well on a phone, which is where most parents open this.
+    """
+    lines = [
+        ln.strip() for ln in text_body.strip().split("\n\n")
+        if ln.strip()
+        and not ln.strip().startswith("http")
+        and not ln.strip().startswith("\u2014")            # signature line, footer covers it
+        and not any(context.get(f) and str(context.get(f)) in ln for f in ("link", *_CODE_FIELDS))
+    ]
+    greeting = ""
+    if lines and lines[0].lower().startswith("hi "):
+        greeting = lines.pop(0)
+
     paras = "".join(
-        f'<p style="margin:0 0 14px;font-size:15px;line-height:1.5;color:#111827;">{line}</p>'
-        for line in text_body.strip().split("\n\n")
-        if not line.strip().startswith("http") and "{" not in line
-        and not any(context.get(f) and str(context.get(f)) in line for f in ("link", *_CODE_FIELDS))
+        f'<p style="margin:0 0 16px;font-size:16px;line-height:1.6;color:#1F2937;'
+        f'font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Helvetica,Arial,sans-serif;">{ln}</p>'
+        for ln in lines
     )
+    greeting_html = (
+        f'<p style="margin:0 0 16px;font-size:16px;line-height:1.6;color:#111827;font-weight:600;'
+        f'font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Helvetica,Arial,sans-serif;">{greeting}</p>'
+        if greeting else ""
+    )
+
     cta = ""
     if context.get("link"):
+        label = context.get("cta_label") or "Open 60\'6\" ID"
         cta = (
-            f'<a href="{context["link"]}" '
-            'style="display:inline-block;background:#DC2626;color:#ffffff;text-decoration:none;'
-            'font-weight:700;padding:12px 22px;border-radius:8px;font-size:15px;">Open 60\'6" ID</a>'
+            '<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
+            'style="margin:8px 0 4px;"><tr><td style="border-radius:10px;background:#DC2626;">'
+            f'<a href="{context["link"]}" style="display:inline-block;padding:14px 28px;'
+            'font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Helvetica,Arial,sans-serif;'
+            'font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;">'
+            f'{label}</a></td></tr></table>'
+            f'<p style="margin:14px 0 0;font-size:12px;line-height:1.5;color:#9CA3AF;'
+            'font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Helvetica,Arial,sans-serif;">'
+            f'Or paste this link into your browser:<br><span style="color:#6B7280;">{context["link"]}</span></p>'
         )
+
     code = ""
     if context.get("code"):
         code = (
-            f'<div style="font-family:ui-monospace,Menlo,monospace;font-size:30px;font-weight:700;'
-            f'letter-spacing:4px;color:#0A0A0A;background:#F3F4F6;border:1px solid #E5E7EB;'
-            f'border-radius:10px;padding:16px;text-align:center;margin:6px 0 18px;">{context["code"]}</div>'
+            '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" '
+            'style="margin:4px 0 20px;"><tr><td align="center" '
+            'style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:32px;font-weight:700;'
+            'letter-spacing:6px;color:#0A0A0A;background:#F9FAFB;border:1px solid #E5E7EB;'
+            f'border-radius:12px;padding:20px 12px;">{context["code"]}</td></tr></table>'
         )
+
+    org = context.get("org") or "60'6\" Athletics"
+    preheader = (
+        f'<div style="display:none;max-height:0;overflow:hidden;opacity:0;">{subject}</div>'
+    )
+
     return (
-        '<div style="margin:0;padding:24px;background:#F3F4F6;">'
-        '<div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;'
+        f'{preheader}'
+        '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" '
+        'style="background:#F3F4F6;margin:0;padding:28px 12px;">'
+        '<tr><td align="center">'
+        '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="560" '
+        'style="max-width:560px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;'
         'border:1px solid #E5E7EB;">'
-        '<div style="background:#0A0A0A;padding:18px 24px;">'
-        '<span style="color:#ffffff;font-size:18px;font-weight:800;letter-spacing:0.5px;">'
-        '60\'6" <span style="color:#DC2626;">ID</span></span></div>'
-        f'<div style="padding:24px;">{paras}{code}{cta}</div>'
-        '<div style="padding:16px 24px;border-top:1px solid #F3F4F6;color:#9CA3AF;font-size:12px;">'
-        '60\'6" Athletics · Train. Elevate. Succeed.</div>'
-        '</div></div>'
+
+        # header
+        '<tr><td style="background:#0A0A0A;padding:22px 28px;">'
+        '<span style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Helvetica,Arial,sans-serif;'
+        'color:#ffffff;font-size:21px;font-weight:800;letter-spacing:-0.3px;">'
+        '60\'6" <span style="color:#DC2626;">ID</span></span>'
+        '<div style="margin-top:5px;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Helvetica,Arial,sans-serif;'
+        'color:#9CA3AF;font-size:10px;letter-spacing:2.4px;text-transform:uppercase;">'
+        'Train. Elevate. Succeed.</div></td></tr>'
+
+        # red accent rule
+        '<tr><td style="height:4px;background:#DC2626;font-size:0;line-height:0;">&nbsp;</td></tr>'
+
+        # body
+        f'<tr><td style="padding:30px 28px 28px;">{greeting_html}{paras}{code}{cta}</td></tr>'
+
+        # footer
+        '<tr><td style="padding:18px 28px 22px;border-top:1px solid #F3F4F6;background:#FAFAFA;">'
+        '<p style="margin:0;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Helvetica,Arial,sans-serif;'
+        f'font-size:12px;line-height:1.6;color:#6B7280;">Sent by <strong style="color:#374151;">{org}</strong> '
+        'through 60\'6" ID — one permanent athlete profile for every camp, showcase and season.</p>'
+        '<p style="margin:8px 0 0;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Helvetica,Arial,sans-serif;'
+        'font-size:11px;line-height:1.5;color:#9CA3AF;">'
+        'You are receiving this because your athlete is registered with this organization.</p>'
+        '</td></tr>'
+
+        '</table></td></tr></table>'
     )
 
 

@@ -440,6 +440,133 @@ async def edit_assessment(assessment_id: str, body: AssessmentEditBody,
     return clean({**a, **updates})
 
 
+def _family_emails(athlete: dict) -> list[str]:
+    """Addresses that should hear about this athlete's assessment."""
+    out = []
+    for to in (athlete.get("guardian_email"), athlete.get("email")):
+        to = (to or "").strip()
+        if to and "@" in to and to.lower() not in [o.lower() for o in out]:
+            out.append(to)
+    return out
+
+
+async def _send_assessment_email(athlete: dict, event_name: str, org_name: str) -> int:
+    """Best-effort family email. Returns how many addresses were attempted."""
+    link = f"{settings.app_public_url}/my-id"
+    sent = 0
+    for to in _family_emails(athlete):
+        safe_send(to, "assessment_published", {
+            "name": athlete.get("guardian_name") or athlete.get("first_name") or "there",
+            "athlete_name": f"{athlete.get('first_name', '')} {athlete.get('last_name', '')}".strip(),
+            "org": org_name,
+            "event": event_name, "link": link,
+        })
+        sent += 1
+    return sent
+
+
+@router.get("/assessments/publish-readiness")
+async def publish_readiness(event_id: str | None = None,
+                            user=Depends(require_roles(*ADMIN_ROLES))):
+    """Who would actually be notified if you published now.
+
+    Publishing emails the family, so an athlete with no address on file is a
+    silent no-op — the assessment still releases to their portal, but nobody is
+    told. This surfaces that BEFORE a bulk publish rather than after.
+    """
+    org = user["organization_id"]
+    q = {"organization_id": org, "status": {"$ne": "published"}}
+    if event_id:
+        q["event_id"] = event_id
+    drafts = await db.assessments.find(q, {"_id": 0, "id": 1, "athlete_id": 1, "event_id": 1}).to_list(2000)
+    ids = sorted({d["athlete_id"] for d in drafts})
+    athletes = await db.athletes.find(
+        {"id": {"$in": ids}, "organization_id": org},
+        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "email": 1,
+         "guardian_email": 1, "guardian_name": 1}).to_list(2000)
+    amap = {a["id"]: a for a in athletes}
+    reachable, unreachable = [], []
+    for aid in ids:
+        a = amap.get(aid)
+        if not a:
+            continue
+        entry = {"athlete_id": aid,
+                 "name": f"{a.get('first_name', '')} {a.get('last_name', '')}".strip(),
+                 "emails": _family_emails(a)}
+        (reachable if entry["emails"] else unreachable).append(entry)
+    unreachable.sort(key=lambda x: x["name"])
+    return {
+        "drafts": len(drafts),
+        "athletes": len(ids),
+        "will_email": len(reachable),
+        "no_email": len(unreachable),
+        "missing_email_athletes": unreachable,
+        "mail_provider": settings.mail_provider,
+        "mail_configured": bool(settings.resend_api_key) or settings.mail_provider == "stdout",
+    }
+
+
+class PublishAllBody(BaseModel):
+    event_id: str | None = None
+    confirm: str
+    only_with_email: bool = False
+
+
+@router.post("/assessments/publish-all")
+async def publish_all_assessments(body: PublishAllBody,
+                                  user=Depends(require_roles(*ADMIN_ROLES))):
+    """Publish every unpublished assessment (optionally for one event) and email
+    each family. Irreversible — requires confirm="PUBLISH".
+
+    `only_with_email` holds back athletes with no address so they can be
+    published later, once contact details are filled in, instead of releasing
+    silently.
+    """
+    if body.confirm != "PUBLISH":
+        raise HTTPException(status_code=400, detail='Confirmation required: pass confirm="PUBLISH".')
+    org = user["organization_id"]
+    org_name = user.get("organization_name") or "60'6\" Athletics"
+    q = {"organization_id": org, "status": {"$ne": "published"}}
+    if body.event_id:
+        q["event_id"] = body.event_id
+    drafts = await db.assessments.find(q, {"_id": 0}).to_list(2000)
+
+    event_ids = sorted({d.get("event_id") for d in drafts if d.get("event_id")})
+    events = await db.events.find({"id": {"$in": event_ids}, "organization_id": org},
+                                  {"_id": 0, "id": 1, "name": 1}).to_list(200)
+    ename = {e["id"]: e.get("name") for e in events}
+
+    published = emailed = skipped_no_email = 0
+    ts = now_iso()
+    for d in drafts:
+        athlete = await db.athletes.find_one(
+            {"id": d["athlete_id"], "organization_id": org}, {"_id": 0})
+        if not athlete:
+            continue
+        addresses = _family_emails(athlete)
+        if body.only_with_email and not addresses:
+            skipped_no_email += 1
+            continue
+        await db.assessments.update_one(
+            {"id": d["id"], "organization_id": org},
+            {"$set": {"status": "published", "published_at": ts,
+                      "published_by": user["id"], "updated_at": ts}})
+        published += 1
+        event_name = ename.get(d.get("event_id")) or "your evaluation event"
+        await notify_athlete_users(
+            athlete, "assessment_published", "Your 60'6\" assessment is ready",
+            f"Your development assessment from {event_name} has been released.",
+            {"assessment_id": d["id"]})
+        if addresses:
+            await _send_assessment_email(athlete, event_name, org_name)
+            emailed += 1
+    await log_audit(org, user, "assessments_bulk_published", "organization", org,
+                    {"published": published, "emailed": emailed,
+                     "skipped_no_email": skipped_no_email, "event_id": body.event_id})
+    return {"published": published, "families_emailed": emailed,
+            "skipped_no_email": skipped_no_email}
+
+
 @router.post("/assessments/{assessment_id}/publish")
 async def publish_assessment(assessment_id: str, user=Depends(require_roles(*ADMIN_ROLES))):
     """Final admin approval → released to athlete/parent. Irreversible: the
