@@ -26,7 +26,9 @@ const StatCard = ({ label, value, icon: Icon, tint = "bg-secondary text-foregrou
         </div>
         <div className="min-w-0">
           <p className="font-mono-num font-bold text-2xl text-foreground leading-none">{value ?? "—"}</p>
-          <p className="text-xs font-semibold text-foreground mt-1 truncate">{label}</p>
+          {/* Labels wrap (max 2 lines) instead of truncating — "Registered
+              Players" must never render as "Regi…" in a narrow column. */}
+          <p className="mt-1 text-xs font-semibold leading-snug text-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden">{label}</p>
           {sub && <p className="text-[10px] text-muted-foreground truncate">{sub}</p>}
         </div>
       </CardContent>
