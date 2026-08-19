@@ -366,7 +366,9 @@ export default function Dashboard() {
               <ClipboardList className="h-7 w-7 text-warning" />
             </div>
             <div className="flex-1 min-w-[140px]">
-              <p className="text-4xl font-bold text-foreground leading-none font-mono-num">{awaiting ?? "—"}</p>
+              <p className="text-4xl font-bold text-foreground leading-none font-mono-num">
+                {awaiting ?? <span className="inline-block h-7 w-10 align-middle rounded bg-secondary animate-pulse" aria-label="Loading" />}
+              </p>
               <p className="text-sm text-muted-foreground mt-1.5">Evaluations awaiting your review</p>
             </div>
             <Button onClick={() => navigate("/review")} className="h-12 rounded-xl bg-primary hover:bg-brand-secondary px-6" data-testid="open-review-queue-button">

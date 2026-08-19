@@ -165,6 +165,26 @@ async def list_media(athlete_id: str, season_id: str | None = None,
     return rows
 
 
+@router.get("/me/media")
+async def my_media(athlete_id: str | None = None, user=Depends(get_current_user)):
+    """Media for an athlete the CALLER OWNS — the family-facing list.
+
+    The My Development page asked for this endpoint before it existed, so every
+    load 404'd and the athlete's own videos could never appear. Ownership is by
+    linkage (user_id / guardian_user_id), never by role or org, matching the
+    other /me/* routes. Only consent-approved media is returned: pending or
+    rejected youth media must never surface, even to the family's own view.
+    """
+    from routes_athlete import _own_athlete
+    a = await _own_athlete(user, athlete_id)
+    rows = await db.athlete_media.find(
+        {"athlete_id": a["id"], "organization_id": a["organization_id"],
+         "consent_status": "approved"},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(200)
+    return rows
+
+
 @router.get("/media/pending-consent")
 async def pending_consent(user=Depends(require_roles(*COACH_ROLES, "parent"))):
     org = user["organization_id"]

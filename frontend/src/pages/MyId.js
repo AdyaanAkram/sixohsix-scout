@@ -523,14 +523,20 @@ export default function MyId() {
         </div>
         <CardContent className="py-4 border-t border-divider grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
           <div data-testid="my-dev-kpi">
-            <p className={`text-3xl font-bold font-mono-num flex items-center justify-center gap-1 ${trendTone}`}>
-              <TrendIcon className="h-5 w-5" />
-              {change != null ? `${change > 0 ? "+" : ""}${change}` : "—"}
-            </p>
+            {change != null ? (
+              <p className={`text-3xl font-bold font-mono-num flex items-center justify-center gap-1 ${trendTone}`}>
+                <TrendIcon className="h-5 w-5" />
+                {`${change > 0 ? "+" : ""}${change}`}
+              </p>
+            ) : (
+              <p className="text-sm font-semibold text-muted-foreground py-2">Not enough events yet</p>
+            )}
             <p className="text-[10px] uppercase text-muted-foreground mt-1">{trendLabel}</p>
           </div>
           <div>
-            <p className="text-3xl font-bold font-mono-num text-brand" data-testid="my-id-overall">{currentScore ?? "—"}</p>
+            <p className={currentScore != null ? "text-3xl font-bold font-mono-num text-brand" : "text-sm font-semibold text-muted-foreground py-2"} data-testid="my-id-overall">
+              {currentScore ?? "Not scored yet"}
+            </p>
             <p className="text-[10px] uppercase text-muted-foreground mt-1">Overall score</p>
           </div>
           <div>
@@ -692,8 +698,14 @@ export default function MyId() {
             <p className="font-display text-2xl text-foreground">{card?.name}</p>
             <p className="text-sm text-muted-foreground">{card?.primary_position} · {card?.age_group}</p>
             <p className="text-xs font-mono-num text-brand mt-0.5" data-testid="id-card-permanent-id">{permanentId}</p>
-            <p className="text-3xl font-bold font-mono-num text-brand mt-2">{card?.headline_overall ?? "—"}</p>
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Headline overall</p>
+            {card?.headline_overall != null ? (
+              <>
+                <p className="text-3xl font-bold font-mono-num text-brand mt-2">{card.headline_overall}</p>
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Headline overall</p>
+              </>
+            ) : (
+              <p className="mt-2 text-xs text-muted-foreground">Scores appear after your first scored evaluation.</p>
+            )}
             {(card?.highlight_metrics || []).length > 0 && (
               <div className="flex flex-wrap gap-2 mt-3">
                 {card.highlight_metrics.map((h) => (

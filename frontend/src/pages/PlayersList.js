@@ -431,7 +431,9 @@ const SnapshotStat = ({ icon: Icon, tint, label, value, sub, onClick, active, te
         <Icon className="h-4 w-4" />
       </span>
       <span className="min-w-0">
-        <span className="block font-mono-num text-2xl font-bold leading-tight text-foreground">{value ?? "—"}</span>
+        <span className="block font-mono-num text-2xl font-bold leading-tight text-foreground">
+          {value ?? <span className="inline-block h-5 w-8 align-middle rounded bg-secondary animate-pulse" aria-label="Loading" />}
+        </span>
         <span className="block text-[11px] font-semibold text-muted-foreground whitespace-nowrap">{label}{active ? " ✕" : ""}</span>
         {sub}
       </span>
