@@ -644,13 +644,15 @@ function AiAssessmentCard({ row, athleteId, isAdmin, onChanged }) {
 // square, mono-num value, tiny label that WRAPS instead of truncating.
 // A tile with nothing to show renders a short muted phrase at a smaller size —
 // never a bare "—", which families read as broken data.
-const ProfileStatTile = ({ icon: Icon, tint, value, empty, mono = true, valueClass, label, sub, badge, testId }) => (
-  <Card className="rounded-2xl border-border bg-card h-full" data-testid={testId}>
+const ProfileStatTile = ({ icon: Icon, tint, value, empty, mono = true, valueClass, label, sub, testId }) => (
+  <Card className="rounded-2xl border-border bg-card h-full overflow-hidden" data-testid={testId}>
     <CardContent className="pt-4 pb-4 flex flex-col items-start gap-2 2xl:flex-row 2xl:items-center 2xl:gap-3">
       <div className={cn("h-10 w-10 rounded-lg grid place-items-center shrink-0", tint)}>
         <Icon className="h-5 w-5" />
       </div>
-      <div className="min-w-0">
+      {/* w-full + min-w-0 in both flex directions: nothing in a tile may spill
+          past the card edge (the 60-yard verification badge used to). */}
+      <div className="w-full min-w-0 2xl:flex-1">
         {value != null ? (
           <p className={cn("font-bold text-2xl text-foreground leading-none", mono && "font-mono-num", valueClass)}>{value}</p>
         ) : (
@@ -658,7 +660,6 @@ const ProfileStatTile = ({ icon: Icon, tint, value, empty, mono = true, valueCla
         )}
         <p className="mt-1 text-xs font-semibold leading-snug text-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden">{label}</p>
         {sub && <p className="text-[10px] leading-snug text-muted-foreground">{sub}</p>}
-        {badge && <div className="mt-1">{badge}</div>}
       </div>
     </CardContent>
   </Card>
@@ -1040,15 +1041,18 @@ export default function PlayerProfile() {
 
       {/* Hero — digital player card */}
       <Card className="rounded-2xl border-border overflow-hidden" data-testid="profile-hero">
-        <div className="hero-sweep px-5 py-6 space-y-4">
-          <div className="flex flex-col sm:flex-row gap-6">
-            <PlayerAvatar firstName={a.first_name} lastName={a.last_name} size="hero" photoUrl={a.photo_url} className="mx-auto sm:mx-0" />
-            <div className="flex-1 min-w-0">
-              <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="hero-sweep px-5 py-6">
+          {/* Two columns from sm up: identity on the left, the action cluster
+              pinned top-right, so the hero stops being a wide band with a dead
+              right half. The disclosure's expanded grid stays full width, so
+              the Collapsible root wraps both columns. */}
+          <Collapsible>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex min-w-0 flex-col gap-5 sm:flex-1 sm:flex-row">
+                <PlayerAvatar firstName={a.first_name} lastName={a.last_name} size="hero" photoUrl={a.photo_url} className="mx-auto sm:mx-0" />
                 <div className="min-w-0 space-y-1.5 text-center sm:text-left mx-auto sm:mx-0">
                   <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2.5">
                     <h1 className="font-display text-5xl sm:text-6xl leading-[0.95] text-foreground" data-testid="profile-player-name">{a.first_name} {a.last_name}</h1>
-                    <StatusBadge status={a.status} />
                     {a.flagged_follow_up && <span className="inline-flex items-center gap-1 rounded-full bg-destructive/15 border border-destructive/40 text-destructive px-2.5 py-0.5 text-xs font-semibold"><Flag className="h-3 w-3" /> Follow-up</span>}
                   </div>
                   {identityLine && (
@@ -1066,115 +1070,116 @@ export default function PlayerProfile() {
                     )}
                   </div>
                   <p className="text-sm font-mono-num text-brand" data-testid="profile-permanent-id">{formatPermanentId(a.id)}</p>
-                </div>
-                <div className="flex flex-wrap justify-center sm:justify-end gap-2 mx-auto sm:mx-0">
-                  {isAdmin && (
-                    <Dialog open={editOpen} onOpenChange={setEditOpen}>
-                      <Button variant="outline" className="rounded-xl h-10" onClick={openProfileEdit} data-testid="profile-edit-button">
-                        Edit Profile
-                      </Button>
-                      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl">
-                        <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Edit Profile</DialogTitle></DialogHeader>
-                        <div className="grid grid-cols-2 gap-3">
-                          {EDIT_FIELDS.map(([k, label, type]) => (
-                            <div key={k} className="space-y-1">
-                              <Label className="text-xs">{label}</Label>
-                              <Input type={type || "text"} value={editForm[k] ?? ""} onChange={(e) => setEditForm((f) => ({ ...f, [k]: e.target.value }))} className="h-10 rounded-lg" data-testid={`edit-profile-${k.replace(/_/g, "-")}`} />
-                            </div>
-                          ))}
-                          <div className="space-y-1">
-                            <Label className="text-xs">Primary position</Label>
-                            <Select value={editForm.primary_position || undefined} onValueChange={(v) => setEditForm((f) => ({ ...f, primary_position: v }))}>
-                              <SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="Select" /></SelectTrigger>
-                              <SelectContent>{["P","C","1B","2B","3B","SS","LF","CF","RF","UTIL"].map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
-                            </Select>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div className="space-y-1">
-                              <Label className="text-xs">Bats</Label>
-                              <Select value={editForm.bats || undefined} onValueChange={(v) => setEditForm((f) => ({ ...f, bats: v }))}>
-                                <SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="—" /></SelectTrigger>
-                                <SelectContent><SelectItem value="R">R</SelectItem><SelectItem value="L">L</SelectItem><SelectItem value="S">S</SelectItem></SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs">Throws</Label>
-                              <Select value={editForm.throws || undefined} onValueChange={(v) => setEditForm((f) => ({ ...f, throws: v }))}>
-                                <SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="—" /></SelectTrigger>
-                                <SelectContent><SelectItem value="R">R</SelectItem><SelectItem value="L">L</SelectItem></SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                        </div>
-                        <DialogFooter>
-                          <Button onClick={saveProfileEdit} disabled={editBusy} className="rounded-xl bg-primary hover:bg-brand-secondary w-full h-11" data-testid="edit-profile-save">
-                            {editBusy ? "Saving…" : "Save Profile"}
-                          </Button>
-                        </DialogFooter>
-                      </DialogContent>
-                    </Dialog>
-                  )}
-                  {canCoach && (
-                    <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
-                      <Button variant="outline" className="rounded-xl h-10" disabled={inviteBusy || inviteStatus?.status === "accepted"} onClick={openInvite} data-testid="invite-to-platform-button">
-                        <Mail className="h-4 w-4 mr-1" />
-                        {inviteStatus?.status === "accepted" ? "On platform" : inviteStatus?.status === "pending" ? "Resend invite" : "Invite to platform"}
-                      </Button>
-                      <DialogContent className="max-w-md rounded-2xl">
-                        <DialogHeader>
-                          <DialogTitle className="font-display text-2xl text-foreground">Invite to platform</DialogTitle>
-                        </DialogHeader>
-                        <div className="space-y-3">
-                          <p className="text-sm text-muted-foreground">
-                            Under 13 (or no birth date on file): the invite goes to the <b>guardian</b>.
-                            Ages 13–17: it goes to the <b>athlete&apos;s email</b> with the guardian copied. 18+: athlete only.
-                          </p>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Athlete email</Label>
-                            <Input type="email" value={inviteForm.email} disabled={!isAdmin}
-                              onChange={(e) => setInviteForm((f) => ({ ...f, email: e.target.value }))}
-                              placeholder="athlete@example.com" className="h-10 rounded-lg" data-testid="invite-athlete-email-input" />
-                          </div>
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="space-y-1">
-                              <Label className="text-xs">Guardian name</Label>
-                              <Input value={inviteForm.guardian_name} disabled={!isAdmin}
-                                onChange={(e) => setInviteForm((f) => ({ ...f, guardian_name: e.target.value }))}
-                                className="h-10 rounded-lg" data-testid="invite-guardian-name-input" />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs">Guardian email</Label>
-                              <Input type="email" value={inviteForm.guardian_email} disabled={!isAdmin}
-                                onChange={(e) => setInviteForm((f) => ({ ...f, guardian_email: e.target.value }))}
-                                placeholder="parent@example.com" className="h-10 rounded-lg" data-testid="invite-guardian-email-input" />
-                            </div>
-                          </div>
-                          {!isAdmin && (
-                            <p className="text-xs text-muted-foreground">Only an owner or admin can change these contact details — ask one to fill in a missing email.</p>
-                          )}
-                          {inviteStatus?.status === "pending" && (
-                            <p className="text-xs text-muted-foreground">A previous invite to {inviteStatus.email} is still pending — sending again replaces it.</p>
-                          )}
-                        </div>
-                        <DialogFooter>
-                          <Button onClick={sendInvite} disabled={inviteBusy} className="rounded-xl bg-primary hover:bg-brand-secondary w-full h-11" data-testid="invite-send-button">
-                            {inviteBusy ? "Sending…" : "Save & send invitation"}
-                          </Button>
-                        </DialogFooter>
-                      </DialogContent>
-                    </Dialog>
-                  )}
-                  {canReview && <Button variant="outline" className="rounded-xl h-10" onClick={() => window.open(signedUrl(`/reports/player/${athleteId}/pdf`), "_blank")} data-testid="profile-pdf-button"><FileDown className="h-4 w-4 mr-1" /> PDF</Button>}
-                  {isAdmin && a.status === "active" && <Button variant="outline" className="rounded-xl h-10 text-muted-foreground" onClick={archive} data-testid="profile-archive-button"><Archive className="h-4 w-4 mr-1" /> Archive</Button>}
+                  <CollapsibleTrigger className="inline-flex items-center gap-1 text-xs font-semibold text-info hover:underline [&[data-state=open]>svg]:rotate-180" data-testid="hero-details-expander">
+                    View Details <ChevronDown className="h-3.5 w-3.5" />
+                  </CollapsibleTrigger>
                 </div>
               </div>
+              {/* Right column: status pill + every action, right-aligned from sm
+                  up and wrapping under the identity block on phones. */}
+              <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:shrink-0">
+                <StatusBadge status={a.status} />
+                {isAdmin && (
+                  <Dialog open={editOpen} onOpenChange={setEditOpen}>
+                    <Button variant="outline" className="rounded-xl h-10" onClick={openProfileEdit} data-testid="profile-edit-button">
+                      Edit Profile
+                    </Button>
+                    <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl">
+                      <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Edit Profile</DialogTitle></DialogHeader>
+                      <div className="grid grid-cols-2 gap-3">
+                        {EDIT_FIELDS.map(([k, label, type]) => (
+                          <div key={k} className="space-y-1">
+                            <Label className="text-xs">{label}</Label>
+                            <Input type={type || "text"} value={editForm[k] ?? ""} onChange={(e) => setEditForm((f) => ({ ...f, [k]: e.target.value }))} className="h-10 rounded-lg" data-testid={`edit-profile-${k.replace(/_/g, "-")}`} />
+                          </div>
+                        ))}
+                        <div className="space-y-1">
+                          <Label className="text-xs">Primary position</Label>
+                          <Select value={editForm.primary_position || undefined} onValueChange={(v) => setEditForm((f) => ({ ...f, primary_position: v }))}>
+                            <SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="Select" /></SelectTrigger>
+                            <SelectContent>{["P","C","1B","2B","3B","SS","LF","CF","RF","UTIL"].map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                          </Select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Bats</Label>
+                            <Select value={editForm.bats || undefined} onValueChange={(v) => setEditForm((f) => ({ ...f, bats: v }))}>
+                              <SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="—" /></SelectTrigger>
+                              <SelectContent><SelectItem value="R">R</SelectItem><SelectItem value="L">L</SelectItem><SelectItem value="S">S</SelectItem></SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Throws</Label>
+                            <Select value={editForm.throws || undefined} onValueChange={(v) => setEditForm((f) => ({ ...f, throws: v }))}>
+                              <SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="—" /></SelectTrigger>
+                              <SelectContent><SelectItem value="R">R</SelectItem><SelectItem value="L">L</SelectItem></SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button onClick={saveProfileEdit} disabled={editBusy} className="rounded-xl bg-primary hover:bg-brand-secondary w-full h-11" data-testid="edit-profile-save">
+                          {editBusy ? "Saving…" : "Save Profile"}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                )}
+                {canCoach && (
+                  <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+                    <Button variant="outline" className="rounded-xl h-10" disabled={inviteBusy || inviteStatus?.status === "accepted"} onClick={openInvite} data-testid="invite-to-platform-button">
+                      <Mail className="h-4 w-4 mr-1" />
+                      {inviteStatus?.status === "accepted" ? "On platform" : inviteStatus?.status === "pending" ? "Resend invite" : "Invite to platform"}
+                    </Button>
+                    <DialogContent className="max-w-md rounded-2xl">
+                      <DialogHeader>
+                        <DialogTitle className="font-display text-2xl text-foreground">Invite to platform</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-3">
+                        <p className="text-sm text-muted-foreground">
+                          Under 13 (or no birth date on file): the invite goes to the <b>guardian</b>.
+                          Ages 13–17: it goes to the <b>athlete&apos;s email</b> with the guardian copied. 18+: athlete only.
+                        </p>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Athlete email</Label>
+                          <Input type="email" value={inviteForm.email} disabled={!isAdmin}
+                            onChange={(e) => setInviteForm((f) => ({ ...f, email: e.target.value }))}
+                            placeholder="athlete@example.com" className="h-10 rounded-lg" data-testid="invite-athlete-email-input" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Guardian name</Label>
+                            <Input value={inviteForm.guardian_name} disabled={!isAdmin}
+                              onChange={(e) => setInviteForm((f) => ({ ...f, guardian_name: e.target.value }))}
+                              className="h-10 rounded-lg" data-testid="invite-guardian-name-input" />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Guardian email</Label>
+                            <Input type="email" value={inviteForm.guardian_email} disabled={!isAdmin}
+                              onChange={(e) => setInviteForm((f) => ({ ...f, guardian_email: e.target.value }))}
+                              placeholder="parent@example.com" className="h-10 rounded-lg" data-testid="invite-guardian-email-input" />
+                          </div>
+                        </div>
+                        {!isAdmin && (
+                          <p className="text-xs text-muted-foreground">Only an owner or admin can change these contact details — ask one to fill in a missing email.</p>
+                        )}
+                        {inviteStatus?.status === "pending" && (
+                          <p className="text-xs text-muted-foreground">A previous invite to {inviteStatus.email} is still pending — sending again replaces it.</p>
+                        )}
+                      </div>
+                      <DialogFooter>
+                        <Button onClick={sendInvite} disabled={inviteBusy} className="rounded-xl bg-primary hover:bg-brand-secondary w-full h-11" data-testid="invite-send-button">
+                          {inviteBusy ? "Sending…" : "Save & send invitation"}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                )}
+                {canReview && <Button variant="outline" className="rounded-xl h-10" onClick={() => window.open(signedUrl(`/reports/player/${athleteId}/pdf`), "_blank")} data-testid="profile-pdf-button"><FileDown className="h-4 w-4 mr-1" /> PDF</Button>}
+                {isAdmin && a.status === "active" && <Button variant="outline" className="rounded-xl h-10 text-muted-foreground" onClick={archive} data-testid="profile-archive-button"><Archive className="h-4 w-4 mr-1" /> Archive</Button>}
+              </div>
             </div>
-          </div>
-          {/* Full bio detail stays available — presentation changes, depth doesn't. */}
-          <Collapsible>
-            <CollapsibleTrigger className="inline-flex items-center gap-1 text-xs font-semibold text-info hover:underline [&[data-state=open]>svg]:rotate-180" data-testid="hero-details-expander">
-              View Details <ChevronDown className="h-3.5 w-3.5" />
-            </CollapsibleTrigger>
+            {/* Full bio detail stays available — presentation changes, depth doesn't. */}
             <CollapsibleContent>
               <div className="pt-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-2 text-sm">
                 <div><p className="text-[10px] uppercase text-muted-foreground">Age group</p><p className="font-semibold">{a.age_group || "—"}</p></div>
@@ -1230,10 +1235,14 @@ export default function PlayerProfile() {
           <ProfileStatTile
             icon={Zap}
             tint="bg-warning/15 text-warning"
-            value={<>{exitVeloKpi.value}<span className="text-sm font-semibold text-muted-foreground ml-1">{exitVeloKpi.unit}</span></>}
+            value={(
+              <span className="flex min-w-0 items-center gap-1">
+                <span className="truncate">{exitVeloKpi.value}<span className="text-sm font-semibold text-muted-foreground ml-1">{exitVeloKpi.unit}</span></span>
+                {exitVeloKpi.source && <VerificationBadge source={exitVeloKpi.source} iconOnly />}
+              </span>
+            )}
             label="Exit velocity"
             sub={exitVeloKpi.isBest ? "Personal best" : null}
-            badge={exitVeloKpi.source ? <VerificationBadge source={exitVeloKpi.source} compact /> : null}
             testId="kpi-exit-velocity"
           />
         ) : (
@@ -1249,10 +1258,14 @@ export default function PlayerProfile() {
           <ProfileStatTile
             icon={Timer}
             tint="bg-info/15 text-info"
-            value={<>{sixtyKpi.value}<span className="text-sm font-semibold text-muted-foreground ml-1">{sixtyKpi.unit}</span></>}
+            value={(
+              <span className="flex min-w-0 items-center gap-1">
+                <span className="truncate">{sixtyKpi.value}<span className="text-sm font-semibold text-muted-foreground ml-1">{sixtyKpi.unit}</span></span>
+                {sixtyKpi.source && <VerificationBadge source={sixtyKpi.source} iconOnly />}
+              </span>
+            )}
             label="60-yard"
             sub={sixtyKpi.isBest ? "Personal best" : null}
-            badge={sixtyKpi.source ? <VerificationBadge source={sixtyKpi.source} compact /> : null}
             testId="kpi-sixty-yard"
           />
         ) : (

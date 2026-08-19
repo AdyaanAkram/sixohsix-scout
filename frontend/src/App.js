@@ -40,6 +40,7 @@ import Teams from "@/pages/Teams";
 import TeamDetail from "@/pages/TeamDetail";
 import Workspace from "@/pages/Workspace";
 import RegisterEvent from "@/pages/RegisterEvent";
+import NotFound from "@/pages/NotFound";
 
 const Protected = ({ children }) => {
   const { user, loading } = useAuth();
@@ -105,7 +106,7 @@ function App() {
           <Route path="/drills" element={<Protected><StaffOnly><Drills /></StaffOnly></Protected>} />
           <Route path="/settings" element={<Protected><Settings /></Protected>} />
             <Route path="/audit-log" element={<Protected><StaffOnly><AuditLog /></StaffOnly></Protected>} />
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<NotFound />} />
           </Routes>
           <Toaster position="top-center" richColors />
         </ErrorBoundary>

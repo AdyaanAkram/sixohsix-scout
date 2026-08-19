@@ -68,11 +68,12 @@ const TOOLTIP_STYLE = {
   color: "hsl(var(--foreground))",
 };
 
-/* Photo header for the picker card — same idiom as the Athletes directory and
+/* Thumbnail for the picker tile — same idiom as the Athletes directory and
    Scout (CardPhoto isn't exported from either, so it's re-declared here at
    module level). Real photo when the athlete has one, otherwise a branded
-   monogram panel with a faded position watermark, so the many photo-less
-   athletes on a roster still look intentional rather than broken. */
+   monogram panel, so the many photo-less athletes on a roster still look
+   intentional rather than broken. At tile size there's no room for the
+   position watermark the larger card variants carry. */
 const CardPhoto = ({ p }) => {
   const [failed, setFailed] = useState(false);
   useEffect(() => { setFailed(false); }, [p.photo_url]);
@@ -90,21 +91,18 @@ const CardPhoto = ({ p }) => {
   }
   const initials = `${(p.first_name || "?")[0] || ""}${(p.last_name || "")[0] || ""}`.toUpperCase();
   return (
-    <div className="relative flex h-full w-full items-center justify-center bg-gradient-to-br from-brand-tertiary via-secondary to-background">
-      {p.primary_position && (
-        <span className="absolute -right-2 bottom-0 select-none font-display text-7xl font-extrabold leading-none text-foreground/[0.06]">
-          {p.primary_position}
-        </span>
-      )}
-      <span className="select-none font-display text-5xl text-brand/70">{initials}</span>
+    <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-brand-tertiary via-secondary to-background">
+      <span className="select-none font-display text-lg text-brand/70">{initials}</span>
     </div>
   );
 };
 
-/* One selectable athlete card in the picker. The whole card is the toggle;
-   `disabled` is the max-four cap biting on an unselected card, in which case
+/* One selectable athlete in the picker, as a dense horizontal tile — picking
+   four out of a 70+ athlete roster shouldn't mean endless scrolling, so the
+   photo is a thumbnail rather than a card header. The whole tile is the toggle;
+   `disabled` is the max-four cap biting on an unselected tile, in which case
    clicks and keyboard activation are ignored. The roster payload carries no
-   evaluation score, so this card deliberately has no score chip — an empty
+   evaluation score, so this tile deliberately has no score chip — an empty
    "—" chip would read as a real (zero) score. */
 const PickerCard = ({ p, checked, disabled, onToggle }) => {
   const classLine = [p.graduation_year ? `Class of ${p.graduation_year}` : null, p.age_group || null]
@@ -112,7 +110,7 @@ const PickerCard = ({ p, checked, disabled, onToggle }) => {
     .join(" · ");
   const activate = () => { if (!disabled) onToggle(p.id); };
   return (
-    <Card
+    <div
       role="button"
       tabIndex={disabled ? -1 : 0}
       aria-pressed={checked}
@@ -122,42 +120,35 @@ const PickerCard = ({ p, checked, disabled, onToggle }) => {
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(); }
       }}
       className={cn(
-        "h-full overflow-hidden rounded-2xl transition-all",
-        checked
-          ? "border-brand ring-2 ring-brand/50"
-          : "border-border hover:border-brand/50 hover:shadow-lg hover:-translate-y-0.5",
+        "flex items-center gap-3 rounded-xl border bg-card p-2.5 transition-colors",
+        checked ? "border-brand ring-2 ring-brand/50" : "border-border hover:border-brand/50",
         disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
       )}
       data-testid={`compare-player-card-${p.id}`}
     >
-      <div className="relative aspect-[4/3] w-full overflow-hidden">
+      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl">
         <CardPhoto p={p} />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/55 to-transparent" />
-        {/* Selection affordance: filled brand check when picked, hollow ring otherwise. */}
-        <span
-          aria-hidden="true"
-          className={cn(
-            "absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full border-2 transition-colors",
-            checked
-              ? "border-brand bg-brand text-white shadow-md"
-              : "border-white/85 bg-black/30 backdrop-blur-sm"
-          )}
-        >
-          {checked && <Check className="h-4 w-4" strokeWidth={3} />}
-        </span>
       </div>
-      <CardContent className="p-4 pt-3">
-        <div className="min-w-0">
-          <p className="font-display text-lg leading-tight text-foreground truncate">
-            {p.first_name} {p.last_name}
-          </p>
-          <p className="text-xs text-muted-foreground truncate">
-            {p.primary_position || "—"} · {p.bats || "—"}/{p.throws || "—"}
-          </p>
-          {classLine && <p className="text-xs text-muted-foreground truncate">{classLine}</p>}
-        </div>
-      </CardContent>
-    </Card>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold leading-tight text-foreground">
+          {p.first_name} {p.last_name}
+        </p>
+        <p className="truncate text-xs text-muted-foreground">
+          {p.primary_position || "—"} · {p.bats || "—"}/{p.throws || "—"}
+        </p>
+        {classLine && <p className="truncate text-xs text-muted-foreground">{classLine}</p>}
+      </div>
+      {/* Selection affordance: filled brand check when picked, hollow ring otherwise. */}
+      <span
+        aria-hidden="true"
+        className={cn(
+          "flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
+          checked ? "border-brand bg-brand text-white" : "border-border-strong"
+        )}
+      >
+        {checked && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+      </span>
+    </div>
   );
 };
 
@@ -304,6 +295,8 @@ export default function PlayerCompare() {
 
   const textCell = "bg-card px-3.5 py-2.5 text-sm text-foreground last:rounded-r-xl";
 
+  const compareHint = selected.length < 2 ? "Pick at least two athletes" : "Jump to the comparison";
+
   return (
     <div className="space-y-5" data-testid="player-compare-page">
       <div className="flex items-start gap-3">
@@ -344,14 +337,31 @@ export default function PlayerCompare() {
             Clear
           </Button>
         )}
+        {/* Jumps past the picker to the side-by-side table — with 70+ athletes
+            the results sit well below the fold once the grid is scrolled. The
+            span carries the same title because a disabled button has
+            pointer-events: none and would swallow its own tooltip. */}
+        <span className="inline-flex" title={compareHint}>
+          <Button
+            className="h-11 rounded-xl bg-primary hover:bg-brand-secondary"
+            disabled={selected.length < 2}
+            title={compareHint}
+            onClick={() =>
+              document.getElementById("compare-results")?.scrollIntoView({ behavior: "smooth", block: "start" })
+            }
+            data-testid="compare-scroll-button"
+          >
+            <GitCompare className="mr-1 h-4 w-4" /> Compare
+          </Button>
+        </span>
       </div>
 
-      {/* Capped at four, so unselected cards go inert once the cap is reached. */}
-      <div className="max-h-[70vh] overflow-y-auto pr-1">
+      {/* Capped at four, so unselected tiles go inert once the cap is reached. */}
+      <div className="max-h-[420px] overflow-y-auto pr-1">
         {filtered.length === 0 ? (
           <p className="py-6 text-sm text-muted-foreground">No players match “{q.trim()}”.</p>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3" data-testid="compare-player-grid">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2" data-testid="compare-player-grid">
             {filtered.map((p) => {
               const checked = selected.includes(p.id);
               return (
@@ -372,7 +382,7 @@ export default function PlayerCompare() {
         <>
           {/* Side-by-side comparison table — athlete columns, striped metric
               rows, best value per row in success green when a winner exists. */}
-          <div>
+          <div id="compare-results" className="scroll-mt-4">
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Side by Side</p>
             <div className="overflow-x-auto rounded-2xl" data-testid="compare-table">
               <table className="w-full border-separate [border-spacing:0_6px]">
