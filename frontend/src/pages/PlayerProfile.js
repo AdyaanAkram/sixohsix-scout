@@ -26,7 +26,7 @@ import {
   ArrowLeft, FileDown, Flag, Plus, TrendingUp, TrendingDown, Minus,
   ClipboardList, Image as ImageIcon, StickyNote, CalendarClock, Target, Archive, Camera, Mail,
   Gauge, Trophy, Sparkles, ChevronDown, ChevronRight, Check, X, Trash2,
-  Timer, Zap, User,
+  Timer, Zap, User, ArchiveRestore, GitMerge,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -738,6 +738,13 @@ export default function PlayerProfile() {
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  // Duplicate athletes are a real problem for this org (imported rosters +
+  // family self-signups create two records for one kid). The merge endpoint
+  // existed but nothing called it.
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeQuery, setMergeQuery] = useState("");
+  const [mergeResults, setMergeResults] = useState([]);
+  const [mergeBusy, setMergeBusy] = useState(false);
   const [editForm, setEditForm] = useState({});
   const [editBusy, setEditBusy] = useState(false);
 
@@ -968,9 +975,48 @@ export default function PlayerProfile() {
   };
 
   const archive = async () => {
+    if (!window.confirm(`Archive ${summary?.athlete?.first_name || "this athlete"}?\n\nThey come off the active roster but keep every evaluation, metric and note. You can restore them at any time.`)) return;
     try {
       await api.post(`/athletes/${athleteId}/archive`);
       toast.success("Player archived.");
+      loadSummary();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+
+  // Search the org roster for the duplicate record to fold into this one.
+  const searchDuplicates = async (q) => {
+    setMergeQuery(q);
+    if (q.trim().length < 2) { setMergeResults([]); return; }
+    try {
+      const r = await api.get("/athletes", { params: { search: q.trim(), limit: 10 } });
+      const rows = Array.isArray(r.data) ? r.data : r.data?.athletes || [];
+      setMergeResults(rows.filter((x) => x.id !== athleteId && x.status !== "merged"));
+    } catch { setMergeResults([]); }
+  };
+
+  const mergeDuplicate = async (dup) => {
+    const dupName = `${dup.first_name} ${dup.last_name}`;
+    const keepName = `${summary?.athlete?.first_name || ""} ${summary?.athlete?.last_name || ""}`.trim();
+    if (!window.confirm(
+      `Merge "${dupName}" into "${keepName}"?\n\n` +
+      `Every evaluation, note, goal, video and event entry moves to ${keepName}, and any blank fields here fill in from the duplicate. ` +
+      `"${dupName}" is then marked merged and leaves the roster.\n\nThis cannot be undone from the app.`)) return;
+    setMergeBusy(true);
+    try {
+      await api.post("/athletes/merge", { keep_id: athleteId, merge_id: dup.id });
+      toast.success(`${dupName} merged into ${keepName}.`);
+      setMergeOpen(false);
+      setMergeQuery(""); setMergeResults([]);
+      loadSummary();
+    } catch (e) { toast.error(errMsg(e)); } finally { setMergeBusy(false); }
+  };
+
+  // Archiving was a one-way door in the UI — the restore endpoint existed but
+  // nothing called it, so an archived athlete could never be brought back.
+  const restore = async () => {
+    try {
+      await api.post(`/athletes/${athleteId}/restore`);
+      toast.success("Player restored to the active roster.");
       loadSummary();
     } catch (e) { toast.error(errMsg(e)); }
   };
@@ -1177,6 +1223,54 @@ export default function PlayerProfile() {
                 )}
                 {canReview && <Button variant="outline" className="rounded-xl h-10" onClick={() => window.open(signedUrl(`/reports/player/${athleteId}/pdf`), "_blank")} data-testid="profile-pdf-button"><FileDown className="h-4 w-4 mr-1" /> PDF</Button>}
                 {isAdmin && a.status === "active" && <Button variant="outline" className="rounded-xl h-10 text-muted-foreground" onClick={archive} data-testid="profile-archive-button"><Archive className="h-4 w-4 mr-1" /> Archive</Button>}
+                {isAdmin && a.status === "archived" && <Button variant="outline" className="rounded-xl h-10 border-success/40 text-success hover:bg-success/10" onClick={restore} data-testid="profile-restore-button"><ArchiveRestore className="h-4 w-4 mr-1" /> Restore to roster</Button>}
+                {isAdmin && a.status !== "merged" && (
+                  <Dialog open={mergeOpen} onOpenChange={(o) => { setMergeOpen(o); if (!o) { setMergeQuery(""); setMergeResults([]); } }}>
+                    <Button variant="outline" className="rounded-xl h-10 text-muted-foreground" onClick={() => setMergeOpen(true)} data-testid="profile-merge-button">
+                      <GitMerge className="h-4 w-4 mr-1" /> Merge duplicate
+                    </Button>
+                    <DialogContent className="max-w-lg rounded-2xl" data-testid="merge-duplicate-dialog">
+                      <DialogHeader>
+                        <DialogTitle className="font-display text-2xl text-foreground">Merge a duplicate record</DialogTitle>
+                      </DialogHeader>
+                      <p className="text-sm text-muted-foreground">
+                        Find the duplicate of <span className="font-semibold text-foreground">{a.first_name} {a.last_name}</span>. Its
+                        evaluations, metrics, notes and event history move here, and this profile keeps its own details — blanks fill in from the duplicate.
+                      </p>
+                      <Input
+                        value={mergeQuery}
+                        onChange={(e) => searchDuplicates(e.target.value)}
+                        placeholder="Search by name…"
+                        className="h-11 rounded-xl"
+                        data-testid="merge-search-input"
+                      />
+                      <div className="max-h-64 space-y-1.5 overflow-y-auto">
+                        {mergeQuery.trim().length >= 2 && mergeResults.length === 0 && (
+                          <p className="py-4 text-center text-sm text-muted-foreground">No other athlete matches that name.</p>
+                        )}
+                        {mergeResults.map((d) => (
+                          <button
+                            key={d.id}
+                            type="button"
+                            disabled={mergeBusy}
+                            onClick={() => mergeDuplicate(d)}
+                            className="flex w-full items-center gap-3 rounded-xl border border-border bg-background px-3 py-2.5 text-left hover:border-brand/50 hover:bg-secondary disabled:opacity-50"
+                            data-testid={`merge-candidate-${d.id}`}
+                          >
+                            <PlayerAvatar firstName={d.first_name} lastName={d.last_name} photoUrl={d.photo_url} size="sm" />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm font-semibold text-foreground">{d.first_name} {d.last_name}</span>
+                              <span className="block truncate text-xs text-muted-foreground">
+                                {[d.graduation_year ? `Class of ${d.graduation_year}` : null, d.age_group, d.primary_position, d.status !== "active" ? d.status : null].filter(Boolean).join(" · ") || "—"}
+                              </span>
+                            </span>
+                            <GitMerge className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          </button>
+                        ))}
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                )}
               </div>
             </div>
             {/* Full bio detail stays available — presentation changes, depth doesn't. */}
