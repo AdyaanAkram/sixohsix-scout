@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, errMsg } from "@/lib/api";
-import { formatPermanentId } from "@/lib/utils";
+import { cn, formatPermanentId } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -31,6 +31,28 @@ const KEY_METRICS = [
   { key: "sixty_yard_dash", label: "60-Yard Dash" },
 ];
 
+// Which direction "better" points for a metric row. Anything not listed gets
+// no winner highlight — a best value is never invented for an unknown metric.
+const HIGHER_IS_BETTER = new Set(["exit_velocity", "throwing_velocity"]);
+const LOWER_IS_BETTER = new Set(["sixty_yard_dash"]); // it's a time
+
+// Indices holding the best numeric value for a row. Empty set when fewer than
+// two comparable numbers exist, when the direction is unknown, or when every
+// value ties — no winner is declared in those cases.
+const winnerSet = (values, dir) => {
+  if (!dir) return new Set();
+  const nums = values.map((v) => {
+    const n = v === null || v === undefined || v === "" ? NaN : Number(v);
+    return Number.isFinite(n) ? n : null;
+  });
+  const present = nums.filter((n) => n !== null);
+  if (present.length < 2) return new Set();
+  const best = dir === "high" ? Math.max(...present) : Math.min(...present);
+  const worst = dir === "high" ? Math.min(...present) : Math.max(...present);
+  if (best === worst) return new Set(); // all tied — nobody "wins"
+  return new Set(nums.map((n, i) => (n === best ? i : -1)).filter((i) => i >= 0));
+};
+
 const shortName = (a) =>
   a ? `${a.first_name?.[0] || ""}. ${a.last_name || ""}`.trim() : "";
 
@@ -46,6 +68,17 @@ const TOOLTIP_STYLE = {
   borderRadius: 12,
   color: "hsl(var(--foreground))",
 };
+
+/* Sticky first column of the comparison table: the metric name, kept visible
+   while the athlete columns scroll horizontally on narrow screens. */
+const MetricLabelCell = ({ children }) => (
+  <th
+    scope="row"
+    className="sticky left-0 z-10 whitespace-nowrap rounded-l-xl bg-card px-3.5 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+  >
+    {children}
+  </th>
+);
 
 export default function PlayerCompare() {
   const [players, setPlayers] = useState([]);
@@ -109,12 +142,25 @@ export default function PlayerCompare() {
 
   const loaded = cards.filter((c) => c.payload);
 
+  // Union of measurement keys across the loaded players, in first-seen order,
+  // so a metric one player lacks still gets a row (the others just show "–").
+  const measurementRows = useMemo(() => {
+    const rows = [];
+    loaded.forEach((c) => {
+      (c.payload.measurements || []).forEach((m) => {
+        if (!rows.some((r) => r.key === m.metric_key)) rows.push({ key: m.metric_key, label: m.label });
+      });
+    });
+    return rows;
+  }, [loaded]);
+
   // Grouped bar: overall evaluation score per player.
   const overallData = loaded.map((c, i) => ({
     name: shortName(c.payload.athlete),
     overall: c.payload.overall_score ?? null,
     color: SERIES[i % SERIES.length],
   }));
+  const hasOverallScores = overallData.some((d) => d.overall !== null && d.overall !== undefined);
 
   // Multi-series category comparison. Union of category names across players so
   // a category one player lacks still appears (that player just has no bar).
@@ -153,6 +199,19 @@ export default function PlayerCompare() {
   const metricValue = (payload, key) =>
     payload?.measurements?.find((m) => m.metric_key === key) || null;
 
+  // ---- comparison table rows -----------------------------------------------
+  // Each column: { id, payload, roster, a } where `a` prefers the compare
+  // payload's athlete but falls back to the roster row while loading.
+  const cols = cards.map((c) => ({ ...c, a: c.payload?.athlete || c.roster }));
+
+  const overallWinners = winnerSet(cols.map((c) => c.payload?.overall_score), "high");
+
+  const numCell = (i, winners) =>
+    cn("bg-card px-3.5 py-2.5 text-sm font-mono-num last:rounded-r-xl",
+      winners?.has(i) ? "text-success font-semibold" : "text-foreground");
+
+  const textCell = "bg-card px-3.5 py-2.5 text-sm text-foreground last:rounded-r-xl";
+
   return (
     <div className="space-y-5" data-testid="player-compare-page">
       <div className="flex items-start gap-3">
@@ -172,11 +231,11 @@ export default function PlayerCompare() {
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder="Search players…"
-        className="h-11 rounded-xl max-w-md"
+        className="h-11 rounded-xl bg-card max-w-md"
         data-testid="compare-search"
       />
 
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 max-h-56 overflow-y-auto rounded-2xl border border-border p-3">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 max-h-56 overflow-y-auto rounded-2xl border border-border bg-card p-3">
         {filtered.map((p) => (
           <label key={p.id} className="flex items-center gap-2 rounded-xl px-2 py-2 hover:bg-secondary cursor-pointer">
             <Checkbox checked={selected.includes(p.id)} onCheckedChange={() => toggle(p.id)} />
@@ -191,96 +250,123 @@ export default function PlayerCompare() {
 
       {selected.length > 0 && (
         <>
-          {/* Side-by-side player cards */}
-          <div className={`grid gap-3 ${selected.length === 1 ? "grid-cols-1" : selected.length === 2 ? "md:grid-cols-2" : "md:grid-cols-2 xl:grid-cols-4"}`}>
-            {cards.map(({ id, payload, roster }) => {
-              const a = payload?.athlete || roster;
-              if (!a) return null;
-              return (
-                <Card key={id} className="rounded-2xl border-border overflow-hidden" data-testid="compare-card">
-                  <div className="h-36 bg-surface-3 relative">
-                    {a.photo_url && a.photo_url.startsWith("http") ? (
-                      <img src={a.photo_url} alt="" className="absolute inset-0 w-full h-full object-cover opacity-80" />
-                    ) : null}
-                    <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent" />
-                    <div className="absolute bottom-3 left-3 right-3 flex items-end gap-3">
-                      <PlayerAvatar firstName={a.first_name} lastName={a.last_name} photoUrl={a.photo_url} size="lg" />
-                      <div className="min-w-0">
-                        <Link to={`/players/${id}`} className="font-semibold text-foreground hover:underline">
-                          {a.first_name} {a.last_name}
-                        </Link>
-                        <p className="text-xs text-muted-foreground">{a.primary_position || "—"} · {a.age_group || "—"}</p>
-                        <p className="text-[10px] font-mono-num uppercase tracking-wide text-brand">
-                          {formatPermanentId(id)}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <CardContent className="pt-4 pb-4 space-y-3">
-                    <div className="grid grid-cols-3 gap-2 text-center">
-                      <div className="rounded-xl bg-secondary px-2 py-2">
-                        <p className="text-xl font-bold font-mono-num">{payload?.overall_score ?? "—"}</p>
-                        <p className="text-[10px] text-muted-foreground uppercase">Overall</p>
-                      </div>
-                      <div className="rounded-xl bg-secondary px-2 py-2">
-                        <p className="text-xl font-bold font-mono-num">{payload?.evaluation_count ?? "—"}</p>
-                        <p className="text-[10px] text-muted-foreground uppercase">Evals</p>
-                      </div>
-                      <div className="rounded-xl bg-secondary px-2 py-2">
-                        <p className="text-xl font-bold font-mono-num">{payload?.video_count ?? "—"}</p>
-                        <p className="text-[10px] text-muted-foreground uppercase">Videos</p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-center text-[11px] text-muted-foreground">
-                      <div className="rounded-xl bg-secondary/60 px-2 py-1.5">
-                        <p className="text-foreground font-semibold">{a.height || "—"}</p>
-                        <p className="uppercase">Height</p>
-                      </div>
-                      <div className="rounded-xl bg-secondary/60 px-2 py-1.5">
-                        <p className="text-foreground font-semibold">{a.weight || "—"}</p>
-                        <p className="uppercase">Weight</p>
-                      </div>
-                      <div className="rounded-xl bg-secondary/60 px-2 py-1.5">
-                        <p className="text-foreground font-semibold">{a.bats || "—"}/{a.throws || "—"}</p>
-                        <p className="uppercase">Bats/Throws</p>
-                      </div>
-                      <div className="rounded-xl bg-secondary/60 px-2 py-1.5">
-                        <p className="text-foreground font-semibold">{a.graduation_year || "—"}</p>
-                        <p className="uppercase">Grad</p>
-                      </div>
-                    </div>
-
-                    {/* Verified measurements — trust source shown, never a guessed value */}
-                    <div className="space-y-1.5">
-                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Verified Measurements</p>
-                      {payload?.measurements?.length ? (
-                        payload.measurements.map((m) => (
-                          <div key={m.metric_key} className="flex items-center justify-between gap-2">
-                            <span className="text-xs text-muted-foreground truncate">{m.label}</span>
-                            <span className="flex items-center gap-1.5 shrink-0">
-                              <span className="text-sm font-semibold font-mono-num">
-                                {m.value != null ? `${m.value}${m.unit ? ` ${m.unit}` : ""}` : "—"}
-                              </span>
-                              <VerificationBadge source={m.source} compact />
-                            </span>
+          {/* Side-by-side comparison table — athlete columns, striped metric
+              rows, best value per row in success green when a winner exists. */}
+          <div>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Side by Side</p>
+            <div className="overflow-x-auto rounded-2xl" data-testid="compare-table">
+              <table className="w-full border-separate [border-spacing:0_6px]">
+                <thead>
+                  <tr>
+                    <th className="sticky left-0 z-10 bg-background" aria-hidden="true" />
+                    {cols.map(({ id, a }) => a && (
+                      <th key={id} className="min-w-[170px] px-3.5 pb-1 text-left align-bottom font-normal" data-testid="compare-card">
+                        <div className="flex items-center gap-3">
+                          <PlayerAvatar firstName={a.first_name} lastName={a.last_name} photoUrl={a.photo_url} size="lg" />
+                          <div className="min-w-0">
+                            <Link to={`/players/${id}`} className="font-display text-base leading-tight text-foreground hover:underline block truncate">
+                              {a.first_name} {a.last_name}
+                            </Link>
+                            <p className="text-[11px] text-muted-foreground truncate">
+                              {a.graduation_year ? `Class of ${a.graduation_year}` : "No grad year"} · {a.primary_position || "—"}
+                            </p>
+                            <p className="text-[10px] font-mono-num uppercase tracking-wide text-brand truncate">
+                              {formatPermanentId(id)}
+                            </p>
                           </div>
-                        ))
-                      ) : (
-                        <p className="text-xs text-muted-foreground">{busy && !payload ? "Loading…" : "No verified measurements."}</p>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
+                        </div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr data-testid="compare-row-overall">
+                    <MetricLabelCell>Overall Score</MetricLabelCell>
+                    {cols.map((c, i) => (
+                      <td key={c.id} className={numCell(i, overallWinners)}>
+                        {c.payload?.overall_score !== null && c.payload?.overall_score !== undefined ? (
+                          c.payload.overall_score
+                        ) : (
+                          <span className="font-sans text-xs text-muted-foreground">
+                            {c.payload ? ((c.payload.evaluation_count ?? 0) > 0 ? "Evaluated · metrics on file" : "No eval yet") : (busy ? "Loading…" : "–")}
+                          </span>
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr data-testid="compare-row-evals">
+                    <MetricLabelCell>Evaluations</MetricLabelCell>
+                    {cols.map((c, i) => (
+                      <td key={c.id} className={numCell(i)}>
+                        {c.payload?.evaluation_count ?? <span className="font-sans text-xs text-muted-foreground">–</span>}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr data-testid="compare-row-videos">
+                    <MetricLabelCell>Videos</MetricLabelCell>
+                    {cols.map((c, i) => (
+                      <td key={c.id} className={numCell(i)}>
+                        {c.payload?.video_count ?? <span className="font-sans text-xs text-muted-foreground">–</span>}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr data-testid="compare-row-height">
+                    <MetricLabelCell>Height</MetricLabelCell>
+                    {cols.map((c) => <td key={c.id} className={textCell}>{c.a?.height || "–"}</td>)}
+                  </tr>
+                  <tr data-testid="compare-row-weight">
+                    <MetricLabelCell>Weight</MetricLabelCell>
+                    {cols.map((c) => <td key={c.id} className={textCell}>{c.a?.weight || "–"}</td>)}
+                  </tr>
+                  <tr data-testid="compare-row-bats-throws">
+                    <MetricLabelCell>Bats / Throws</MetricLabelCell>
+                    {cols.map((c) => (
+                      <td key={c.id} className={cn(textCell, "font-mono-num")}>{c.a?.bats || "–"}/{c.a?.throws || "–"}</td>
+                    ))}
+                  </tr>
+                  <tr data-testid="compare-row-grad">
+                    <MetricLabelCell>Grad Year</MetricLabelCell>
+                    {cols.map((c) => (
+                      <td key={c.id} className={cn(textCell, "font-mono-num")}>{c.a?.graduation_year || "–"}</td>
+                    ))}
+                  </tr>
+                  {measurementRows.map(({ key, label }) => {
+                    const dir = HIGHER_IS_BETTER.has(key) ? "high" : LOWER_IS_BETTER.has(key) ? "low" : null;
+                    const winners = winnerSet(cols.map((c) => metricValue(c.payload, key)?.value), dir);
+                    return (
+                      <tr key={key} data-testid={`compare-row-${key}`}>
+                        <MetricLabelCell>{label}</MetricLabelCell>
+                        {cols.map((c, i) => {
+                          const m = metricValue(c.payload, key);
+                          return (
+                            <td key={c.id} className={numCell(i, winners)}>
+                              {m?.value != null ? (
+                                <span className="inline-flex items-center gap-1.5">
+                                  {m.value}{m.unit ? ` ${m.unit}` : ""}
+                                  <VerificationBadge source={m.source} compact />
+                                </span>
+                              ) : (
+                                <span className="font-sans text-xs text-muted-foreground">–</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {busy && loaded.length === 0 && (
+              <p className="mt-2 text-xs text-muted-foreground">Loading comparison…</p>
+            )}
           </div>
 
           {/* Category comparison: radar for ≤2 players, grouped bar for >2 */}
           {loaded.length > 0 && (
             <Card className="rounded-2xl border-border">
               <CardContent className="pt-5 pb-5">
-                <p className="text-sm font-semibold mb-3">Category scores</p>
+                <p className="mb-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Category Scores</p>
                 {loaded.length <= 2 ? (
                   <>
                     {overlayRadar() || (
@@ -294,6 +380,8 @@ export default function PlayerCompare() {
                       </p>
                     )}
                   </>
+                ) : categoryData.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No scored evaluations yet.</p>
                 ) : (
                   <div className="h-72" data-testid="category-bar">
                     <ResponsiveContainer width="100%" height="100%">
@@ -320,26 +408,31 @@ export default function PlayerCompare() {
             </Card>
           )}
 
-          {/* Overall score grouped bar */}
+          {/* Overall score grouped bar — only when at least one real score
+              exists; a chart of nothing is never drawn. */}
           {overallData.length >= 2 && (
             <Card className="rounded-2xl border-border">
               <CardContent className="pt-5 pb-5">
-                <p className="text-sm font-semibold mb-3">Overall evaluation score</p>
-                <div className="h-56" data-testid="overall-bar">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={overallData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                      <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                      <YAxis domain={[0, 10]} stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                      <Tooltip contentStyle={TOOLTIP_STYLE} />
-                      <Bar dataKey="overall" name="Overall" radius={[6, 6, 0, 0]}>
-                        {overallData.map((d) => (
-                          <Cell key={d.name} fill={d.color} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                <p className="mb-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Overall Evaluation Score</p>
+                {!hasOverallScores ? (
+                  <p className="text-xs text-muted-foreground">No scored evaluations yet.</p>
+                ) : (
+                  <div className="h-56" data-testid="overall-bar">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={overallData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                        <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                        <YAxis domain={[0, 10]} stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                        <Tooltip contentStyle={TOOLTIP_STYLE} />
+                        <Bar dataKey="overall" name="Overall" radius={[6, 6, 0, 0]}>
+                          {overallData.map((d) => (
+                            <Cell key={d.name} fill={d.color} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
@@ -362,7 +455,9 @@ export default function PlayerCompare() {
                 return (
                   <Card key={km.key} className="rounded-2xl border-border">
                     <CardContent className="pt-5 pb-5">
-                      <p className="text-sm font-semibold mb-3">{km.label}{unit ? ` (${unit})` : ""}</p>
+                      <p className="mb-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        {km.label}{unit ? ` (${unit})` : ""}
+                      </p>
                       <div className="h-48">
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart data={rows}>

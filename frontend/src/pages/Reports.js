@@ -55,15 +55,36 @@ const chartTooltip = {
 
 const NotEnoughData = () => <p className="text-xs text-muted-foreground">Not enough data yet.</p>;
 
+const PanelLabel = ({ children }) => (
+  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{children}</p>
+);
+
+const scrollToTabs = () => {
+  document.getElementById("reports-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" });
+};
+
+// The report hub — one card per existing report tab. Focusing a card switches
+// the tab below; no data is fetched until the tab's own effect runs, as before.
+const REPORT_DEFS = [
+  { tab: "leaderboard", icon: Trophy, tint: "bg-warning/15 text-warning", name: "Leaderboard", desc: "Ranked players for the selected event and filters." },
+  { tab: "categories", icon: Layers, tint: "bg-brand/15 text-brand", name: "Category ranking", desc: "Top players in each scored category, with averages." },
+  { tab: "positions", icon: Users, tint: "bg-info/15 text-info", name: "Position comparison", desc: "Average and best overall score by primary position." },
+  { tab: "progress", icon: TrendingUp, tint: "bg-success/15 text-success", name: "Player progress", desc: "Score trend, category change and goal progress per player." },
+  { tab: "completion", icon: ClipboardList, tint: "bg-info/15 text-info", name: "Completion", desc: "Per-station evaluation completion for the event roster." },
+  { tab: "disagreement", icon: AlertTriangle, tint: "bg-destructive/15 text-destructive", name: "Disagreement", desc: "Evaluator score spreads flagged for a second look." },
+];
+
 // One insight card on the landing strip. Renders as a link (route cards) or a
 // button (cards that focus one of the existing tabs below).
-const InsightCard = ({ icon: Icon, title, to, onClick, testId, children }) => {
+const InsightCard = ({ icon: Icon, tint = "bg-brand/15 text-brand", title, to, onClick, testId, children }) => {
   const body = (
     <Card className="rounded-2xl border-border h-full hover:border-brand/50 transition-colors">
       <CardContent className="pt-4 pb-4">
-        <div className="flex items-center gap-2 mb-2">
-          <Icon className="h-4 w-4 text-brand shrink-0" />
-          <p className="text-[11px] uppercase tracking-[0.14em] font-semibold text-muted-foreground">{title}</p>
+        <div className="flex items-center gap-2.5 mb-2">
+          <div className={cn("h-8 w-8 rounded-lg grid place-items-center shrink-0", tint)}>
+            <Icon className="h-4 w-4" />
+          </div>
+          <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground">{title}</p>
         </div>
         {children}
       </CardContent>
@@ -246,19 +267,72 @@ export default function Reports() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="font-display text-4xl text-foreground">Reports</h1>
-          <p className="text-sm text-muted-foreground">Internal rankings and completion reports. Not for public distribution.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button asChild variant="outline" className="rounded-xl h-11" data-testid="reports-compare-link">
-            <Link to="/scout/compare"><GitCompare className="h-4 w-4 mr-1" /> Compare players</Link>
-          </Button>
+      <div>
+        <h1 className="font-display text-4xl text-foreground">Reports</h1>
+        <p className="text-sm text-muted-foreground">Internal rankings and completion reports. Not for public distribution.</p>
+      </div>
+
+      {/* ---------------- Report hub ---------------- */}
+      <div className="space-y-1.5">
+        <PanelLabel>Reports &amp; analytics</PanelLabel>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="reports-hub">
+          {REPORT_DEFS.map(({ tab: t, icon: Icon, tint, name, desc }) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => { setTab(t); scrollToTabs(); }}
+              data-testid={`reports-hub-${t}`}
+              className="block h-full w-full text-left cursor-pointer"
+            >
+              <Card className={cn("rounded-2xl border-border bg-card h-full transition-colors hover:bg-secondary/50", tab === t && "border-brand/50")}>
+                <CardContent className="pt-4 pb-4 flex items-start gap-3">
+                  <div className={cn("h-10 w-10 rounded-lg grid place-items-center shrink-0", tint)}>
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground">{name}</p>
+                    <p className="text-xs text-muted-foreground">{desc}</p>
+                    <span className="mt-1.5 inline-block text-xs font-semibold text-primary">View report →</span>
+                  </div>
+                </CardContent>
+              </Card>
+            </button>
+          ))}
+          <Card className="rounded-2xl border-border bg-card h-full">
+            <CardContent className="pt-4 pb-4 flex items-start gap-3">
+              <div className="h-10 w-10 rounded-lg grid place-items-center shrink-0 bg-brand/15 text-brand">
+                <GitCompare className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground">Compare players</p>
+                <p className="text-xs text-muted-foreground">Side-by-side score comparison across athletes.</p>
+                <Button asChild variant="outline" size="sm" className="mt-2 rounded-lg h-8" data-testid="reports-compare-link">
+                  <Link to="/scout/compare"><GitCompare className="h-3.5 w-3.5 mr-1" /> Open compare</Link>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
           {eventId && (
-            <Button variant="outline" className="rounded-xl h-11" onClick={() => window.open(signedUrl(`/reports/event-results/${eventId}/csv`), "_blank")} data-testid="reports-export-csv-button">
-              <FileDown className="h-4 w-4 mr-1" /> Export CSV
-            </Button>
+            <Card className="rounded-2xl border-border bg-card h-full">
+              <CardContent className="pt-4 pb-4 flex items-start gap-3">
+                <div className="h-10 w-10 rounded-lg grid place-items-center shrink-0 bg-success/15 text-success">
+                  <FileDown className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">Event results CSV</p>
+                  <p className="text-xs text-muted-foreground">Full results export for the selected event.</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2 rounded-lg h-8"
+                    onClick={() => window.open(signedUrl(`/reports/event-results/${eventId}/csv`), "_blank")}
+                    data-testid="reports-export-csv-button"
+                  >
+                    <FileDown className="h-3.5 w-3.5 mr-1" /> Export CSV
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           )}
         </div>
       </div>
@@ -267,9 +341,11 @@ export default function Reports() {
       {insights === null ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}</div>
       ) : insights === false ? null : (
+        <div className="space-y-1.5">
+        <PanelLabel>At a glance</PanelLabel>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" data-testid="reports-insights">
           <InsightCard
-            icon={TrendingUp} title="Top Movers" testId="insight-top-movers"
+            icon={TrendingUp} tint="bg-success/15 text-success" title="Top Movers" testId="insight-top-movers"
             onClick={() => {
               setTab("progress");
               const first = insights.top_movers?.[0]?.athlete?.id;
@@ -293,7 +369,7 @@ export default function Reports() {
             ) : <NotEnoughData />}
           </InsightCard>
 
-          <InsightCard icon={ClipboardList} title="Evaluations Complete" testId="insight-evaluations" onClick={() => setTab("completion")}>
+          <InsightCard icon={ClipboardList} tint="bg-brand/15 text-brand" title="Evaluations Complete" testId="insight-evaluations" onClick={() => setTab("completion")}>
             {insights.evaluations?.completed === null || insights.evaluations?.completed === undefined ? <NotEnoughData /> : (
               <p className="font-mono-num text-3xl font-bold text-foreground">
                 {insights.evaluations.completed}
@@ -304,7 +380,7 @@ export default function Reports() {
             )}
           </InsightCard>
 
-          <InsightCard icon={ClipboardCheck} title="Needs Review" to="/review" testId="insight-needs-review">
+          <InsightCard icon={ClipboardCheck} tint="bg-warning/15 text-warning" title="Needs Review" to="/review" testId="insight-needs-review">
             {insights.needs_review === null || insights.needs_review === undefined ? <NotEnoughData /> : (
               <p className="font-mono-num text-3xl font-bold text-foreground">
                 {insights.needs_review}
@@ -313,7 +389,7 @@ export default function Reports() {
             )}
           </InsightCard>
 
-          <InsightCard icon={Flag} title="Flagged" to="/players" testId="insight-flagged">
+          <InsightCard icon={Flag} tint="bg-destructive/15 text-destructive" title="Flagged" to="/players" testId="insight-flagged">
             {insights.flagged === null || insights.flagged === undefined ? <NotEnoughData /> : (
               <p className="font-mono-num text-3xl font-bold text-foreground">
                 {insights.flagged}
@@ -322,7 +398,7 @@ export default function Reports() {
             )}
           </InsightCard>
 
-          <InsightCard icon={Users} title="Position Snapshot" testId="insight-positions" onClick={() => setTab("positions")}>
+          <InsightCard icon={Users} tint="bg-info/15 text-info" title="Position Snapshot" testId="insight-positions" onClick={() => setTab("positions")}>
             {insights.position_snapshot?.length ? (
               <div className="space-y-1.5">
                 {[...insights.position_snapshot].sort((a, b) => (b.count || 0) - (a.count || 0)).slice(0, 3).map((p) => (
@@ -338,7 +414,7 @@ export default function Reports() {
             ) : <NotEnoughData />}
           </InsightCard>
 
-          <InsightCard icon={TrendingUp} title="Development Trend" testId="insight-trend" onClick={() => setTab("progress")}>
+          <InsightCard icon={TrendingUp} tint="bg-success/15 text-success" title="Development Trend" testId="insight-trend" onClick={() => setTab("progress")}>
             {insights.development_trend ? (
               <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-sm">
                 <span className="inline-flex items-center gap-1 text-success font-semibold">
@@ -354,9 +430,12 @@ export default function Reports() {
             ) : <NotEnoughData />}
           </InsightCard>
         </div>
+        </div>
       )}
 
-      <div className="flex flex-wrap gap-2">
+      <div className="space-y-1.5">
+        <PanelLabel>Event &amp; filters</PanelLabel>
+        <div className="flex flex-wrap gap-2">
         <Select value={eventId} onValueChange={setEventId}>
           <SelectTrigger className="w-[240px] h-11 rounded-xl bg-card" data-testid="reports-event-select"><SelectValue placeholder="Select event" /></SelectTrigger>
           <SelectContent>{events.map((e) => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}</SelectContent>
@@ -373,8 +452,10 @@ export default function Reports() {
           <SelectTrigger className="w-[150px] h-11 rounded-xl bg-card" data-testid="reports-category-filter"><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="overall">Overall score</SelectItem>{CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
         </Select>
+        </div>
       </div>
 
+      <div id="reports-tabs" className="scroll-mt-4">
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="rounded-xl bg-secondary h-11 flex-wrap">
           <TabsTrigger value="leaderboard" className="rounded-lg px-4 data-[state=active]:bg-primary data-[state=active]:text-white" data-testid="reports-tab-leaderboard">Leaderboard</TabsTrigger>
@@ -977,6 +1058,7 @@ export default function Reports() {
           )}
         </TabsContent>
       </Tabs>
+      </div>
     </div>
   );
 }

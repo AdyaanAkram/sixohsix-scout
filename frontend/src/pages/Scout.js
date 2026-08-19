@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/common/EmptyState";
-import { PlayerAvatar } from "@/components/common/PlayerAvatar";
+import { resolvePhotoSrc } from "@/components/common/PlayerAvatar";
 import { VerificationBadge, isVerifiedSource } from "@/components/common/StatusBadge";
 import { GradYearChips } from "@/pages/PlayersList";
 import { cn } from "@/lib/utils";
@@ -29,8 +29,8 @@ const ACTIONS = [
   { to: "/reports", icon: Flag, title: "Rankings & Reports", testId: "scout-reports-link" },
 ];
 
-// Verified metrics surfaced as chips on a card, in preference order. Matches
-// the backend's COMPARE_KEY_METRICS naming (see PlayerCompare).
+// Verified metrics surfaced on a card, in preference order. Matches the
+// backend's COMPARE_KEY_METRICS naming (see PlayerCompare).
 const CHIP_METRIC_ORDER = ["exit_velocity", "throwing_velocity", "sixty_yard_dash"];
 
 // How many cards get the (heavier) /athletes/compare enrichment — verified
@@ -51,7 +51,8 @@ const trendOf = (payload) => {
   return Math.round(change * 10) / 10;
 };
 
-// Up to two measurement chips, verified sources first, key metrics first.
+// Up to three measurements for the card's mini-grid, verified sources first,
+// key metrics first.
 const chipMetrics = (payload) => {
   const ms = payload?.measurements || [];
   const rankKey = (m) => {
@@ -60,7 +61,7 @@ const chipMetrics = (payload) => {
   };
   return [...ms]
     .sort((a, b) => (isVerifiedSource(b.source) - isVerifiedSource(a.source)) || (rankKey(a) - rankKey(b)))
-    .slice(0, 2);
+    .slice(0, 3);
 };
 
 const TrendArrow = ({ change }) => {
@@ -81,6 +82,37 @@ const TrendArrow = ({ change }) => {
   );
 };
 
+/* Photo header for the prospect card — same idiom as the Athletes directory:
+   real photo when the athlete has one, otherwise a branded monogram panel with
+   a faded position watermark so a photo-less prospect still looks intentional. */
+const CardPhoto = ({ p }) => {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { setFailed(false); }, [p.photo_url]);
+  const src = !failed ? resolvePhotoSrc(p.photo_url) : null;
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={`${p.first_name || ""} ${p.last_name || ""}`.trim() || "Player"}
+        className="h-full w-full object-cover object-top"
+        loading="lazy"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  const initials = `${(p.first_name || "?")[0] || ""}${(p.last_name || "")[0] || ""}`.toUpperCase();
+  return (
+    <div className="relative flex h-full w-full items-center justify-center bg-gradient-to-br from-brand-tertiary via-secondary to-background">
+      {p.primary_position && (
+        <span className="absolute -right-2 bottom-0 select-none font-display text-7xl font-extrabold leading-none text-foreground/[0.06]">
+          {p.primary_position}
+        </span>
+      )}
+      <span className="select-none font-display text-5xl text-brand/70">{initials}</span>
+    </div>
+  );
+};
+
 // One prospect card, shared by Discover and Watchlist. `wl` is the athlete's
 // /watchlist entry (latest_overall, score_change, development_focus) used as a
 // fallback when the compare enrichment hasn't loaded; `onToggleWatch` being
@@ -88,57 +120,97 @@ const TrendArrow = ({ change }) => {
 const ProspectCard = ({ athlete, score, payload, wl, watched, onToggleWatch }) => {
   const overall = payload?.overall_score ?? score?.overall_score ?? wl?.latest_overall ?? null;
   const evalCount = payload?.evaluation_count ?? score?.evaluation_count ?? null;
+  const hasScore = overall !== null && overall !== undefined;
+  // Evaluated-but-unscored: evals exist yet carry raw metrics only. Never show
+  // a "—" score for that — say what's actually on file.
+  const evaluated = (evalCount ?? 0) > 0 || !!athlete.statuses?.evaluated || !!wl?.statuses?.evaluated;
   const enrichedChange = trendOf(payload);
   const change = enrichedChange !== null ? enrichedChange
     : (wl?.score_change !== null && wl?.score_change !== undefined ? Math.round(Number(wl.score_change) * 10) / 10 : null);
   const chips = chipMetrics(payload);
   return (
-    <Card className="rounded-2xl border-border hover:border-brand/50 transition-colors" data-testid={`scout-prospect-card-${athlete.id}`}>
-      <CardContent className="pt-4 pb-4 space-y-3">
-        <div className="flex items-start gap-3">
-          <PlayerAvatar firstName={athlete.first_name} lastName={athlete.last_name} photoUrl={athlete.photo_url} />
-          <div className="flex-1 min-w-0">
-            <Link to={`/players/${athlete.id}`} className="font-semibold text-foreground hover:underline block truncate">
-              {athlete.first_name} {athlete.last_name}
-            </Link>
-            <p className="text-xs text-muted-foreground">
-              {athlete.graduation_year ? `Class of ${athlete.graduation_year}` : "No grad year"} · {athlete.primary_position || "—"}
-            </p>
-          </div>
-          <div className="text-right shrink-0">
-            <p className="font-mono-num text-2xl font-bold text-brand leading-none">{overall ?? "—"}</p>
-            <div className="mt-1 flex items-center justify-end gap-1.5">
-              <TrendArrow change={change} />
-            </div>
-          </div>
-          {onToggleWatch && (
-            <button
-              type="button"
-              onClick={() => onToggleWatch(athlete)}
-              className="shrink-0 -mt-1 -mr-1 h-7 w-7 inline-flex items-center justify-center rounded-full transition-colors hover:bg-secondary"
-              title={watched ? "Remove from watchlist" : "Add to watchlist"}
-              aria-label={watched ? "Remove from watchlist" : "Add to watchlist"}
-              aria-pressed={!!watched}
-              data-testid={`scout-watch-toggle-${athlete.id}`}
-            >
-              <Star className={cn("h-4 w-4 transition-colors", watched ? "fill-warning text-warning" : "text-muted-foreground")} />
-            </button>
-          )}
+    <Card
+      className="h-full overflow-hidden rounded-2xl border-border transition-all hover:border-brand/50 hover:shadow-lg hover:-translate-y-0.5"
+      data-testid={`scout-prospect-card-${athlete.id}`}
+    >
+      {/* Photo header — the prospect's face is the card. The watchlist star and
+          the overall score (when a real one exists) live on the image. */}
+      <div className="relative aspect-[4/3] w-full overflow-hidden">
+        <CardPhoto p={athlete} />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/55 to-transparent" />
+        {onToggleWatch && (
+          <button
+            type="button"
+            onClick={() => onToggleWatch(athlete)}
+            className="absolute right-2 top-2 rounded-full bg-black/40 p-1.5 backdrop-blur-sm transition-colors hover:bg-black/60"
+            title={watched ? "Remove from watchlist" : "Add to watchlist"}
+            aria-label={watched ? "Remove from watchlist" : "Add to watchlist"}
+            aria-pressed={!!watched}
+            data-testid={`scout-watch-toggle-${athlete.id}`}
+          >
+            <Star className={cn("h-4 w-4", watched ? "fill-current text-warning" : "text-white/85")} />
+          </button>
+        )}
+        {hasScore && (
+          <span className="absolute bottom-2.5 left-2.5 rounded-lg bg-success px-2.5 py-1.5 font-mono-num text-xl font-bold leading-none text-white shadow-lg">
+            {overall}
+          </span>
+        )}
+      </div>
+
+      <CardContent className="p-4 pt-3 space-y-2.5">
+        <div className="min-w-0">
+          <Link to={`/players/${athlete.id}`} className="font-display text-lg leading-tight text-foreground hover:underline block truncate">
+            {athlete.first_name} {athlete.last_name}
+          </Link>
+          <p className="text-xs text-muted-foreground truncate">
+            {athlete.primary_position || "—"} · {athlete.bats || "—"}/{athlete.throws || "—"} · {athlete.current_team || "No team"}
+          </p>
+          <p className="text-xs text-muted-foreground truncate">
+            {athlete.graduation_year ? `Class of ${athlete.graduation_year}` : "No grad year"}
+            {athlete.age_group ? ` · ${athlete.age_group}` : ""}
+          </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 min-h-[22px]">
-          {chips.length > 0 ? chips.map((m) => (
-            <span key={m.metric_key} className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-0.5 text-[11px] font-medium">
-              <span className="text-muted-foreground">{m.label}</span>
-              <span className="font-mono-num font-bold text-foreground">
-                {m.value != null ? `${m.value}${m.unit ? ` ${m.unit}` : ""}` : "—"}
-              </span>
-              <VerificationBadge source={m.source} compact />
+        {hasScore ? (
+          /* The score itself sits on the photo — this row carries the trend. */
+          <div className="flex min-h-[44px] items-center justify-between gap-2 rounded-xl bg-secondary px-3 py-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wide leading-tight text-muted-foreground">
+              Overall Eval Score
             </span>
-          )) : (
-            <span className="text-[11px] text-muted-foreground">No verified measurements on file.</span>
-          )}
-        </div>
+            {change !== null ? (
+              <TrendArrow change={change} />
+            ) : (
+              <span className="font-mono-num text-xs text-muted-foreground">–</span>
+            )}
+          </div>
+        ) : evaluated ? (
+          <div className="flex min-h-[44px] items-center rounded-xl bg-secondary px-3 py-2">
+            <span className="text-xs text-muted-foreground">Evaluated · metrics on file</span>
+          </div>
+        ) : (
+          <div className="flex min-h-[44px] items-center rounded-xl bg-secondary px-3 py-2">
+            <span className="text-xs text-muted-foreground">No eval yet · Not Evaluated</span>
+          </div>
+        )}
+
+        {chips.length > 0 ? (
+          <div className={cn("grid gap-2", chips.length === 1 ? "grid-cols-1" : chips.length === 2 ? "grid-cols-2" : "grid-cols-3")}>
+            {chips.map((m) => (
+              <div key={m.metric_key} className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground truncate" title={m.label}>
+                  {m.label}
+                </p>
+                <p className="flex items-center gap-1 font-mono-num text-sm font-bold text-foreground">
+                  {m.value != null ? `${m.value}${m.unit ? ` ${m.unit}` : ""}` : "–"}
+                  <VerificationBadge source={m.source} compact />
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[11px] text-muted-foreground">No verified measurements on file.</p>
+        )}
 
         {wl?.development_focus && (
           <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -149,7 +221,9 @@ const ProspectCard = ({ athlete, score, payload, wl, watched, onToggleWatch }) =
 
         <div className="flex items-center justify-between border-t border-border pt-2.5">
           <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
-            <span className="inline-flex items-center gap-1"><ClipboardCheck className="h-3.5 w-3.5" />{evalCount ?? "—"} eval{evalCount === 1 ? "" : "s"}</span>
+            {evalCount !== null && (
+              <span className="inline-flex items-center gap-1"><ClipboardCheck className="h-3.5 w-3.5" />{evalCount} eval{evalCount === 1 ? "" : "s"}</span>
+            )}
             {payload?.video_count !== undefined && (
               <span className="inline-flex items-center gap-1"><Video className="h-3.5 w-3.5" />{payload.video_count} video{payload.video_count === 1 ? "" : "s"}</span>
             )}
@@ -169,11 +243,11 @@ const ProspectCard = ({ athlete, score, payload, wl, watched, onToggleWatch }) =
 };
 
 const CardGrid = ({ children, testId }) => (
-  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid={testId}>{children}</div>
+  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" data-testid={testId}>{children}</div>
 );
 
 const GridSkeleton = () => (
-  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-44 rounded-2xl" />)}</div>
+  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-80 rounded-2xl" />)}</div>
 );
 
 export default function Scout() {
@@ -321,6 +395,7 @@ export default function Scout() {
     <div className="space-y-4">
       <GradYearChips years={gradYears} selected={gradYear} onSelect={setGradYear} testIdPrefix="scout" />
 
+      {/* Control bar — same h-11 rounded-xl bg-card language as the directory. */}
       <div className="flex flex-wrap items-center gap-2">
         <Select value={position} onValueChange={setPosition}>
           <SelectTrigger className="w-[140px] h-11 rounded-xl bg-card" data-testid="scout-filter-position"><SelectValue /></SelectTrigger>
@@ -333,6 +408,8 @@ export default function Scout() {
           </p>
         )}
       </div>
+
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Prospect Board</p>
 
       {!board ? (
         <GridSkeleton />
@@ -380,6 +457,7 @@ export default function Scout() {
         </TabsContent>
 
         <TabsContent value="watchlist" className="mt-4 space-y-4">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Watched Prospects</p>
           {watchlist === null ? (
             <GridSkeleton />
           ) : watchlist.length === 0 ? (
