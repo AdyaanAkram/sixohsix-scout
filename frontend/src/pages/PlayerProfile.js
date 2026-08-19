@@ -646,7 +646,7 @@ function AiAssessmentCard({ row, athleteId, isAdmin, onChanged }) {
 // never a bare "—", which families read as broken data.
 const ProfileStatTile = ({ icon: Icon, tint, value, empty, mono = true, valueClass, label, sub, badge, testId }) => (
   <Card className="rounded-2xl border-border bg-card h-full" data-testid={testId}>
-    <CardContent className="pt-4 pb-4 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
+    <CardContent className="pt-4 pb-4 flex flex-col items-start gap-2 2xl:flex-row 2xl:items-center 2xl:gap-3">
       <div className={cn("h-10 w-10 rounded-lg grid place-items-center shrink-0", tint)}>
         <Icon className="h-5 w-5" />
       </div>
@@ -657,7 +657,7 @@ const ProfileStatTile = ({ icon: Icon, tint, value, empty, mono = true, valueCla
           <p className="text-xs font-semibold text-muted-foreground leading-snug">{empty}</p>
         )}
         <p className="mt-1 text-xs font-semibold leading-snug text-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden">{label}</p>
-        {sub && <p className="text-[10px] text-muted-foreground truncate">{sub}</p>}
+        {sub && <p className="text-[10px] leading-snug text-muted-foreground">{sub}</p>}
         {badge && <div className="mt-1">{badge}</div>}
       </div>
     </CardContent>
@@ -1208,7 +1208,7 @@ export default function PlayerProfile() {
       {/* KPI row — the sketch order: evaluation, development, headline verified
           metrics (only when the athlete actually has them), goal, completion.
           Missing headline metrics fall back to real counts, never invented values. */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3" data-testid="profile-quick-cards">
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6 gap-3" data-testid="profile-quick-cards">
         <ProfileStatTile
           icon={Gauge}
           tint="bg-brand/15 text-brand"
