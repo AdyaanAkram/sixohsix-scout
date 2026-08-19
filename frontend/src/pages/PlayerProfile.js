@@ -1104,12 +1104,12 @@ export default function PlayerProfile() {
               right half. The disclosure's expanded grid stays full width, so
               the Collapsible root wraps both columns. */}
           <Collapsible>
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div className="flex min-w-0 flex-col gap-5 sm:flex-1 sm:flex-row">
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+              <div className="flex min-w-0 flex-col gap-5 sm:flex-row xl:flex-1">
                 <PlayerAvatar firstName={a.first_name} lastName={a.last_name} size="hero" photoUrl={a.photo_url} className="mx-auto sm:mx-0" />
                 <div className="min-w-0 space-y-1.5 text-center sm:text-left mx-auto sm:mx-0">
                   <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2.5">
-                    <h1 className="font-display text-5xl sm:text-6xl leading-[0.95] text-foreground" data-testid="profile-player-name">{a.first_name} {a.last_name}</h1>
+                    <h1 className="font-display text-4xl sm:text-5xl xl:text-6xl leading-[1.02] text-foreground break-words" data-testid="profile-player-name">{a.first_name} {a.last_name}</h1>
                     {a.flagged_follow_up && <span className="inline-flex items-center gap-1 rounded-full bg-destructive/15 border border-destructive/40 text-destructive px-2.5 py-0.5 text-xs font-semibold"><Flag className="h-3 w-3" /> Follow-up</span>}
                   </div>
                   {identityLine && (
@@ -1134,7 +1134,7 @@ export default function PlayerProfile() {
               </div>
               {/* Right column: status pill + every action, right-aligned from sm
                   up and wrapping under the identity block on phones. */}
-              <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:shrink-0">
+              <div className="flex min-w-0 flex-wrap items-center gap-2 xl:max-w-[30rem] xl:justify-end">
                 <StatusBadge status={a.status} />
                 {isAdmin && (
                   <Dialog open={editOpen} onOpenChange={setEditOpen}>
