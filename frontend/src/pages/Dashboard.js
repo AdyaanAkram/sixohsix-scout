@@ -654,7 +654,7 @@ export default function Dashboard() {
                 <StatusBadge status={ev.status} testId="event-status-badge" />
               </div>
               <CardContent className="pt-4 pb-5">
-                <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 2xl:grid-cols-4 gap-3">
                   <StatCard label="Registered Players" value={stats.registered} icon={Users} testId="stat-registered" to={`/events/${ev.id}?tab=checkin`} />
                   <StatCard label="Checked In" value={stats.checked_in} icon={CheckCircle2} tint="bg-success/15 text-success" testId="stat-checked-in" to={`/events/${ev.id}?tab=checkin`} />
                   <StatCard label="Evaluations Completed" value={stats.evaluations_completed} icon={ClipboardCheck} tint="bg-info/15 text-info" testId="stat-evals-completed" to={`/events/${ev.id}?tab=progress`} />
