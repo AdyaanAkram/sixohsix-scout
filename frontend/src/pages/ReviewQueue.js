@@ -78,7 +78,7 @@ const StatCard = ({ icon: Icon, tint, value, label, sub, onClick, testId }) => {
         <div className="min-w-0">
           <p className="font-mono-num font-bold text-2xl text-foreground leading-none">{value ?? "—"}</p>
           {/* Labels wrap to two lines rather than truncating to "Evalu…". */}
-          <p className="mt-1 text-xs font-semibold leading-snug text-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden">{label}</p>
+          <p className="mt-1 text-xs font-semibold leading-snug text-foreground break-words [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden">{label}</p>
           {sub && <p className="text-[10px] text-muted-foreground truncate">{sub}</p>}
         </div>
       </CardContent>
@@ -389,12 +389,12 @@ export default function ReviewQueue() {
 
       {/* B — Stat card row */}
       {insightsLoading && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-2">
           {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-20 rounded-2xl" />)}
         </div>
       )}
       {totals && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2" data-testid="evals-stat-row">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-2" data-testid="evals-stat-row">
           <StatCard icon={ClipboardList} tint="bg-brand/15 text-brand" value={totals.evaluations} label="Evaluations" sub="Total completed" />
           <StatCard icon={CheckCircle2} tint="bg-success/15 text-success" value={totals.verified} label="Verified" sub={`${verifiedPct}% verified`} />
           <StatCard icon={Users} tint="bg-warning/15 text-warning" value={totals.athletes_evaluated} label="Athletes" sub="Evaluated" />
