@@ -1692,16 +1692,18 @@ def _fmt_num(v):
     return int(f) if f == int(f) else round(f, 2)
 
 
-async def _export_rows(org: str) -> tuple[list[str], list[list]]:
+async def _export_rows(org: str, athlete_ids: list[str] | None = None) -> tuple[list[str], list[list]]:
     """Roster + every measured reading + evaluation/assessment state.
 
     Built to match the coach master view the client works from: one row per
     athlete, a best-of column per tool plus the raw readings behind it, and the
     profile/data gaps spelled out so the sheet is directly actionable.
     """
-    athletes = await db.athletes.find(
-        {"organization_id": org, "status": {"$ne": "merged"}}, {"_id": 0}
-    ).sort([("last_name", 1), ("first_name", 1)]).to_list(5000)
+    q = {"organization_id": org, "status": {"$ne": "merged"}}
+    if athlete_ids is not None:
+        q["id"] = {"$in": athlete_ids}
+    athletes = await db.athletes.find(q, {"_id": 0}).sort(
+        [("last_name", 1), ("first_name", 1)]).to_list(5000)
     ids = [a["id"] for a in athletes]
 
     metrics = await db.verified_metrics.find(

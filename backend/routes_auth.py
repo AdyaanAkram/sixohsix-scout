@@ -16,6 +16,10 @@ from storage import media_object_key, storage
 
 # Staff roles outrank family roles: accepting a staff invitation on an account
 # that already belongs to the org promotes it rather than being ignored.
+ROLE_LABELS = {"owner": "an owner", "admin": "an administrator",
+               "head_scout": "a head scout", "coach": "a coach",
+               "evaluator": "an evaluator", "parent": "a guardian", "athlete": "an athlete"}
+
 ROLE_RANK = {"athlete": 1, "parent": 1, "evaluator": 2, "coach": 3,
              "head_scout": 4, "admin": 5, "owner": 6}
 
@@ -281,7 +285,45 @@ async def invite_staff(body: InviteBody, user=Depends(require_roles(*ADMIN_ROLES
         raise HTTPException(status_code=400, detail="Invalid role. Use athlete invite endpoint for athletes.")
     existing = await db.users.find_one({"email": body.email.lower()})
     if existing:
-        raise HTTPException(status_code=400, detail="A user with this email already exists.")
+        # A parent of an athlete here being made a coach used to hit a flat
+        # "user already exists" wall — there was no way to give an existing
+        # account a staff role. They already have a password, so no invitation
+        # token is needed: grant (or promote) the membership directly. The
+        # family lens is untouched; it comes from the athlete's guardian link.
+        member = await db.memberships.find_one(
+            {"user_id": existing["id"], "organization_id": user["organization_id"]}, {"_id": 0})
+        if member and ROLE_RANK.get(member.get("role"), 0) >= ROLE_RANK.get(body.role, 0) \
+                and member.get("active", True):
+            raise HTTPException(
+                status_code=409,
+                detail=f"{existing.get('full_name') or body.email} is already "
+                       f"{ROLE_LABELS.get(member.get('role'), member.get('role'))} here.")
+        if member:
+            await db.memberships.update_one(
+                {"id": member["id"]},
+                {"$set": {"role": body.role, "active": True, "updated_at": now_iso()}})
+            action = "membership_role_promoted"
+        else:
+            await db.memberships.insert_one({
+                "id": new_id(), "user_id": existing["id"],
+                "organization_id": user["organization_id"],
+                "role": body.role, "active": True, "created_at": now_iso(),
+            })
+            action = "membership_granted"
+        org = await db.organizations.find_one(
+            {"id": user["organization_id"]}, {"_id": 0, "name": 1})
+        safe_send(existing["email"], "staff_added", {
+            "name": (existing.get("full_name") or "there").split(" ")[0],
+            "org": (org or {}).get("name") or "your organization",
+            "role": ROLE_LABELS.get(body.role, body.role),
+            "link": f"{settings.app_public_url}/workspace",
+        })
+        await log_audit(user["organization_id"], user, action, "membership",
+                        existing["id"], {"role": body.role, "email": existing["email"]})
+        return {"mode": "added", "email": existing["email"],
+                "full_name": existing.get("full_name"), "role": body.role,
+                "message": "Existing account added to your staff."}
+
     from datetime import datetime, timedelta, timezone
     token = secrets.token_urlsafe(24)
     expires_at = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()

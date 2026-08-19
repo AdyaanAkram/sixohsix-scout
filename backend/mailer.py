@@ -77,6 +77,18 @@ TEMPLATES = {
             "If you didn't request this, ignore this email.\n"
         ),
     },
+    "staff_added": {
+        "subject": "You're now {role} with {org}",
+        "body": (
+            "Hi {name},\n\n"
+            "{org} has added your existing 60'6\" account as {role}. Nothing to set up — "
+            "sign in with the account you already have and pick your mode.\n\n"
+            "{link}\n\n"
+            "Your athlete's profile stays exactly where it was; you can switch between "
+            "coaching and your family view any time.\n\n"
+        ),
+    },
+
     "staff_invitation": {
         "subject": "You're invited to 60'6\" ID",
         "body": (

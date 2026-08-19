@@ -2634,7 +2634,19 @@ export default function EventDetail() {
           {/* The three things an event-runner touches constantly — big, direct,
               one tap each. Staffing math moved out of the way (Evaluators tab). */}
           <div className="space-y-1.5">
-            <SectionLabel>Event snapshot</SectionLabel>
+            <div className="flex items-center justify-between gap-2">
+              <SectionLabel>Event snapshot</SectionLabel>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => window.open(signedUrl(`/events/${eventId}/export/csv`), "_blank")}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"
+                  data-testid="event-export-csv"
+                >
+                  <FileDown className="h-3.5 w-3.5" /> Export this event
+                </button>
+              )}
+            </div>
             <div className="grid gap-3 sm:grid-cols-3">
               <OverviewStatCard
                 icon={Users}

@@ -8,7 +8,7 @@ from datetime import datetime as _dt
 from datetime import timedelta as _td
 from datetime import timezone as _tz
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 
 from auth import (ADMIN_ROLES, COACH_ROLES, STAFF_ROLES, active_assignment_filter,
@@ -301,6 +301,51 @@ async def _require_event_assignment(event_id: str, user):
             raise HTTPException(status_code=403, detail="You are not assigned to this event.")
     if user["role"] == "evaluator" and not assigned:
         raise HTTPException(status_code=403, detail="You are not assigned to this event.")
+
+
+@router.get("/events/{event_id}/export/csv")
+async def export_event_roster(event_id: str,
+                              user=Depends(require_roles(*ADMIN_ROLES, "head_scout"))):
+    """This event's roster with the same depth as the athlete master export,
+    plus the event-day columns (group, check-in, bib). The existing results
+    export is leaderboard-only, so it is empty until evaluations are scored."""
+    from routes_players import _export_rows
+    org = user["organization_id"]
+    event = await db.events.find_one({"id": event_id, "organization_id": org}, {"_id": 0})
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found.")
+    links = await db.event_athletes.find(
+        {"event_id": event_id, "organization_id": org}, {"_id": 0}).to_list(5000)
+    ids = [l["athlete_id"] for l in links]
+    if not ids:
+        raise HTTPException(status_code=404, detail="No athletes on this event roster yet.")
+    link_by_athlete = {l["athlete_id"]: l for l in links}
+
+    groups = await db.groups.find({"event_id": event_id, "organization_id": org},
+                                  {"_id": 0, "id": 1, "name": 1}).to_list(200)
+    gname = {g["id"]: g.get("name") for g in groups}
+
+    headers, rows = await _export_rows(org, athlete_ids=ids)
+    id_i = headers.index("Athlete ID")
+    headers = ["Group", "Checked In", "Bib"] + headers
+    out = []
+    for r in rows:
+        link = link_by_athlete.get(r[id_i], {})
+        out.append([
+            gname.get(link.get("group_id")) or "",
+            "Yes" if link.get("status") == "checked_in" else "",
+            link.get("bib_number") or "",
+        ] + r)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(headers)
+    for r in out:
+        writer.writerow(r)
+    await log_audit(org, user, "event_roster_exported", "event", event_id, {"rows": len(out)})
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in (event.get("name") or "event"))[:40]
+    return Response(content=output.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename={safe}_roster.csv"})
 
 
 @router.get("/events/{event_id}/roster")

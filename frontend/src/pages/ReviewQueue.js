@@ -469,7 +469,14 @@ const AssessmentsPublishCard = ({ onPublished }) => {
   if (!readiness || drafts === 0) return null;
 
   return (
-    <Card className="rounded-2xl border-border bg-card" data-testid="assessments-publish-card">
+    <Card
+      role="button"
+      tabIndex={0}
+      onClick={() => setShowPending((v) => !v)}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setShowPending((v) => !v); } }}
+      className="cursor-pointer rounded-2xl border-border bg-card transition-colors hover:border-brand/40"
+      data-testid="assessments-publish-card"
+    >
       <CardContent className="pt-4 pb-4">
         <div className="flex items-center justify-between gap-2">
           <PanelLabel>Assessments ready to publish</PanelLabel>
@@ -481,12 +488,7 @@ const AssessmentsPublishCard = ({ onPublished }) => {
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-4">
-          <button
-            type="button"
-            onClick={() => setShowPending((v) => !v)}
-            className="flex items-center gap-3 rounded-xl px-2 py-1 -ml-2 text-left transition-colors hover:bg-secondary"
-            data-testid="assessments-pending-toggle"
-          >
+          <div className="flex items-center gap-3" data-testid="assessments-pending-toggle">
             <div className="h-10 w-10 rounded-lg grid place-items-center shrink-0 bg-brand/15 text-brand">
               <Send className="h-5 w-5" />
             </div>
@@ -497,23 +499,11 @@ const AssessmentsPublishCard = ({ onPublished }) => {
                 {showPending ? <ChevronUp className="h-3.5 w-3.5 text-info" /> : <ChevronDown className="h-3.5 w-3.5 text-info" />}
               </p>
             </div>
-          </button>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-lg bg-success/15 px-2.5 py-1.5 text-xs font-semibold text-success">
-              <Mail className="h-3.5 w-3.5" />
-              <span className="font-mono-num font-bold">{willEmail}</span> families will be emailed
-            </span>
-            {noEmail > 0 && (
-              <span className="inline-flex items-center gap-1.5 rounded-lg bg-warning/15 px-2.5 py-1.5 text-xs font-semibold text-warning">
-                <MailWarning className="h-3.5 w-3.5" />
-                <span className="font-mono-num font-bold">{noEmail}</span> have no email on file
-              </span>
-            )}
           </div>
           <div className="flex-1" />
           <Button
             className="rounded-xl bg-primary hover:bg-brand-secondary h-11"
-            onClick={() => setDialogOpen(true)}
+            onClick={(e) => { e.stopPropagation(); setDialogOpen(true); }}
             disabled={publishing}
             data-testid="assessments-publish-button"
           >
@@ -560,33 +550,6 @@ const AssessmentsPublishCard = ({ onPublished }) => {
           </div>
         )}
 
-        {missing.length > 0 && (
-          <div className="mt-3">
-            <button
-              type="button"
-              onClick={() => setShowMissing((v) => !v)}
-              className="inline-flex items-center gap-1 text-xs font-semibold text-info"
-              data-testid="assessments-missing-toggle"
-            >
-              {showMissing ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-              {showMissing ? "Hide who has no email" : `Who has no email (${missing.length})`}
-            </button>
-            {showMissing && (
-              <div className="mt-2 max-h-64 overflow-y-auto rounded-xl border border-border">
-                {missing.map((m) => (
-                  <Link
-                    key={m.athlete_id}
-                    to={`/players/${m.athlete_id}`}
-                    className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 last:border-b-0 hover:bg-secondary transition-colors"
-                  >
-                    <span className="text-sm text-foreground truncate">{m.name || "Athlete"}</span>
-                    <span className="text-[11px] font-semibold text-primary shrink-0">Add an email →</span>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
 
         <PublishAllDialog
           open={dialogOpen}

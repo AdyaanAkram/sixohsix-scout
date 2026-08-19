@@ -38,7 +38,10 @@ export default function Staff() {
     try {
       const r = await api.post("/staff/invite", form);
       setInviteResult(r.data);
-      toast.success("Invitation emailed.");
+      // An existing account is added straight away — there is no invite to accept.
+      toast.success(r.data?.mode === "added"
+        ? `${r.data.full_name || r.data.email} added to your staff.`
+        : "Invitation emailed.");
       load();
     } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
   };
@@ -85,8 +88,18 @@ export default function Staff() {
               ) : (
                 <div className="space-y-3" data-testid="invite-result">
                   <p className="text-sm text-muted-foreground">
-                    Invitation emailed to <span className="font-semibold">{inviteResult.email}</span>.
-                    {inviteResult.expires_at ? " Link expires in 14 days." : ""}
+                    {inviteResult.mode === "added" ? (
+                      <>
+                        <span className="font-semibold">{inviteResult.full_name || inviteResult.email}</span> already had a
+                        60&apos;6&quot; account, so they were added to your staff right away — no invitation to accept.
+                        They keep any family profile they already had.
+                      </>
+                    ) : (
+                      <>
+                        Invitation emailed to <span className="font-semibold">{inviteResult.email}</span>.
+                        {inviteResult.expires_at ? " Link expires in 14 days." : ""}
+                      </>
+                    )}
                   </p>
                   <p className="text-xs text-muted-foreground">In local/dev, the accept link is printed in the backend console (tokens are never returned by the API).</p>
                   <Button className="w-full rounded-xl bg-primary h-11" onClick={() => { setOpen(false); setInviteResult(null); }} data-testid="invite-done-button">Done</Button>
