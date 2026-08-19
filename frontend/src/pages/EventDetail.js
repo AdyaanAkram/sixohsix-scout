@@ -842,6 +842,32 @@ const CheckInTab = ({ eventId, isAdmin }) => {
 };
 
 // ---------------- Groups tab ----------------
+// Module scope on purpose: declaring this inside GroupsTab gave it a fresh
+// component identity on every parent render, remounting every chip (and closing
+// the open "Move to…" Select) whenever name/editName/dragOverGroup changed.
+const MemberChip = ({ m, isAdmin, groups, moveAthlete }) => (
+  <span
+    draggable={isAdmin}
+    onDragStart={(ev) => ev.dataTransfer.setData("text/athlete-id", m.athlete_id)}
+    className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-semibold text-foreground cursor-grab active:cursor-grabbing"
+    data-testid={`group-member-${m.athlete_id}`}
+  >
+    {m.first_name} {m.last_name}
+    {isAdmin && (
+      <Select value="__stay__" onValueChange={(v) => moveAthlete(m.athlete_id, v === "__none__" ? null : v)}>
+        <SelectTrigger className="h-5 w-5 p-0 border-0 bg-transparent shadow-none [&>svg]:h-3.5 [&>svg]:w-3.5" aria-label="Move to group" />
+        <SelectContent>
+          <SelectItem value="__stay__" className="hidden">Move to…</SelectItem>
+          {(groups || []).filter((g2) => g2.id !== m.group_id).map((g2) => (
+            <SelectItem key={g2.id} value={g2.id}>→ {g2.name}</SelectItem>
+          ))}
+          {m.group_id && <SelectItem value="__none__">→ Unassigned</SelectItem>}
+        </SelectContent>
+      </Select>
+    )}
+  </span>
+);
+
 const GroupsTab = ({ eventId, isAdmin }) => {
   const [groups, setGroups] = useState(null);
   const [name, setName] = useState("");
@@ -856,7 +882,7 @@ const GroupsTab = ({ eventId, isAdmin }) => {
   const [mergeInto, setMergeInto] = useState("");
   const [members, setMembers] = useState([]); // event roster w/ names for member chips
   const load = useCallback(() => {
-    api.get(`/events/${eventId}/groups`).then((r) => setGroups(sortGroups(r.data)));
+    api.get(`/events/${eventId}/groups`).then((r) => setGroups(sortGroups(r.data))).catch((e) => { toast.error(errMsg(e)); setGroups([]); });
     api.get(`/events/${eventId}/roster`).then((r) => setMembers(r.data || [])).catch(() => setMembers([]));
   }, [eventId]);
   useEffect(() => { load(); }, [load]);
@@ -880,28 +906,6 @@ const GroupsTab = ({ eventId, isAdmin }) => {
     onDragOver: (ev) => { ev.preventDefault(); setDragOverGroup(key); },
     onDragLeave: (ev) => { if (!ev.currentTarget.contains(ev.relatedTarget)) setDragOverGroup((d) => (d === key ? null : d)); },
   });
-  const MemberChip = ({ m }) => (
-    <span
-      draggable={isAdmin}
-      onDragStart={(ev) => ev.dataTransfer.setData("text/athlete-id", m.athlete_id)}
-      className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-semibold text-foreground cursor-grab active:cursor-grabbing"
-      data-testid={`group-member-${m.athlete_id}`}
-    >
-      {m.first_name} {m.last_name}
-      {isAdmin && (
-        <Select value="__stay__" onValueChange={(v) => moveAthlete(m.athlete_id, v === "__none__" ? null : v)}>
-          <SelectTrigger className="h-5 w-5 p-0 border-0 bg-transparent shadow-none [&>svg]:h-3.5 [&>svg]:w-3.5" aria-label="Move to group" />
-          <SelectContent>
-            <SelectItem value="__stay__" className="hidden">Move to…</SelectItem>
-            {(groups || []).filter((g2) => g2.id !== m.group_id).map((g2) => (
-              <SelectItem key={g2.id} value={g2.id}>→ {g2.name}</SelectItem>
-            ))}
-            {m.group_id && <SelectItem value="__none__">→ Unassigned</SelectItem>}
-          </SelectContent>
-        </Select>
-      )}
-    </span>
-  );
 
   const add = async () => {
     if (!name.trim()) return;
@@ -1015,7 +1019,7 @@ const GroupsTab = ({ eventId, isAdmin }) => {
               <CardContent className="py-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Unassigned — drag into a group (or tap the arrow)</p>
                 <div className="flex flex-wrap gap-1.5">
-                  {members.filter((m) => !m.group_id).map((m) => <MemberChip key={m.athlete_id} m={m} />)}
+                  {members.filter((m) => !m.group_id).map((m) => <MemberChip key={m.athlete_id} m={m} isAdmin={isAdmin} groups={groups} moveAthlete={moveAthlete} />)}
                 </div>
               </CardContent>
             </Card>
@@ -1046,7 +1050,7 @@ const GroupsTab = ({ eventId, isAdmin }) => {
                     )}
                     <p className="text-xs text-muted-foreground">{g.player_count} players</p>
                     <div className="mt-2 flex flex-wrap gap-1.5">
-                      {members.filter((m) => m.group_id === g.id).map((m) => <MemberChip key={m.athlete_id} m={m} />)}
+                      {members.filter((m) => m.group_id === g.id).map((m) => <MemberChip key={m.athlete_id} m={m} isAdmin={isAdmin} groups={groups} moveAthlete={moveAthlete} />)}
                     </div>
                   </div>
                   {isAdmin && (
@@ -1278,7 +1282,7 @@ const StationsTab = ({ eventId, isAdmin }) => {
   const [moduleControls, setModuleControls] = useState(true); // flips off on 404 (older server)
 
   const load = useCallback(() => {
-    api.get(`/events/${eventId}/stations`).then((r) => setStations(r.data));
+    api.get(`/events/${eventId}/stations`).then((r) => setStations(r.data)).catch((e) => { toast.error(errMsg(e)); setStations([]); });
     api.get("/templates").then((r) => setTemplates(r.data));
     api.get(`/events/${eventId}/groups`).then((r) => setGroups(sortGroups(r.data)));
   }, [eventId]);
@@ -1527,7 +1531,7 @@ const EvaluatorsTab = ({ eventId, isAdmin }) => {
   const [inviteBusy, setInviteBusy] = useState(false);
 
   const load = useCallback(() => {
-    api.get(`/events/${eventId}/assignments`).then((r) => setAssignments(r.data));
+    api.get(`/events/${eventId}/assignments`).then((r) => setAssignments(r.data)).catch((e) => { toast.error(errMsg(e)); setAssignments([]); });
     api.get(`/events/${eventId}/stations`).then((r) => setStations(r.data));
     api.get(`/events/${eventId}/groups`).then((r) => setGroups(sortGroups(r.data)));
     if (isAdmin) {
