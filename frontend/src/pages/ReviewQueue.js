@@ -413,6 +413,7 @@ const PublishAllDialog = ({
 const AssessmentsPublishCard = ({ onPublished }) => {
   const [readiness, setReadiness] = useState(null);
   const [showMissing, setShowMissing] = useState(false);
+  const [showPending, setShowPending] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [onlyWithEmail, setOnlyWithEmail] = useState(false);
@@ -480,15 +481,23 @@ const AssessmentsPublishCard = ({ onPublished }) => {
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowPending((v) => !v)}
+            className="flex items-center gap-3 rounded-xl px-2 py-1 -ml-2 text-left transition-colors hover:bg-secondary"
+            data-testid="assessments-pending-toggle"
+          >
             <div className="h-10 w-10 rounded-lg grid place-items-center shrink-0 bg-brand/15 text-brand">
               <Send className="h-5 w-5" />
             </div>
             <div>
               <p className="font-mono-num font-bold text-3xl text-foreground leading-none">{drafts}</p>
-              <p className="mt-1 text-xs font-semibold text-foreground">assessments ready</p>
+              <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-foreground">
+                assessments ready
+                {showPending ? <ChevronUp className="h-3.5 w-3.5 text-info" /> : <ChevronDown className="h-3.5 w-3.5 text-info" />}
+              </p>
             </div>
-          </div>
+          </button>
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1.5 rounded-lg bg-success/15 px-2.5 py-1.5 text-xs font-semibold text-success">
               <Mail className="h-3.5 w-3.5" />
@@ -520,6 +529,34 @@ const AssessmentsPublishCard = ({ onPublished }) => {
           <div className="mt-3 flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-sm font-semibold text-destructive">
             <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
             <span>Email is not configured — publishing will release assessments in-app but send nothing.</span>
+          </div>
+        )}
+
+        {showPending && (
+          <div className="mt-3 max-h-96 overflow-y-auto rounded-xl border border-border" data-testid="assessments-pending-list">
+            {(readiness.pending_athletes || []).map((a) => (
+              <Link
+                key={a.athlete_id}
+                to={`/players/${a.athlete_id}?tab=assessment`}
+                className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-b-0 transition-colors hover:bg-secondary"
+                data-testid={`assessments-pending-${a.athlete_id}`}
+              >
+                <PlayerAvatar firstName={a.name?.split(" ")[0]} lastName={a.name?.split(" ").slice(1).join(" ")} photoUrl={a.photo_url} size="sm" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold text-foreground">{a.name || "Athlete"}</span>
+                  <span className="block truncate text-[11px] text-muted-foreground">
+                    {[a.primary_position, a.graduation_year ? `Class of ${a.graduation_year}` : a.age_group].filter(Boolean).join(" · ") || "—"}
+                    {a.draft_count > 1 ? ` · ${a.draft_count} drafts` : ""}
+                  </span>
+                </span>
+                {a.emails?.length ? (
+                  <Mail className="h-3.5 w-3.5 shrink-0 text-success" aria-label="Family will be emailed" />
+                ) : (
+                  <MailWarning className="h-3.5 w-3.5 shrink-0 text-warning" aria-label="No email on file" />
+                )}
+                <span className="shrink-0 text-[11px] font-semibold text-primary">Open →</span>
+              </Link>
+            ))}
           </div>
         )}
 
