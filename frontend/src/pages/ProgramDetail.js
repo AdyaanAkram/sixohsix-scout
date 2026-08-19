@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, errMsg } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,11 +8,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PlayerAvatar } from "@/components/common/PlayerAvatar";
 import { toast } from "sonner";
-import { ArrowLeft, Check, Loader2, Plus, Search, UserPlus } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarPlus, Check, Loader2, Plus, Search, UserPlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function ProgramDetail() {
   const { programId } = useParams();
+  const navigate = useNavigate();
+  const [creatingEventFor, setCreatingEventFor] = useState(null);
   const [prog, setProg] = useState(null);
   const [enrollments, setEnrollments] = useState([]);
   const [sessionDate, setSessionDate] = useState("");
@@ -94,6 +96,24 @@ export default function ProgramDetail() {
     }
   };
 
+  // One tap: spin up the evaluation event for a session day (roster pre-filled
+  // with everyone enrolled) and jump straight into the event dashboard.
+  const createSessionEvent = async (s) => {
+    setCreatingEventFor(s.id);
+    try {
+      const r = await api.post(`/programs/sessions/${s.id}/event`);
+      const ev = r.data?.event;
+      if (r.data?.created) {
+        toast.success(`Event created${r.data.roster_added ? ` — ${r.data.roster_added} enrolled athletes added to the roster` : ""}.`);
+      }
+      if (ev?.id) navigate(`/events/${ev.id}`);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setCreatingEventFor(null);
+    }
+  };
+
   const openAttendance = async (sessionId) => {
     setActiveSessionId(sessionId);
     try {
@@ -136,7 +156,7 @@ export default function ProgramDetail() {
           {prog.type} · {prog.status} · {enrollments.length} enrolled
         </p>
         <p className="text-xs text-muted-foreground mt-2 max-w-lg">
-          Camp flow: add session dates → enroll athletes → take attendance each session. Evaluation events stay separate under Events.
+          Camp flow: add session dates → enroll athletes → take attendance each session. Tap Create event on a session to run stations, check-in and scoring for that day — enrolled athletes are added to the event roster automatically.
         </p>
       </div>
 
@@ -165,20 +185,57 @@ export default function ProgramDetail() {
         ) : (
           <div className="space-y-2">
             {prog.sessions.map((s) => (
-              <div key={s.id} className="rounded-xl border border-border bg-card px-4 py-3 flex flex-wrap items-center justify-between gap-2">
-                <div>
+              <div
+                key={s.id}
+                role={s.event_id ? "button" : undefined}
+                tabIndex={s.event_id ? 0 : undefined}
+                onClick={s.event_id ? () => navigate(`/events/${s.event_id}`) : undefined}
+                onKeyDown={s.event_id ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate(`/events/${s.event_id}`); } } : undefined}
+                className={cn(
+                  "rounded-xl border border-border bg-card px-4 py-3 flex flex-wrap items-center justify-between gap-2 transition-colors",
+                  s.event_id && "cursor-pointer hover:border-brand/50"
+                )}
+                data-testid={`session-row-${s.id}`}
+              >
+                <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground">#{s.session_number} · {s.date}</p>
-                  <p className="text-xs text-muted-foreground">{s.focus || "No focus set"} · {s.status}</p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {[s.start_time && s.end_time ? `${s.start_time}–${s.end_time}` : null, s.focus || "No focus set", s.status]
+                      .filter(Boolean).join(" · ")}
+                  </p>
                 </div>
-                <Button
-                  variant="outline"
-                  className="rounded-xl h-10"
-                  disabled={enrollments.length === 0}
-                  onClick={() => openAttendance(s.id)}
-                  data-testid={`session-attendance-${s.id}`}
-                >
-                  {activeSessionId === s.id ? "Taking attendance…" : "Attendance"}
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="outline"
+                    className="rounded-xl h-10"
+                    disabled={enrollments.length === 0}
+                    onClick={(e) => { e.stopPropagation(); openAttendance(s.id); }}
+                    data-testid={`session-attendance-${s.id}`}
+                  >
+                    {activeSessionId === s.id ? "Taking attendance…" : "Attendance"}
+                  </Button>
+                  {s.event_id ? (
+                    <Button
+                      className="rounded-xl h-10 bg-brand hover:bg-brand-secondary"
+                      onClick={(e) => { e.stopPropagation(); navigate(`/events/${s.event_id}`); }}
+                      data-testid={`session-open-event-${s.id}`}
+                    >
+                      Open event <ArrowRight className="h-4 w-4 ml-1" />
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      className="rounded-xl h-10 border-brand/40 text-brand hover:bg-brand-tertiary"
+                      disabled={creatingEventFor === s.id}
+                      onClick={(e) => { e.stopPropagation(); createSessionEvent(s); }}
+                      data-testid={`session-create-event-${s.id}`}
+                    >
+                      {creatingEventFor === s.id
+                        ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Creating…</>
+                        : <><CalendarPlus className="h-4 w-4 mr-1" /> Create event</>}
+                    </Button>
+                  )}
+                </div>
               </div>
             ))}
           </div>

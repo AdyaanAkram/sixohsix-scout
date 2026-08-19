@@ -348,7 +348,7 @@ export const OrgSwitcher = ({ compact }) => {
  * workspaces the account's role is authorized for are ever offered.
  * Hidden entirely for single-workspace users.
  */
-const WorkspaceSwitcher = ({ workspace, workspaces, onSwitch, onNavigate }) => {
+const WorkspaceSwitcher = ({ workspace, workspaces, onSwitch, onNavigate, onOpenPicker }) => {
   if ((workspaces || []).length <= 1) return null;
   const current = WORKSPACE_META[workspace] || WORKSPACE_META.evaluator;
   const CurrentIcon = current.icon;
@@ -393,6 +393,18 @@ const WorkspaceSwitcher = ({ workspace, workspaces, onSwitch, onNavigate }) => {
             </DropdownMenuItem>
           );
         })}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          data-testid="workspace-option-picker"
+          onClick={() => { onOpenPicker?.(); onNavigate?.(); }}
+          className="flex items-start gap-2 cursor-pointer"
+        >
+          <ArrowLeftRight className="h-4 w-4 mt-0.5 ml-6 text-muted-foreground" />
+          <div className="min-w-0">
+            <p className="font-semibold truncate">All modes</p>
+            <p className="text-[11px] text-muted-foreground">Back to the mode picker</p>
+          </div>
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -471,7 +483,7 @@ export const AppLayout = ({ children }) => {
         <div className="px-5 py-5 border-b border-divider space-y-3">
           <Logo />
           <OrgSwitcher />
-          <WorkspaceSwitcher workspace={activeWorkspace} workspaces={workspaces} onSwitch={switchWorkspace} />
+          <WorkspaceSwitcher workspace={activeWorkspace} workspaces={workspaces} onSwitch={switchWorkspace} onOpenPicker={() => navigate("/workspace")} />
         </div>
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {navKeys.map((k) => (
@@ -675,6 +687,7 @@ export const AppLayout = ({ children }) => {
                     workspaces={workspaces}
                     onSwitch={switchWorkspace}
                     onNavigate={() => setMoreOpen(false)}
+                    onOpenPicker={() => navigate("/workspace")}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-2">

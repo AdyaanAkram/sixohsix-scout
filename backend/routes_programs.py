@@ -196,6 +196,73 @@ async def add_session(program_id: str, body: SessionBody, user=Depends(require_r
     return clean(doc)
 
 
+@router.post("/sessions/{session_id}/event")
+async def create_session_event(session_id: str, user=Depends(require_roles(*ADMIN_ROLES))):
+    """Create the evaluation event for a program session — one tap from the
+    program page. Idempotent: if the session already has a live linked event,
+    return it instead of creating a duplicate. Every currently-enrolled athlete
+    is pre-added to the event roster so the day starts ready for check-in."""
+    org = _org(user)
+    session = await db.sessions.find_one({"id": session_id, "organization_id": org}, {"_id": 0})
+    if not session:
+        raise HTTPException(404, detail="Session not found.")
+    if session.get("event_id"):
+        ev = await db.events.find_one(
+            {"id": session["event_id"], "organization_id": org}, {"_id": 0})
+        if ev:
+            return {"event": clean(ev), "created": False}
+    prog = await db.programs.find_one(
+        {"id": session["program_id"], "organization_id": org}, {"_id": 0})
+    if not prog:
+        raise HTTPException(404, detail="Program not found.")
+
+    location = None
+    loc_id = session.get("location_id") or prog.get("location_id")
+    if loc_id:
+        loc = await db.locations.find_one({"id": loc_id, "organization_id": org}, {"_id": 0})
+        if loc:
+            location = ", ".join(x for x in (loc.get("name"), loc.get("city"), loc.get("state")) if x)
+
+    n = session.get("session_number")
+    doc = {
+        "id": new_id(), "organization_id": org,
+        "name": f"{prog['name']} — Session{f' #{n}' if n else ''} ({session['date']})",
+        "event_type": "Evaluation",
+        "date": session["date"],
+        "start_time": session.get("start_time"),
+        "end_time": session.get("end_time"),
+        "location": location,
+        "description": f"Session day for the {prog['name']} program.",
+        "age_groups": prog.get("age_groups") or [],
+        "status": "Draft",
+        "program_id": prog["id"], "session_id": session_id,
+        "created_by": user["id"], "created_at": now_iso(), "updated_at": now_iso(),
+    }
+    await db.events.insert_one(doc)
+
+    # Pre-populate the roster with everyone enrolled in the program.
+    enrolled = await db.enrollments.find(
+        {"program_id": prog["id"], "organization_id": org,
+         "status": {"$in": ["enrolled", "completed"]}},
+        {"_id": 0, "athlete_id": 1}).to_list(5000)
+    for e in enrolled:
+        await db.event_athletes.insert_one({
+            "id": new_id(), "organization_id": org,
+            "event_id": doc["id"], "athlete_id": e["athlete_id"], "status": "registered",
+            "bib_number": None, "group_id": None, "late_arrival": False,
+            "flagged_incomplete": False, "walk_up": False,
+            "created_at": now_iso(), "updated_at": now_iso(),
+        })
+
+    await db.sessions.update_one(
+        {"id": session_id, "organization_id": org},
+        {"$set": {"event_id": doc["id"], "updated_at": now_iso()}})
+    await log_audit(org, user, "session_event_created", "event", doc["id"],
+                    {"program_id": prog["id"], "session_id": session_id,
+                     "roster_added": len(enrolled)})
+    return {"event": clean(doc), "created": True, "roster_added": len(enrolled)}
+
+
 @router.get("/{program_id}/sessions")
 async def list_sessions(program_id: str, user=Depends(require_roles(*STAFF_ROLES))):
     prog = await db.programs.find_one({"id": program_id, "organization_id": _org(user)}, {"_id": 0, "id": 1})
