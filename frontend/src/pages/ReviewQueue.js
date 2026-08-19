@@ -71,14 +71,14 @@ const EvalDetail = ({ ev }) => {
 const StatCard = ({ icon: Icon, tint, value, label, sub, onClick, testId }) => {
   const body = (
     <Card className={cn("rounded-2xl border-border bg-card h-full", onClick && "transition-colors hover:bg-secondary/50")} data-testid={testId}>
-      <CardContent className="pt-4 pb-4 flex items-center gap-3">
+      <CardContent className="pt-4 pb-4 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
         <div className={cn("h-10 w-10 rounded-lg grid place-items-center shrink-0", tint)}>
           <Icon className="h-5 w-5" />
         </div>
         <div className="min-w-0">
           <p className="font-mono-num font-bold text-2xl text-foreground leading-none">{value ?? "—"}</p>
           {/* Labels wrap to two lines rather than truncating to "Evalu…". */}
-          <p className="mt-1 text-xs font-semibold leading-snug text-foreground break-words [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden">{label}</p>
+          <p className="mt-1 text-xs font-semibold leading-snug text-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden">{label}</p>
           {sub && <p className="text-[10px] text-muted-foreground truncate">{sub}</p>}
         </div>
       </CardContent>

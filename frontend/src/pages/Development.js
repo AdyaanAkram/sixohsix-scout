@@ -19,7 +19,7 @@ const clampPct = (v) => Math.min(100, Math.max(0, Number(v)));
 
 const StatCard = ({ icon: Icon, tint, value, label, sub, testId }) => (
   <Card className="rounded-2xl border-border bg-card h-full" data-testid={testId}>
-    <CardContent className="pt-4 pb-4 flex items-center gap-3">
+    <CardContent className="pt-4 pb-4 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
       <div className={cn("h-10 w-10 rounded-lg grid place-items-center shrink-0", tint)}>
         <Icon className="h-5 w-5" />
       </div>

@@ -20,7 +20,7 @@ import { signedUrl } from "@/lib/api";
 const StatCard = ({ label, value, icon: Icon, tint = "bg-secondary text-foreground", testId, to, sub }) => {
   const card = (
     <Card className={`rounded-2xl border-border bg-card h-full ${to ? "cursor-pointer transition-colors hover:bg-secondary/50" : ""}`} data-testid={testId}>
-      <CardContent className="pt-4 pb-4 flex items-center gap-3">
+      <CardContent className="pt-4 pb-4 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
         <div className={`h-10 w-10 rounded-lg grid place-items-center shrink-0 ${tint}`}>
           <Icon className="h-5 w-5" />
         </div>
