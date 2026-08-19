@@ -156,8 +156,11 @@ export default function Workspace() {
             <p className="text-[9px] uppercase tracking-[0.14em] text-brand">Train. Elevate. Succeed.</p>
           </div>
         </div>
-        <div className="w-full max-w-[260px] sm:w-auto">
-          <OrgSwitcher compact />
+        <div className="w-full sm:w-auto sm:min-w-[320px]">
+          <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+            Organization
+          </p>
+          <OrgSwitcher large />
         </div>
       </header>
 

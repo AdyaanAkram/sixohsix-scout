@@ -41,6 +41,26 @@ const EMPTY_ATHLETE = {
 
 const EMAIL_RE = /\S+@\S+\.\S+/;
 
+/* "2026-08-22" → "Aug 22" / "Sat Aug 22" etc. Falls back to the raw string. */
+const fmtDate = (iso, opts) => {
+  if (!iso) return "";
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-US", opts);
+};
+
+/* Program session → "Sat Aug 22 · 10:00–13:00" (times only when present). */
+const fmtSession = (s) => {
+  const day = fmtDate(s.date, { weekday: "short", month: "short", day: "numeric" });
+  const times = s.start_time && s.end_time ? ` · ${s.start_time}–${s.end_time}` : "";
+  return `${day}${times}`;
+};
+
+/* 39000 → "$390", 39050 → "$390.50". */
+const fmtPrice = (cents) => {
+  const dollars = cents / 100;
+  return Number.isInteger(dollars) ? `$${dollars}` : `$${dollars.toFixed(2)}`;
+};
+
 /* Display-only age from the DOB the parent is typing — never sent to the API. */
 const calcAge = (dob) => {
   if (!dob) return null;
@@ -124,7 +144,11 @@ const ConsentCheck = ({ id, checked, onChange, children, testid }) => (
 );
 
 export default function RegisterEvent() {
-  const { eventId } = useParams();
+  const { eventId, programId } = useParams();
+  const mode = programId ? "program" : "event";
+  const isProgram = mode === "program";
+  const targetId = programId || eventId;
+  const publicPath = isProgram ? `/enroll/${targetId}` : `/register/${targetId}`;
   const { user, loading: authLoading } = useAuth();
   const signedIn = !!user && (user.role === "parent" || user.role === "athlete");
 
@@ -164,7 +188,11 @@ export default function RegisterEvent() {
 
   useEffect(() => {
     Promise.all([
-      api.get(`/public/events/${eventId}/registration-info`),
+      api.get(
+        mode === "program"
+          ? `/public/programs/${targetId}/registration-info`
+          : `/public/events/${targetId}/registration-info`
+      ),
       // Non-fatal: the waiver box falls back to a generic notice if this 404s.
       api.get("/public/consent-versions").catch(() => ({ data: null })),
     ])
@@ -172,20 +200,22 @@ export default function RegisterEvent() {
         setInfo(i.data);
         setConsentInfo(c.data);
       })
-      .catch((e) => setLoadError(errMsg(e, "Could not load this event.")));
-  }, [eventId]);
+      .catch((e) => setLoadError(errMsg(e, mode === "program" ? "Could not load this program." : "Could not load this event.")));
+  }, [mode, targetId]);
 
   useEffect(() => {
     if (!signedIn) return;
-    api.get("/me/athletes", { params: { event_id: eventId } })
+    api.get("/me/athletes", { params: mode === "event" ? { event_id: targetId } : {} })
       .then((r) => setMyAthletes(Array.isArray(r.data) ? r.data : []))
       .catch(() => setMyAthletes([])); // endpoint may not be deployed yet
-  }, [signedIn, eventId]);
+  }, [signedIn, mode, targetId]);
 
-  const steps = useMemo(
-    () => (signedIn ? STEP_DEFS.filter((s) => s.key !== "parent") : STEP_DEFS),
-    [signedIn]
-  );
+  const steps = useMemo(() => {
+    const defs = signedIn ? STEP_DEFS.filter((s) => s.key !== "parent") : STEP_DEFS;
+    return mode === "program"
+      ? defs.map((s) => (s.key === "event" ? { ...s, label: "This Program" } : s))
+      : defs;
+  }, [signedIn, mode]);
   const step = steps[Math.min(stepIdx, steps.length - 1)];
 
   const selectedAthlete = athleteId ? myAthletes.find((a) => a.id === athleteId) : null;
@@ -378,7 +408,10 @@ export default function RegisterEvent() {
         },
         signature: { full_legal_name: signature.trim() },
       };
-      const r = await api.post(`/public/events/${eventId}/register`, payload);
+      const r = await api.post(
+        isProgram ? `/public/programs/${targetId}/register` : `/public/events/${targetId}/register`,
+        payload
+      );
       // New-account registrations return a token — store it exactly like signup
       // does so /my-id and "register another" work without re-authenticating.
       if (r.data?.token) setToken(r.data.token);
@@ -386,9 +419,11 @@ export default function RegisterEvent() {
       window.scrollTo({ top: 0 });
     } catch (e) {
       if (e?.response?.status === 409) {
-        toast.error(errMsg(e, "An account with this email already exists — sign in first, then register."));
+        toast.error(errMsg(e, isProgram
+          ? "An account with this email already exists — sign in first, then enroll."
+          : "An account with this email already exists — sign in first, then register."));
       } else {
-        toast.error(errMsg(e, "Registration failed."));
+        toast.error(errMsg(e, isProgram ? "Enrollment failed." : "Registration failed."));
       }
     } finally {
       setBusy(false);
@@ -400,7 +435,7 @@ export default function RegisterEvent() {
       <Shell>
         <Card className="rounded-2xl border-border bg-card">
           <CardContent className="py-8 text-center space-y-2">
-            <p className="font-display text-3xl text-foreground">Event not found</p>
+            <p className="font-display text-3xl text-foreground">{isProgram ? "Program not found" : "Event not found"}</p>
             <p className="text-sm text-muted-foreground">{loadError}</p>
             <Button asChild variant="outline" className="rounded-xl mt-2"><Link to="/">Back to home</Link></Button>
           </CardContent>
@@ -418,7 +453,15 @@ export default function RegisterEvent() {
     );
   }
 
-  const { event, organization } = info;
+  const { organization } = info;
+  // In program mode the payload's `program` object plays the role of `event`.
+  const event = info.event || info.program;
+  const dateRange = isProgram && event?.start_date
+    ? [
+        fmtDate(event.start_date, { month: "short", day: "numeric" }),
+        event.end_date ? fmtDate(event.end_date, { month: "short", day: "numeric" }) : null,
+      ].filter(Boolean).join(" – ")
+    : "";
 
   const eventHeader = (
     <Card className="rounded-2xl border-border bg-card overflow-hidden">
@@ -432,10 +475,27 @@ export default function RegisterEvent() {
           <p className="text-xs uppercase tracking-widest text-brand font-semibold truncate">{organization?.name}</p>
           <p className="font-display text-2xl text-foreground truncate">{event?.name}</p>
           <p className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
-            {event?.date && <span className="inline-flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" /><span className="font-mono-num">{event.date}</span></span>}
-            {event?.location && <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{event.location}</span>}
+            {isProgram ? (
+              <>
+                {dateRange && <span className="inline-flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" /><span className="font-mono-num">{dateRange}</span></span>}
+                {event?.location && <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{event.location}</span>}
+                {event?.price_cents != null && <span className="font-semibold text-foreground font-mono-num">{fmtPrice(event.price_cents)}</span>}
+              </>
+            ) : (
+              <>
+                {event?.date && <span className="inline-flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" /><span className="font-mono-num">{event.date}</span></span>}
+                {event?.location && <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{event.location}</span>}
+              </>
+            )}
           </p>
-          <p className="text-[11px] text-muted-foreground mt-1">Event details filled in automatically.</p>
+          {isProgram && (event?.sessions || []).length > 0 && (
+            <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+              {event.sessions.map((s, i) => (
+                <span key={s.session_number ?? i} className="text-[11px] text-muted-foreground font-mono-num">{fmtSession(s)}</span>
+              ))}
+            </div>
+          )}
+          <p className="text-[11px] text-muted-foreground mt-1">{isProgram ? "Program details filled in automatically." : "Event details filled in automatically."}</p>
         </div>
       </CardContent>
     </Card>
@@ -447,9 +507,9 @@ export default function RegisterEvent() {
         {eventHeader}
         <Card className="rounded-2xl border-border bg-card" data-testid="register-closed">
           <CardContent className="py-8 text-center space-y-2">
-            <p className="font-display text-3xl text-foreground">Registration is closed</p>
+            <p className="font-display text-3xl text-foreground">{isProgram ? "Enrollment is closed" : "Registration is closed"}</p>
             <p className="text-sm text-muted-foreground">
-              Online registration for this event isn&apos;t open right now. Reach out to {organization?.name || "the organization"} with any questions.
+              {isProgram ? "Online enrollment for this program" : "Online registration for this event"} isn&apos;t open right now. Reach out to {organization?.name || "the organization"} with any questions.
             </p>
             <Button asChild variant="outline" className="rounded-xl mt-2"><Link to="/">Back to home</Link></Button>
           </CardContent>
@@ -464,15 +524,29 @@ export default function RegisterEvent() {
     const athleteName = selectedAthlete
       ? `${selectedAthlete.first_name} ${selectedAthlete.last_name}`
       : `${athlete.first_name} ${athlete.last_name}`;
+    const waitlisted = isProgram && done.enrollment_status === "waitlisted";
     return (
       <Shell>
         {eventHeader}
         <Card className="rounded-2xl border-border bg-card" data-testid="register-success">
           <CardContent className="py-8 text-center space-y-4">
-            <CheckCircle2 className="h-12 w-12 text-success mx-auto" />
+            <CheckCircle2 className={cn("h-12 w-12 mx-auto", waitlisted ? "text-warning" : "text-success")} />
             <div>
-              <p className="font-display text-3xl text-foreground">{athleteName} is registered</p>
-              <p className="text-sm text-muted-foreground mt-1">Their permanent 60&apos;6&quot; ID is created.</p>
+              {waitlisted ? (
+                <>
+                  <p className="font-display text-3xl text-foreground">{athleteName} is on the waitlist</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {event?.name} is full — {athleteName} has been placed on the waitlist. {organization?.name || "The organization"} will reach out if a spot opens up. Their permanent 60&apos;6&quot; ID is created.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="font-display text-3xl text-foreground">
+                    {isProgram ? `${athleteName} is enrolled in ${event?.name || "this program"}` : `${athleteName} is registered`}
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-1">Their permanent 60&apos;6&quot; ID is created.</p>
+                </>
+              )}
             </div>
             <div className="flex flex-col gap-2 max-w-xs mx-auto">
               <Button
@@ -488,7 +562,7 @@ export default function RegisterEvent() {
                 onClick={() => setShowEventDetails((s) => !s)}
                 data-testid="register-success-event-details"
               >
-                Event Details
+                {isProgram ? "Program Details" : "Event Details"}
               </Button>
               <Button
                 variant="outline"
@@ -496,14 +570,18 @@ export default function RegisterEvent() {
                 onClick={() => window.location.reload()}
                 data-testid="register-success-another"
               >
-                Register Another Athlete
+                {isProgram ? "Enroll Another Athlete" : "Register Another Athlete"}
               </Button>
             </div>
             {showEventDetails && (
               <div className="rounded-xl border border-border bg-card px-4 py-3 text-left text-sm space-y-1">
                 <p className="font-semibold">{event?.name}</p>
-                {event?.event_type && <p className="text-muted-foreground capitalize">{String(event.event_type).replace(/_/g, " ")}</p>}
+                {(event?.event_type || event?.type) && <p className="text-muted-foreground capitalize">{String(event.event_type || event.type).replace(/_/g, " ")}</p>}
                 {event?.date && <p className="text-muted-foreground font-mono-num">{event.date}</p>}
+                {isProgram && dateRange && <p className="text-muted-foreground font-mono-num">{dateRange}</p>}
+                {isProgram && (event?.sessions || []).map((s, i) => (
+                  <p key={s.session_number ?? i} className="text-muted-foreground font-mono-num text-xs">{fmtSession(s)}</p>
+                ))}
                 {event?.location && <p className="text-muted-foreground">{event.location}</p>}
                 {(done.positions_evaluated || positionsEvaluated).length > 0 && (
                   <p className="text-muted-foreground">Evaluating: {(done.positions_evaluated || positionsEvaluated).join(", ")}</p>
@@ -522,7 +600,7 @@ export default function RegisterEvent() {
     <div className="space-y-4">
       <div className="rounded-xl border border-info/40 bg-info/10 px-3.5 py-2.5 text-sm">
         Registered a child before, or already have a 60&apos;6&quot; account?{" "}
-        <Link to={`/signin?next=/register/${eventId}`} className="font-semibold text-info underline" data-testid="register-signin-link">
+        <Link to={`/signin?next=${publicPath}`} className="font-semibold text-info underline" data-testid="register-signin-link">
           Sign in
         </Link>{" "}
         — then add another athlete without retyping your info.
@@ -646,7 +724,7 @@ export default function RegisterEvent() {
             >
               <p className="font-semibold text-sm">
                 {a.first_name} {a.last_name}
-                {a.on_event && <span className="text-xs font-normal text-success ml-2">✓ already registered for this event</span>}
+                {a.on_event && <span className="text-xs font-normal text-success ml-2">✓ already {isProgram ? "enrolled in this program" : "registered for this event"}</span>}
               </p>
               <p className="text-xs text-muted-foreground font-mono-num">
                 {a.date_of_birth || "DOB —"} · Grad {a.graduation_year || "—"}
@@ -663,13 +741,13 @@ export default function RegisterEvent() {
             )}
           >
             <p className="font-semibold text-sm">+ New athlete</p>
-            <p className="text-xs text-muted-foreground">Register a different athlete in your family.</p>
+            <p className="text-xs text-muted-foreground">{isProgram ? "Enroll" : "Register"} a different athlete in your family.</p>
           </button>
         </div>
       )}
       {selectedAthlete ? (
         <div className="rounded-xl border border-border bg-card px-4 py-3 space-y-1" data-testid="register-athlete-confirm">
-          <p className="text-xs uppercase tracking-widest text-brand font-semibold">Registering</p>
+          <p className="text-xs uppercase tracking-widest text-brand font-semibold">{isProgram ? "Enrolling" : "Registering"}</p>
           <p className="font-display text-2xl text-foreground">{selectedAthlete.first_name} {selectedAthlete.last_name}</p>
           <p className="text-sm text-muted-foreground font-mono-num">
             {selectedAthlete.date_of_birth || "DOB —"} · Grad {selectedAthlete.graduation_year || "—"}
@@ -758,7 +836,7 @@ export default function RegisterEvent() {
 
   const eventStep = (
     <div className="space-y-3">
-      <Field label="Positions being evaluated" required hint="Pre-filled from the athlete's positions — adjust for this event.">
+      <Field label="Positions being evaluated" required hint={`Pre-filled from the athlete's positions — adjust for this ${isProgram ? "program" : "event"}.`}>
         <div className="flex flex-wrap gap-2">
           {evalPositionOptions.map((p) => (
             <Chip
@@ -773,7 +851,7 @@ export default function RegisterEvent() {
         </div>
       </Field>
       {positionsEvaluated.length === 0 && (
-        <p className="text-xs text-warning">Pick at least one position to be evaluated at this event.</p>
+        <p className="text-xs text-warning">Pick at least one position to be evaluated {isProgram ? "in this program" : "at this event"}.</p>
       )}
     </div>
   );
@@ -947,7 +1025,7 @@ export default function RegisterEvent() {
           </p>
         </div>
         <div className="border-t border-divider pt-2">
-          <p className="text-xs uppercase tracking-widest text-brand font-semibold">Event</p>
+          <p className="text-xs uppercase tracking-widest text-brand font-semibold">{isProgram ? "Program" : "Event"}</p>
           <p className="text-sm font-semibold">{event?.name}</p>
           <p className="text-sm text-muted-foreground">Evaluated at: {positionsEvaluated.join(", ")}</p>
         </div>
@@ -983,7 +1061,7 @@ export default function RegisterEvent() {
         className="w-full h-12 rounded-full bg-brand hover:bg-brand-secondary text-base font-semibold active:scale-[0.98] transition"
         data-testid="register-submit-button"
       >
-        {busy ? "Registering…" : "REGISTER ATHLETE"}
+        {busy ? (isProgram ? "Enrolling…" : "Registering…") : (isProgram ? "ENROLL ATHLETE" : "REGISTER ATHLETE")}
       </Button>
     </div>
   );
@@ -1005,7 +1083,7 @@ export default function RegisterEvent() {
       {signedIn && (
         <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-sm" data-testid="register-signed-in-banner">
           <UserRound className="h-4 w-4 text-brand shrink-0" />
-          <span className="text-muted-foreground">Registering as <span className="font-semibold text-foreground">{user.full_name}</span></span>
+          <span className="text-muted-foreground">{isProgram ? "Enrolling" : "Registering"} as <span className="font-semibold text-foreground">{user.full_name}</span></span>
         </div>
       )}
 
@@ -1046,7 +1124,7 @@ export default function RegisterEvent() {
         <p className="text-center text-sm text-muted-foreground">
           Already have an account?{" "}
           <Link to="/signin" className="text-info hover:underline" data-testid="register-signin-link">Sign in</Link>
-          {" "}to register faster.
+          {" "}to {isProgram ? "enroll" : "register"} faster.
         </p>
       )}
     </Shell>

@@ -252,7 +252,7 @@ const OrgMark = ({ name, logoUrl, className }) => {
   );
 };
 
-export const OrgSwitcher = ({ compact }) => {
+export const OrgSwitcher = ({ compact, large }) => {
   const { user, switchOrganization } = useAuth();
   const [orgs, setOrgs] = useState(user?.memberships || []);
   const [busy, setBusy] = useState(false);
@@ -273,10 +273,10 @@ export const OrgSwitcher = ({ compact }) => {
 
   if (!multi) {
     return (
-      <div className={cn("flex items-center gap-2.5 px-3 py-2 rounded-xl bg-secondary/60 border border-border", compact && "py-1.5")}>
+      <div className={cn("flex items-center gap-2.5 px-3 py-2 rounded-xl bg-secondary/60 border border-border", compact && "py-1.5", large && "px-4 py-3 gap-3")}>
         <OrgMark name={user.organization_name} logoUrl={logoUrl} />
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-foreground truncate" data-testid="current-org-name">
+          <p className={cn("text-sm font-semibold text-foreground truncate", large && "text-base")} data-testid="current-org-name">
             {user.organization_name || "—"}
           </p>
           <p className="text-[9px] uppercase tracking-widest text-muted-foreground truncate">
@@ -306,13 +306,16 @@ export const OrgSwitcher = ({ compact }) => {
           data-testid="org-switcher-button"
           className={cn(
             "w-full flex items-center gap-2 rounded-xl border border-border bg-secondary/60 px-3 py-2 text-left hover:bg-secondary transition",
-            compact && "w-auto max-w-[180px]"
+            compact && "w-auto max-w-[180px]",
+            large && "px-4 py-3 gap-3"
           )}
         >
           <OrgMark name={user.organization_name} logoUrl={logoUrl} />
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-foreground truncate">{user.organization_name}</p>
-            <p className="text-[9px] uppercase tracking-widest text-muted-foreground truncate">Powered by 60&apos;6&quot; ID</p>
+            <p className={cn("text-sm font-semibold text-foreground truncate", large && "text-base")}>{user.organization_name}</p>
+            <p className="text-[9px] uppercase tracking-widest text-muted-foreground truncate">
+              {large ? "Tap to switch organization" : "Powered by 60'6\" ID"}
+            </p>
           </div>
           <ChevronsUpDown className="h-4 w-4 text-muted-foreground shrink-0" />
         </button>
@@ -344,69 +347,30 @@ export const OrgSwitcher = ({ compact }) => {
 };
 
 /**
- * Compact "Switch Workspace" control. Purely presentational — only the
- * workspaces the account's role is authorized for are ever offered.
- * Hidden entirely for single-workspace users.
+ * Sidebar mode tile — shows the current mode and returns to the full-screen
+ * mode picker (/workspace) where both mode AND organization are chosen.
+ * Hidden for single-workspace users (nothing to pick).
  */
-const WorkspaceSwitcher = ({ workspace, workspaces, onSwitch, onNavigate, onOpenPicker }) => {
+const ModePickerTile = ({ workspace, workspaces, onOpen }) => {
   if ((workspaces || []).length <= 1) return null;
   const current = WORKSPACE_META[workspace] || WORKSPACE_META.evaluator;
   const CurrentIcon = current.icon;
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          data-testid="workspace-switcher"
-          className="w-full flex items-center gap-2 rounded-xl border border-border bg-secondary/60 px-3 py-2 text-left hover:bg-secondary transition"
-        >
-          <div className="h-7 w-7 rounded-lg bg-brand-tertiary ring-1 ring-brand/40 flex items-center justify-center shrink-0">
-            <CurrentIcon className="h-3.5 w-3.5 text-brand" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-[9px] uppercase tracking-widest text-muted-foreground">Workspace</p>
-            <p className="text-sm font-semibold text-foreground truncate">{current.label}</p>
-          </div>
-          <ChevronsUpDown className="h-4 w-4 text-muted-foreground shrink-0" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-72">
-        <DropdownMenuLabel>Switch workspace</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {workspaces.map((key) => {
-          const meta = WORKSPACE_META[key];
-          if (!meta) return null;
-          const Icon = meta.icon;
-          return (
-            <DropdownMenuItem
-              key={key}
-              data-testid={`workspace-option-${key}`}
-              onClick={() => { onSwitch(key); onNavigate?.(); }}
-              className="flex items-start gap-2 cursor-pointer"
-            >
-              <Check className={cn("h-4 w-4 mt-0.5", key === workspace ? "opacity-100 text-brand" : "opacity-0")} />
-              <Icon className="h-4 w-4 mt-0.5 text-brand" />
-              <div className="min-w-0">
-                <p className="font-semibold truncate">{meta.label}</p>
-                <p className="text-[11px] text-muted-foreground">{meta.blurb}</p>
-              </div>
-            </DropdownMenuItem>
-          );
-        })}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          data-testid="workspace-option-picker"
-          onClick={() => { onOpenPicker?.(); onNavigate?.(); }}
-          className="flex items-start gap-2 cursor-pointer"
-        >
-          <ArrowLeftRight className="h-4 w-4 mt-0.5 ml-6 text-muted-foreground" />
-          <div className="min-w-0">
-            <p className="font-semibold truncate">All modes</p>
-            <p className="text-[11px] text-muted-foreground">Back to the mode picker</p>
-          </div>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <button
+      type="button"
+      onClick={onOpen}
+      data-testid="mode-picker-button"
+      className="w-full flex items-center gap-2 rounded-xl border border-border bg-secondary/60 px-3 py-2 text-left hover:bg-secondary transition"
+    >
+      <div className="h-7 w-7 rounded-lg bg-brand-tertiary ring-1 ring-brand/40 flex items-center justify-center shrink-0">
+        <CurrentIcon className="h-3.5 w-3.5 text-brand" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[9px] uppercase tracking-widest text-muted-foreground">Mode</p>
+        <p className="text-sm font-semibold text-foreground truncate">{current.label}</p>
+      </div>
+      <ArrowLeftRight className="h-4 w-4 text-muted-foreground shrink-0" />
+    </button>
   );
 };
 
@@ -482,8 +446,7 @@ export const AppLayout = ({ children }) => {
       <aside className={cn("hidden md:flex fixed inset-y-0 left-0 w-[268px] flex-col border-r border-border bg-surface-2 z-40", hideChrome && "md:hidden")} data-testid="desktop-sidebar-nav">
         <div className="px-5 py-5 border-b border-divider space-y-3">
           <Logo />
-          <OrgSwitcher />
-          <WorkspaceSwitcher workspace={activeWorkspace} workspaces={workspaces} onSwitch={switchWorkspace} onOpenPicker={() => navigate("/workspace")} />
+          <ModePickerTile workspace={activeWorkspace} workspaces={workspaces} onOpen={() => navigate("/workspace")} />
         </div>
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {navKeys.map((k) => (
@@ -682,12 +645,10 @@ export const AppLayout = ({ children }) => {
               <SheetContent side="bottom" className="rounded-t-2xl pb-8 bg-surface-2 border-border">
                 <p className="font-display text-2xl text-foreground mb-3">More</p>
                 <div className="mb-3">
-                  <WorkspaceSwitcher
+                  <ModePickerTile
                     workspace={activeWorkspace}
                     workspaces={workspaces}
-                    onSwitch={switchWorkspace}
-                    onNavigate={() => setMoreOpen(false)}
-                    onOpenPicker={() => navigate("/workspace")}
+                    onOpen={() => { setMoreOpen(false); navigate("/workspace"); }}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-2">

@@ -312,6 +312,14 @@ async def enroll_athlete(program_id: str, body: EnrollBody, user=Depends(require
         "program_id": program_id, "athlete_id": body.athlete_id, "organization_id": _org(user),
     })
     if existing:
+        if existing.get("status") == "withdrawn":
+            # Re-enrolling a withdrawn athlete revives the row (attendance history kept).
+            await db.enrollments.update_one(
+                {"id": existing["id"]},
+                {"$set": {"status": body.status, "updated_at": now_iso()}})
+            await log_audit(_org(user), user, "enrollment_revived", "enrollment", existing["id"],
+                            {"program_id": program_id, "athlete_id": body.athlete_id})
+            return clean({**existing, "status": body.status})
         raise HTTPException(400, detail="Athlete already enrolled in this program.")
     doc = {
         "id": new_id(),
@@ -330,6 +338,22 @@ async def enroll_athlete(program_id: str, body: EnrollBody, user=Depends(require
     await log_audit(_org(user), user, "enrollment_created", "enrollment", doc["id"],
                     {"program_id": program_id, "athlete_id": body.athlete_id})
     return clean(doc)
+
+
+@router.delete("/{program_id}/enrollments/{athlete_id}")
+async def withdraw_enrollment(program_id: str, athlete_id: str,
+                              user=Depends(require_roles(*ADMIN_ROLES, *COACH_ROLES))):
+    """Remove an athlete from the program. Soft: the enrollment flips to
+    withdrawn so attendance history survives; re-enrolling revives it."""
+    res = await db.enrollments.update_one(
+        {"program_id": program_id, "athlete_id": athlete_id,
+         "organization_id": _org(user), "status": {"$ne": "withdrawn"}},
+        {"$set": {"status": "withdrawn", "updated_at": now_iso()}})
+    if res.matched_count == 0:
+        raise HTTPException(404, detail="Enrollment not found.")
+    await log_audit(_org(user), user, "enrollment_withdrawn", "enrollment", athlete_id,
+                    {"program_id": program_id, "athlete_id": athlete_id})
+    return {"message": "Athlete removed from the program."}
 
 
 @router.post("/sessions/{session_id}/attendance")

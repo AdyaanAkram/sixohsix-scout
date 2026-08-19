@@ -34,7 +34,12 @@ export default function ProgramDetail() {
   }, [programId]);
   useEffect(() => { load(); }, [load]);
 
-  const enrolledIds = useMemo(() => new Set(enrollments.map((e) => e.athlete_id)), [enrollments]);
+  // Withdrawn rows stay in the API payload for history, but are not on the
+  // roster — and their athletes must reappear in the enroll search (re-enrolling
+  // revives the withdrawn row server-side).
+  const activeEnrollments = useMemo(() => enrollments.filter((e) => e.status !== "withdrawn"), [enrollments]);
+
+  const enrolledIds = useMemo(() => new Set(activeEnrollments.map((e) => e.athlete_id)), [activeEnrollments]);
 
   const searchAthletes = useCallback(async (q) => {
     setSearchBusy(true);
@@ -96,6 +101,20 @@ export default function ProgramDetail() {
     }
   };
 
+  const removeAthlete = async (enrollment) => {
+    const name = enrollment.athlete
+      ? `${enrollment.athlete.first_name} ${enrollment.athlete.last_name}`
+      : "this athlete";
+    if (!window.confirm(`Remove ${name} from this program? Attendance history is kept and they can be re-enrolled.`)) return;
+    try {
+      await api.delete(`/programs/${programId}/enrollments/${enrollment.athlete_id}`);
+      toast.success(`${name} removed from the program.`);
+      load();
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  };
+
   // One tap: spin up the evaluation event for a session day (roster pre-filled
   // with everyone enrolled) and jump straight into the event dashboard.
   const createSessionEvent = async (s) => {
@@ -153,12 +172,44 @@ export default function ProgramDetail() {
         </Link>
         <h1 className="font-display text-4xl text-foreground">{prog.name}</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          {prog.type} · {prog.status} · {enrollments.length} enrolled
+          {prog.type} · {prog.status} · {activeEnrollments.length} enrolled
         </p>
         <p className="text-xs text-muted-foreground mt-2 max-w-lg">
           Camp flow: add session dates → enroll athletes → take attendance each session. Tap Create event on a session to run stations, check-in and scoring for that day — enrolled athletes are added to the event roster automatically.
         </p>
       </div>
+
+      {/* Family enrollment: public link/QR into the registration wizard */}
+      <Card className="rounded-2xl border-border bg-card" data-testid="program-enroll-share">
+        <CardContent className="py-4 flex flex-wrap items-center gap-4">
+          <img
+            src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(`${window.location.origin}/enroll/${programId}`)}`}
+            alt="Enrollment QR"
+            className="rounded-xl border border-border bg-white p-1.5 w-32 h-32"
+            data-testid="program-enroll-qr"
+          />
+          <div className="flex-1 min-w-[200px] space-y-1.5">
+            <p className="font-semibold text-foreground">Family enrollment</p>
+            <p className="text-xs text-muted-foreground">
+              Parents scan (or tap the link) to create the athlete&apos;s full 60&apos;6&quot; ID profile and enroll in
+              this program — signed waivers included. Print the QR for the check-in table.
+            </p>
+            <p className="text-xs font-mono break-all text-info">{`${window.location.origin}/enroll/${programId}`}</p>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" className="h-8 rounded-lg text-xs"
+                onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/enroll/${programId}`); toast.success("Enrollment link copied."); }}
+                data-testid="program-enroll-copy-link">
+                Copy link
+              </Button>
+              <Button size="sm" variant="outline" className="h-8 rounded-lg text-xs"
+                onClick={() => window.open(`https://api.qrserver.com/v1/create-qr-code/?size=800x800&data=${encodeURIComponent(`${window.location.origin}/enroll/${programId}`)}`, "_blank")}
+                data-testid="program-enroll-big-qr">
+                Open big QR (print)
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* 1. Sessions */}
       <Card className="rounded-2xl border-border bg-card">
@@ -208,7 +259,7 @@ export default function ProgramDetail() {
                   <Button
                     variant="outline"
                     className="rounded-xl h-10"
-                    disabled={enrollments.length === 0}
+                    disabled={activeEnrollments.length === 0}
                     onClick={(e) => { e.stopPropagation(); openAttendance(s.id); }}
                     data-testid={`session-attendance-${s.id}`}
                   >
@@ -250,11 +301,11 @@ export default function ProgramDetail() {
               <p className="font-semibold text-sm text-foreground">Session attendance</p>
               <Button variant="ghost" className="h-8 text-xs" onClick={() => setActiveSessionId(null)}>Close</Button>
             </div>
-            {enrollments.length === 0 ? (
+            {activeEnrollments.length === 0 ? (
               <p className="text-sm text-muted-foreground">Enroll athletes first.</p>
             ) : (
               <div className="space-y-2">
-                {enrollments.map((e) => {
+                {activeEnrollments.map((e) => {
                   const st = attendanceMap[e.athlete_id];
                   return (
                     <div key={e.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-card border border-border px-3 py-2.5">
@@ -338,12 +389,12 @@ export default function ProgramDetail() {
       </Card>
 
       <div>
-        <p className="font-semibold text-sm text-foreground mb-2">Roster ({enrollments.length})</p>
-        {enrollments.length === 0 ? (
+        <p className="font-semibold text-sm text-foreground mb-2">Roster ({activeEnrollments.length})</p>
+        {activeEnrollments.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nobody enrolled yet — search above and tap Enroll.</p>
         ) : (
           <div className="space-y-2">
-            {enrollments.map((e) => (
+            {activeEnrollments.map((e) => (
               <div key={e.id} className="rounded-xl border border-border bg-card px-4 py-3 text-sm flex items-center justify-between gap-2">
                 <div className="flex items-center gap-3 min-w-0">
                   <PlayerAvatar
@@ -360,9 +411,28 @@ export default function ProgramDetail() {
                     </p>
                   </div>
                 </div>
-                <span className="text-xs text-muted-foreground inline-flex items-center gap-1 shrink-0">
-                  <Check className="h-3.5 w-3.5 text-success" /> {e.status}
-                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-xs inline-flex items-center gap-1.5">
+                    {e.status === "waitlisted" ? (
+                      <span className="rounded-full bg-warning/15 text-warning font-semibold px-2 py-0.5">waitlisted</span>
+                    ) : e.status === "pending" ? (
+                      <span className="rounded-full bg-secondary text-muted-foreground font-semibold px-2 py-0.5">pending</span>
+                    ) : (
+                      <span className="text-muted-foreground inline-flex items-center gap-1">
+                        <Check className="h-3.5 w-3.5 text-success" /> {e.status}
+                      </span>
+                    )}
+                    {e.payment_status === "unpaid" && <span className="text-muted-foreground">· unpaid</span>}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    className="h-8 rounded-lg px-2.5 text-xs text-muted-foreground hover:text-destructive"
+                    onClick={() => removeAthlete(e)}
+                    data-testid={`program-remove-${e.athlete_id}`}
+                  >
+                    Remove
+                  </Button>
+                </div>
               </div>
             ))}
           </div>

@@ -76,6 +76,7 @@ function App() {
           <Route path="/story/:slug" element={<Story />} />
           <Route path="/redeem" element={<Redeem />} />
           <Route path="/register/:eventId" element={<RegisterEvent />} />
+          <Route path="/enroll/:programId" element={<RegisterEvent />} />
           <Route path="/workspace" element={<Protected><Workspace /></Protected>} />
           <Route path="/my-id" element={<Protected><MyId /></Protected>} />
             <Route path="/my-id/edit" element={<Protected><MyIdEdit /></Protected>} />

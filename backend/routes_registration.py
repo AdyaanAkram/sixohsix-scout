@@ -330,19 +330,12 @@ async def _match_org_athlete(org: str, first: str, last: str, dob: str | None) -
 
 # ---------------- Public: event registration ----------------
 
-@router.post("/public/events/{event_id}/register")
-async def register_for_event(event_id: str, body: RegistrationBody, request: Request):
-    """Registration-link entry point: parent-first account, athlete profile
-    directly in the event's org, roster enrollment, versioned consents."""
-    rate_limit(f"event_register:{event_id}", 60, 60)
-
-    event = await db.events.find_one({"id": event_id}, {"_id": 0})
-    if not event:
-        raise HTTPException(status_code=404, detail="Event not found.")
-    org = event["organization_id"]
-    if event.get("status") in CLOSED_EVENT_STATUSES:
-        raise HTTPException(status_code=400, detail="Registration is closed for this event.")
-
+async def _register_family_athlete(org: str, body: RegistrationBody, request: Request) -> dict:
+    """Shared core of the public registration flows (event + program):
+    validates consents/signature/positions, resolves or creates the family
+    account, and creates or links the athlete profile inside `org`. Callers
+    finish the flow by enrolling the athlete wherever the link pointed
+    (event roster / program enrollment) and recording consents."""
     # Required consents + signature — checked before any write.
     validate_required_consents(body.consents)
     signature_name = body.signature.full_legal_name.strip()
@@ -473,6 +466,30 @@ async def register_for_event(event_id: str, body: RegistrationBody, request: Req
             status_code=422,
             detail="Athletes 13 and older are evaluated at up to 2 positions — "
                    "pick their best one or two.")
+    return {"uid": uid, "acting_role": acting_role, "created_account": created_account,
+            "athlete": athlete, "positions": positions, "athlete_age": athlete_age,
+            "linked_existing": linked_existing, "pre_authed": pre_authed,
+            "signature_name": signature_name, "public_profile": public_profile}
+
+
+@router.post("/public/events/{event_id}/register")
+async def register_for_event(event_id: str, body: RegistrationBody, request: Request):
+    """Registration-link entry point: parent-first account, athlete profile
+    directly in the event's org, roster enrollment, versioned consents."""
+    rate_limit(f"event_register:{event_id}", 60, 60)
+
+    event = await db.events.find_one({"id": event_id}, {"_id": 0})
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found.")
+    org = event["organization_id"]
+    if event.get("status") in CLOSED_EVENT_STATUSES:
+        raise HTTPException(status_code=400, detail="Registration is closed for this event.")
+
+    core = await _register_family_athlete(org, body, request)
+    uid, acting_role, created_account = core["uid"], core["acting_role"], core["created_account"]
+    athlete, positions, athlete_age = core["athlete"], core["positions"], core["athlete_age"]
+    linked_existing, pre_authed = core["linked_existing"], core["pre_authed"]
+    signature_name, public_profile = core["signature_name"], core["public_profile"]
 
     # Auto-place into the event's age group ("Ages 8-12" / "Ages 13-18" style
     # names) so a registered 14-year-old is grouped and evaluation-ready with
@@ -518,6 +535,128 @@ async def register_for_event(event_id: str, body: RegistrationBody, request: Req
         "athlete_id": athlete["id"],
         "event": {"id": event["id"], "name": event.get("name"),
                   "date": event.get("date"), "location": event.get("location")},
+        "positions_evaluated": positions,
+        "summary": {
+            "athlete_name": f"{athlete.get('first_name', '')} {athlete.get('last_name', '')}".strip(),
+            "dob": athlete.get("date_of_birth"),
+            "graduation_year": athlete.get("graduation_year"),
+            "bats": athlete.get("bats"),
+            "throws": athlete.get("throws"),
+            "primary_position": athlete.get("primary_position"),
+            "secondary_positions": athlete.get("secondary_positions") or [],
+        },
+    }
+    if not pre_authed:
+        out["token"] = create_token(uid, org)
+    return out
+
+
+# ---------------- Public: program enrollment (same wizard, program target) ----------------
+
+@router.get("/public/programs/{program_id}/registration-info")
+async def program_registration_info(program_id: str):
+    """What a program enrollment link needs to render its landing page.
+    Public — no auth, no roster or PII in the response."""
+    prog = await db.programs.find_one({"id": program_id}, {"_id": 0})
+    if not prog:
+        raise HTTPException(status_code=404, detail="Program not found.")
+    org = await db.organizations.find_one({"id": prog.get("organization_id")}, {"_id": 0})
+    sessions = await db.sessions.find(
+        {"program_id": program_id, "organization_id": prog["organization_id"]},
+        {"_id": 0, "date": 1, "start_time": 1, "end_time": 1, "session_number": 1},
+    ).sort("date", 1).to_list(100)
+    location = None
+    if prog.get("location_id"):
+        loc = await db.locations.find_one({"id": prog["location_id"]}, {"_id": 0})
+        if loc:
+            location = ", ".join(x for x in (loc.get("name"), loc.get("city"), loc.get("state")) if x)
+    return {
+        "program": {
+            "id": prog["id"],
+            "name": prog.get("name"),
+            "type": prog.get("type"),
+            "start_date": prog.get("start_date"),
+            "end_date": prog.get("end_date"),
+            "price_cents": prog.get("price_cents"),
+            "description": prog.get("description"),
+            "location": location,
+            "sessions": sessions,
+        },
+        "organization": {
+            "id": (org or {}).get("id"),
+            "name": (org or {}).get("name"),
+            "logo_url": (org or {}).get("logo_url"),
+        },
+        "positions": REGISTRATION_POSITIONS,
+        "registration_open": prog.get("status") == "open",
+    }
+
+
+@router.post("/public/programs/{program_id}/register")
+async def register_for_program(program_id: str, body: RegistrationBody, request: Request):
+    """Program enrollment link: parent-first account, full athlete profile in
+    the program's org, program enrollment, versioned consents. Mirrors the
+    event registration flow — the enrollment record is the only difference."""
+    rate_limit(f"program_register:{program_id}", 60, 60)
+
+    prog = await db.programs.find_one({"id": program_id}, {"_id": 0})
+    if not prog:
+        raise HTTPException(status_code=404, detail="Program not found.")
+    org = prog["organization_id"]
+    if prog.get("status") != "open":
+        raise HTTPException(status_code=400, detail="Enrollment is closed for this program.")
+
+    core = await _register_family_athlete(org, body, request)
+    uid, acting_role, created_account = core["uid"], core["acting_role"], core["created_account"]
+    athlete, positions = core["athlete"], core["positions"]
+    linked_existing, pre_authed = core["linked_existing"], core["pre_authed"]
+    signature_name, public_profile = core["signature_name"], core["public_profile"]
+
+    # Capacity: full programs waitlist instead of rejecting the family outright.
+    status = "enrolled"
+    if prog.get("capacity"):
+        n = await db.enrollments.count_documents({
+            "program_id": program_id, "organization_id": org,
+            "status": {"$in": ["enrolled", "completed"]}})
+        if n >= prog["capacity"]:
+            status = "waitlisted"
+
+    existing = await db.enrollments.find_one(
+        {"program_id": program_id, "athlete_id": athlete["id"], "organization_id": org})
+    if existing:
+        if existing.get("status") == "withdrawn":
+            await db.enrollments.update_one(
+                {"id": existing["id"]},
+                {"$set": {"status": status, "positions_evaluated": positions,
+                          "updated_at": now_iso()}})
+        enrollment_status = status if existing.get("status") == "withdrawn" else existing.get("status")
+    else:
+        await db.enrollments.insert_one({
+            "id": new_id(), "organization_id": org,
+            "program_id": program_id, "athlete_id": athlete["id"],
+            "status": status, "payment_status": "unpaid", "source": "family",
+            "positions_evaluated": positions,
+            "enrolled_at": now_iso(), "enrolled_by": uid,
+            "created_at": now_iso(), "updated_at": now_iso(),
+        })
+        enrollment_status = status
+
+    consents_effective = {**body.consents.model_dump(), "public_profile": public_profile}
+    await record_consents(org, athlete["id"], None, uid, consents_effective, signature_name)
+
+    await _ensure_membership(uid, org, acting_role if acting_role in ("parent", "athlete") else "parent")
+
+    await log_audit(org, None, "program_registration", "athlete", athlete["id"], {
+        "program_id": program_id, "user_id": uid,
+        "linked_existing": linked_existing, "created_account": created_account,
+        "enrollment_status": enrollment_status,
+    })
+
+    out = {
+        "athlete_id": athlete["id"],
+        "enrollment_status": enrollment_status,
+        "program": {"id": prog["id"], "name": prog.get("name"),
+                    "start_date": prog.get("start_date"), "end_date": prog.get("end_date")},
         "positions_evaluated": positions,
         "summary": {
             "athlete_name": f"{athlete.get('first_name', '')} {athlete.get('last_name', '')}".strip(),
