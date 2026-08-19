@@ -20,7 +20,7 @@ import {
   Search, Plus, Upload, FileDown, Users, ChevronRight, LayoutGrid, List,
   SlidersHorizontal, Eye, TrendingUp, TrendingDown, Minus, ArrowRight,
   UserSearch, UserCheck, ClipboardCheck, AlertTriangle, BarChart3, Star,
-  CalendarPlus, Flag,
+  CalendarPlus, Flag, Mail,
 } from "lucide-react";
 
 const AGE_GROUPS = ["8U", "9U", "10U", "11U", "12U", "13U", "14U", "15U", "16U", "17U", "18U"];
@@ -418,6 +418,93 @@ const ChangeSince = ({ change }) => {
 
 /* One stat block inside the class snapshot band. Clickable blocks (Improving /
    Needs Follow-Up) toggle the quick filter, mirroring the old snapshot tiles. */
+
+/* Nudge families to finish their athlete's profile. Only shown when someone is
+   actually reachable AND actually missing something — never a standing banner. */
+const ProfileReminderCard = () => {
+  const [data, setData] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [showList, setShowList] = useState(false);
+
+  const load = useCallback(() => {
+    api.get("/families/profile-reminder-readiness")
+      .then((r) => setData(r.data))
+      .catch(() => setData(null));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const send = async () => {
+    setSending(true);
+    try {
+      const r = await api.post("/families/send-profile-reminder", { confirm: "SEND" });
+      toast.success(`Reminder sent to ${r.data.emails_sent} famil${r.data.emails_sent === 1 ? "y" : "ies"}.`);
+      setOpen(false);
+      load();
+    } catch (e) { toast.error(errMsg(e)); } finally { setSending(false); }
+  };
+
+  if (!data || !data.athletes) return null;
+  const top = (data.most_missing || []).slice(0, 3)
+    .map((g) => `${g.count} missing ${g.field}`).join(" · ");
+
+  return (
+    <div className="rounded-2xl border border-border bg-card p-3 sm:p-4" data-testid="profile-reminder-card">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--info)_/_0.15)] text-info">
+          <Mail className="h-5 w-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-foreground">
+            {data.athletes} famil{data.athletes === 1 ? "y" : "ies"} can finish their athlete&apos;s profile
+          </p>
+          <p className="truncate text-xs text-muted-foreground">{top || "Details missing"}</p>
+        </div>
+        <Button className="h-10 rounded-xl bg-primary hover:bg-brand-secondary" onClick={() => setOpen(true)} data-testid="profile-reminder-send">
+          <Mail className="h-4 w-4 sm:mr-1.5" /> <span className="hidden sm:inline">Send reminder</span>
+        </Button>
+      </div>
+      <button type="button" onClick={() => setShowList((v) => !v)}
+        className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-info hover:underline"
+        data-testid="profile-reminder-toggle">
+        {showList ? "Hide" : "Who gets this"} ({data.emails})
+      </button>
+      {showList && (
+        <div className="mt-2 max-h-56 space-y-1 overflow-y-auto">
+          {(data.recipients || []).map((r) => (
+            <Link key={r.athlete_id} to={`/players/${r.athlete_id}`}
+              className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-secondary">
+              <span className="truncate font-medium text-foreground">{r.name}</span>
+              <span className="shrink-0 truncate text-muted-foreground">{r.missing.join(", ")}</span>
+            </Link>
+          ))}
+        </div>
+      )}
+      <Dialog open={open} onOpenChange={(o) => { if (!sending) setOpen(o); }}>
+        <DialogContent className="max-w-md rounded-2xl" data-testid="profile-reminder-dialog">
+          <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Send profile reminder</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {data.emails} email{data.emails === 1 ? "" : "s"} go out now, each listing exactly what that
+            athlete is missing and linking them to their profile. Families whose profile is already
+            complete are not contacted.
+          </p>
+          {data.mail_configured === false && (
+            <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs font-semibold text-destructive">
+              Email is not configured — nothing will actually be delivered.
+            </p>
+          )}
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button variant="outline" className="h-11 rounded-xl" onClick={() => setOpen(false)} disabled={sending}>Cancel</Button>
+            <Button className="h-11 rounded-xl bg-primary hover:bg-brand-secondary" onClick={send} disabled={sending} data-testid="profile-reminder-confirm">
+              {sending ? "Sending…" : `Send ${data.emails} email${data.emails === 1 ? "" : "s"}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
 const SnapshotStat = ({ icon: Icon, tint, label, value, sub, onClick, active, testId }) => {
   const Tag = onClick ? "button" : "div";
   return (
@@ -729,6 +816,8 @@ export default function PlayersList() {
           </Button>
         </div>
       )}
+
+      {isAdmin && <ProfileReminderCard />}
 
       {/* Class snapshot. A header line (class selector · count · report link)
           over an even 4-up stat strip — the old flex-wrap ran the tiles and the

@@ -8,7 +8,9 @@ from pydantic import BaseModel
 
 from auth import (ADMIN_ROLES, COACH_ROLES, REVIEW_ROLES, STAFF_ROLES,
                   get_current_user, require_roles)
+from config import settings
 from db import clean, db, log_audit, new_id, now_iso
+from mailer import safe_send
 from positions import (AGE_BANDS, POSITION_TAXONOMY, age_band_for_age,
                        normalize_age_band)
 from routes_development import _note_visible_to_role, _validate_date
@@ -387,6 +389,111 @@ async def athletes_overview(
             "follow_up": sum(1 for s in shaped if s["statuses"]["follow_up"]),
         },
     }
+
+
+# ---------------- Family profile-completion reminder ----------------
+
+# What a family can actually fill in themselves, in the order the email lists it.
+# NOTE: current_team is deliberately NOT here — teams are assigned by staff,
+# so asking a family to fill it in would be asking for the wrong thing.
+PROFILE_FIELDS = [
+    ("photo_url", "a profile photo"),
+    ("height", "height"),
+    ("weight", "weight"),
+    ("graduation_year", "graduation year"),
+    ("primary_position", "primary position"),
+    ("date_of_birth", "date of birth"),
+]
+
+
+def _family_addresses(a: dict) -> list[str]:
+    out: list[str] = []
+    for e in (a.get("guardian_email"), a.get("email")):
+        e = (e or "").strip()
+        if e and "@" in e and e.lower() not in [x.lower() for x in out]:
+            out.append(e)
+    return out
+
+
+def _missing_profile_fields(a: dict) -> list[str]:
+    return [label for key, label in PROFILE_FIELDS if not (a.get(key) or "")]
+
+
+async def _reminder_candidates(org: str) -> list[dict]:
+    """Active athletes with a reachable family address and something missing."""
+    athletes = await db.athletes.find(
+        {"organization_id": org, "status": "active"}, {"_id": 0}).to_list(5000)
+    out = []
+    for a in athletes:
+        addresses = _family_addresses(a)
+        missing = _missing_profile_fields(a)
+        if addresses and missing:
+            out.append({
+                "athlete_id": a["id"],
+                "name": f"{a.get('first_name', '')} {a.get('last_name', '')}".strip(),
+                "addresses": addresses,
+                "missing": missing,
+                "guardian_name": a.get("guardian_name"),
+                "first_name": a.get("first_name"),
+            })
+    out.sort(key=lambda x: x["name"])
+    return out
+
+
+@router.get("/families/profile-reminder-readiness")
+async def profile_reminder_readiness(user=Depends(require_roles(*ADMIN_ROLES))):
+    """Who would receive a 'finish your profile' email, and what each is missing.
+
+    Only athletes with a reachable address AND at least one empty field — there
+    is no reason to email a family whose profile is already complete.
+    """
+    cands = await _reminder_candidates(user["organization_id"])
+    addresses = {e.lower() for c in cands for e in c["addresses"]}
+    from collections import Counter
+    gaps = Counter(m for c in cands for m in c["missing"])
+    return {
+        "athletes": len(cands),
+        "emails": len(addresses),
+        "most_missing": [{"field": f, "count": n} for f, n in gaps.most_common()],
+        "recipients": [{"athlete_id": c["athlete_id"], "name": c["name"],
+                        "missing": c["missing"], "emails": c["addresses"]} for c in cands],
+        "mail_provider": settings.mail_provider,
+        "mail_configured": bool(settings.resend_api_key) or settings.mail_provider == "stdout",
+    }
+
+
+class ProfileReminderBody(BaseModel):
+    confirm: str
+
+
+@router.post("/families/send-profile-reminder")
+async def send_profile_reminder(body: ProfileReminderBody,
+                                user=Depends(require_roles(*ADMIN_ROLES))):
+    """Email each family a personalised list of what their athlete is missing.
+    Irreversible (mail goes out) — requires confirm="SEND"."""
+    if body.confirm != "SEND":
+        raise HTTPException(status_code=400, detail='Confirmation required: pass confirm="SEND".')
+    org = user["organization_id"]
+    org_name = user.get("organization_name") or "60'6\" Athletics"
+    link = f"{settings.app_public_url}/my-id"
+    cands = await _reminder_candidates(org)
+    sent = failed = 0
+    for c in cands:
+        missing = c["missing"]
+        phrase = missing[0] if len(missing) == 1 else ", ".join(missing[:-1]) + " and " + missing[-1]
+        for to in c["addresses"]:
+            res = safe_send(to, "complete_profile", {
+                "name": c.get("guardian_name") or c.get("first_name") or "there",
+                "athlete_name": c["name"], "org": org_name,
+                "missing": phrase, "link": link,
+            })
+            if res.get("sent"):
+                sent += 1
+            else:
+                failed += 1
+    await log_audit(org, user, "profile_reminders_sent", "organization", org,
+                    {"athletes": len(cands), "emails_sent": sent, "failed": failed})
+    return {"athletes": len(cands), "emails_sent": sent, "failed": failed}
 
 
 @router.post("/athletes/purge-all")

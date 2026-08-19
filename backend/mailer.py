@@ -35,6 +35,18 @@ TEMPLATES = {
         ),
     },
 
+    "complete_profile": {
+        "subject": "Finish {athlete_name}'s 60'6\" profile",
+        "body": (
+            "Hi {name},\n\n"
+            "{athlete_name} has a 60'6\" ID with {org} — the permanent profile that carries "
+            "their evaluations, verified measurements and coach feedback from camp to camp.\n\n"
+            "A few details are still missing: {missing}. Adding them takes a minute and makes "
+            "their profile far more useful to coaches.\n\n"
+            "{link}\n\n"
+        ),
+    },
+
     "athlete_invitation": {
         "subject": "Claim your 60'6\" ID profile",
         "body": (
