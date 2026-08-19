@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PlayerAvatar, resolvePhotoSrc } from "@/components/common/PlayerAvatar";
-import { StatusBadge } from "@/components/common/StatusBadge";
+import { StatusBadge, VerificationBadge } from "@/components/common/StatusBadge";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
@@ -461,6 +461,7 @@ export default function PlayersList() {
   const [teams, setTeams] = useState(null); // null → /teams unavailable, Team filter hidden
   const [quickFilter, setQuickFilter] = useState(null); // "improving" | "follow_up" | null (snapshot tile toggle)
   const [quickView, setQuickView] = useState(null); // athlete object → Quick View dialog
+  const [quickMetrics, setQuickMetrics] = useState(null); // verified measurements for the open athlete
   const [view, setViewState] = useState(() => {
     try {
       const stored = localStorage.getItem(VIEW_STORAGE_KEY);
@@ -595,6 +596,30 @@ export default function PlayersList() {
   const gradYearOptions = gradYears?.length ? gradYears : gradYear !== "all" ? [{ year: gradYear, count: null }] : [];
 
   const quickViewOpen = (p) => setQuickView(p);
+
+  const hasQuickScore = quickView?.latest_overall !== null && quickView?.latest_overall !== undefined;
+
+  /* Quick View pulls the athlete's verified measurements so the panel shows real
+     numbers (60-yard, exit velo…) rather than a lone score that is often null.
+     One dedupe per tool — the endpoint returns newest-first. */
+  useEffect(() => {
+    if (!quickView?.id) { setQuickMetrics(null); return undefined; }
+    let alive = true;
+    setQuickMetrics(null);
+    api.get(`/metrics/athlete/${quickView.id}`)
+      .then((r) => {
+        if (!alive) return;
+        const rows = Array.isArray(r.data) ? r.data : [];
+        const seen = new Set();
+        setQuickMetrics(rows.filter((m) => {
+          if (m.value === null || m.value === undefined || seen.has(m.metric_key)) return false;
+          seen.add(m.metric_key);
+          return true;
+        }).slice(0, 4));
+      })
+      .catch(() => { if (alive) setQuickMetrics([]); });
+    return () => { alive = false; };
+  }, [quickView?.id]);
 
   const approvePending = async (p) => {
     setPendingBusyId(p.id);
@@ -1030,34 +1055,80 @@ export default function PlayersList() {
         </>
       )}
 
-      {/* Quick View — details on demand, from data already loaded (no extra fetch). */}
+      {/* Quick View — photo-forward panel: identity on the image, score state,
+          verified measurements, then the jump to the full profile. */}
       <Dialog open={!!quickView} onOpenChange={(o) => { if (!o) setQuickView(null); }}>
-        <DialogContent className="max-w-md rounded-2xl" data-testid="players-quickview">
+        <DialogContent className="max-w-lg overflow-hidden rounded-2xl p-0 gap-0" data-testid="players-quickview">
           {quickView && (
             <>
-              <DialogHeader>
-                <div className="flex items-center gap-4">
-                  <PlayerAvatar firstName={quickView.first_name} lastName={quickView.last_name} photoUrl={quickView.photo_url} size="xl" />
-                  <div className="min-w-0">
-                    <DialogTitle className="font-display text-2xl text-foreground truncate">
-                      {quickView.first_name} {quickView.last_name}
-                    </DialogTitle>
-                    <p className="text-sm text-muted-foreground">{identityLine(quickView) || "—"}</p>
-                    <p className="text-sm text-muted-foreground truncate">{quickView.current_team || "No team"}</p>
-                  </div>
-                </div>
-              </DialogHeader>
-              <div className="space-y-3">
+              {/* Photo header — the athlete leads, identity reversed out on the image. */}
+              <div className="relative aspect-[16/9] w-full overflow-hidden">
+                <CardPhoto p={quickView} />
+                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/90 via-black/35 to-black/10" />
                 {snapshot && (
-                  <div className="rounded-xl bg-secondary px-4 py-3 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Latest eval</span>
-                      <ScoreTrend score={quickView.latest_overall} change={quickView.score_change} />
-                    </div>
-                    <p className="text-xs text-muted-foreground">Last eval · {fmtDate(quickView.last_eval_at)}</p>
+                  <div className="absolute left-4 top-4 flex flex-wrap items-center gap-1.5">
+                    <CardStatusPill statuses={quickView.statuses} />
+                    {quickView.statuses?.personal_best && (
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-success px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-md">
+                        <span aria-hidden="true">•</span> Personal Best
+                      </span>
+                    )}
                   </div>
                 )}
-                {snapshot && <StatusChips statuses={quickView.statuses} max={3} testIdPrefix="players-quickview" />}
+                {hasQuickScore && (
+                  <span className="absolute right-4 top-4 rounded-xl bg-success px-3 py-1.5 font-mono-num text-2xl font-bold leading-none text-white shadow-lg">
+                    {fmtScore(quickView.latest_overall)}
+                  </span>
+                )}
+                <div className="absolute inset-x-0 bottom-0 p-4">
+                  <DialogTitle className="font-display text-3xl leading-tight text-white">
+                    {quickView.first_name} {quickView.last_name}
+                  </DialogTitle>
+                  <p className="mt-0.5 text-sm text-white/85">{identityLine(quickView) || "—"}</p>
+                  <p className="text-sm text-white/70 truncate">{quickView.current_team || "No team"}</p>
+                </div>
+              </div>
+
+              <div className="space-y-3 p-4">
+                {snapshot && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-secondary px-4 py-3">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        {hasQuickScore ? "Overall eval score" : "Evaluation status"}
+                      </p>
+                      <p className="text-sm text-foreground">
+                        {hasQuickScore
+                          ? <span className="font-mono-num text-xl font-bold">{fmtScore(quickView.latest_overall)}</span>
+                          : quickView.statuses?.evaluated ? "Evaluated · metrics on file" : "No eval yet"}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      {hasQuickScore && <ChangeSince change={quickView.score_change} />}
+                      <p className="text-[11px] text-muted-foreground">Last eval · {fmtDate(quickView.last_eval_at)}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Verified measurements — the numbers a coach actually wants at a glance. */}
+                {quickMetrics === null ? (
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-14 rounded-lg" />)}
+                  </div>
+                ) : quickMetrics.length > 0 ? (
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="players-quickview-metrics">
+                    {quickMetrics.map((m) => (
+                      <div key={m.metric_key} className="min-w-0 rounded-lg bg-secondary/60 px-2.5 py-2">
+                        <p className="truncate text-[9px] font-semibold uppercase tracking-wide text-muted-foreground" title={m.label}>{m.label}</p>
+                        <p className="flex items-baseline gap-1 whitespace-nowrap">
+                          <span className="truncate font-mono-num text-base font-bold leading-tight text-foreground">{m.value}</span>
+                          {m.unit && <span className="shrink-0 text-[10px] text-muted-foreground">{m.unit}</span>}
+                          <VerificationBadge source={m.source} iconOnly className="ml-auto self-center" />
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
                 {quickView.development_focus && (
                   <p className="text-sm text-muted-foreground">
                     <span className="font-semibold text-foreground">Development focus:</span> {quickView.development_focus}
@@ -1065,7 +1136,8 @@ export default function PlayersList() {
                 )}
                 {!snapshot && <StatusBadge status={quickView.status} />}
               </div>
-              <DialogFooter className="gap-2 sm:gap-2">
+
+              <DialogFooter className="gap-2 border-t border-border p-4 sm:gap-2">
                 <Button variant="outline" className="rounded-xl h-11" onClick={() => setQuickView(null)} data-testid="players-quickview-close">
                   Close
                 </Button>

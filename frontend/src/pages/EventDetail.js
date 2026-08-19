@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -2449,10 +2449,20 @@ export default function EventDetail() {
       : "overview";
   const tab = params.get("tab") || defaultTab;
 
-  const tabs = isStaffView
-    ? ["overview", "roster", "checkin", "groups", "stations", "evaluators", "progress", "results"]
-    : ["overview"];
+  // two-level nav: the primary bar groups the leaves, but only a LEAF ever
+  // reaches the URL (?tab=<leaf>) — deep links from other pages keep working
+  const OVERVIEW_GROUP = { id: "overview", label: "Overview", leaves: ["overview"] };
+  const TAB_GROUPS = isStaffView
+    ? [
+        OVERVIEW_GROUP,
+        { id: "athletes", label: "Athletes", leaves: ["roster", "checkin", "groups"] },
+        { id: "setup", label: "Setup", leaves: ["stations", "evaluators"] },
+        { id: "live", label: "Live", leaves: ["progress", "results"] },
+      ]
+    : [OVERVIEW_GROUP];
   const TAB_LABELS = { overview: "Overview", roster: "Roster", checkin: "Check-In", groups: "Groups", stations: "Stations", evaluators: "Evaluators", progress: "Live", results: "Results" };
+  const activeGroup = TAB_GROUPS.find((g) => g.leaves.includes(tab));
+  const secondaryLeaves = activeGroup && activeGroup.leaves.length > 1 ? activeGroup.leaves : [];
 
   return (
     <div className="space-y-4">
@@ -2522,22 +2532,60 @@ export default function EventDetail() {
       <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
         <div className="relative">
           <div className="overflow-x-auto -mx-4 px-4 scroll-smooth" ref={(el) => {
-            // keep the active tab visible on phones — the row scrolls, so a
+            // keep the active group visible on phones — the row scrolls, so a
             // coach deep-linked to Live/Results should never land on a bar
-            // that looks like it ends at "Groups"
-            if (el) { requestAnimationFrame(() => { const act = el.querySelector('[data-state="active"]'); act?.scrollIntoView({ inline: "center", block: "nearest" }); }); }
+            // that looks like it ends at "Athletes"
+            if (el) { requestAnimationFrame(() => { const act = el.querySelector('[data-active]'); act?.scrollIntoView({ inline: "center", block: "nearest" }); }); }
           }}>
-            <TabsList className="rounded-xl bg-secondary h-11 w-max">
-              {tabs.map((t) => (
-                <TabsTrigger key={t} value={t} className="rounded-lg px-3.5 data-[state=active]:bg-primary data-[state=active]:text-white" data-testid={`event-tab-${t}`}>
-                  {TAB_LABELS[t]}
-                </TabsTrigger>
-              ))}
-            </TabsList>
+            <div role="tablist" className="inline-flex items-center gap-1 rounded-xl bg-secondary h-11 w-max p-1">
+              {TAB_GROUPS.map((g) => {
+                const isActive = activeGroup?.id === g.id;
+                const single = g.leaves.length === 1;
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    data-active={isActive ? "" : undefined}
+                    data-tabgroup={g.id}
+                    data-testid={single ? `event-tab-${g.leaves[0]}` : `event-tabgroup-${g.id}`}
+                    onClick={() => setParams({ tab: g.leaves[0] })}
+                    className={cn(
+                      "h-9 rounded-lg px-3.5 text-sm font-medium whitespace-nowrap transition-colors",
+                      isActive ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {g.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          {/* right-edge fade: signals there are more tabs off-screen */}
+          {/* right-edge fade: signals there are more groups off-screen */}
           <div className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-background to-transparent sm:hidden" />
         </div>
+
+        {secondaryLeaves.length > 0 && (
+          <div className="mt-2 overflow-x-auto -mx-4 px-4">
+            <div className="inline-flex items-center gap-1 w-max">
+              {secondaryLeaves.map((leaf) => (
+                <button
+                  key={leaf}
+                  type="button"
+                  data-testid={`event-tab-${leaf}`}
+                  onClick={() => setParams({ tab: leaf })}
+                  className={cn(
+                    "h-8 rounded-lg px-3 text-sm font-medium whitespace-nowrap transition-colors",
+                    tab === leaf ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {TAB_LABELS[leaf]}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <TabsContent value="overview" className="mt-4">
           {isAdmin && (
