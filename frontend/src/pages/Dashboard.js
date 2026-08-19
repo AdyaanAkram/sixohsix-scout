@@ -501,9 +501,9 @@ export default function Dashboard() {
         {ev ? (
           <Card className="rounded-2xl border-border overflow-hidden">
             <div className="hero-sweep px-5 py-4 border-b flex flex-wrap items-center justify-between gap-2">
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="text-xs uppercase tracking-widest text-muted-foreground">Upcoming / Active Event</p>
-                <Link to={`/events/${ev.id}`} className="font-display text-2xl text-foreground hover:underline" data-testid="dashboard-event-link">{ev.name}</Link>
+                <Link to={`/events/${ev.id}`} className="block font-display text-2xl leading-tight text-foreground break-words hover:underline" data-testid="dashboard-event-link">{ev.name}</Link>
                 <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5"><CalendarDays className="h-3.5 w-3.5" /> {ev.date} · {ev.location}</p>
               </div>
               <StatusBadge status={ev.status} testId="event-status-badge" />
@@ -591,7 +591,9 @@ export default function Dashboard() {
   const gradClasses = (orgSummary?.grad_classes || []).filter((g) => g?.year);
   return (
     <div className="space-y-5" data-testid="admin-dashboard">
-      <div className="flex items-center gap-3.5">
+      {/* Chips sit beside the identity block on desktop and drop below it on
+          mobile — never overlapping the welcome line. */}
+      <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2">
         {org?.logo_url ? (
           // Uploaded logos live behind the authenticated /organization/logo route.
           <img src={resolveOrgLogoSrc(org.logo_url)} alt={orgName} className="h-12 w-12 rounded-xl object-cover ring-1 ring-border shrink-0" data-testid="org-hq-logo" />
@@ -600,10 +602,10 @@ export default function Dashboard() {
             <span className="font-display text-lg font-extrabold text-brand leading-none">{(orgName || "HQ").charAt(0)}</span>
           </div>
         )}
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 basis-[min(100%,16rem)]">
           <PanelLabel>Organization HQ</PanelLabel>
           <h1 className="font-display text-3xl sm:text-4xl text-foreground truncate" data-testid="org-hq-name">{orgName || "Dashboard"}</h1>
-          <p className="text-sm text-muted-foreground">Welcome back, {user?.full_name?.split(" ")[0]}.</p>
+          <p className="text-sm text-muted-foreground truncate">Welcome back, {user?.full_name?.split(" ")[0]}.</p>
         </div>
         {orgSummary && <DevTrendChips trend={orgSummary.development_trend} testId="dev-trend-strip" />}
       </div>
@@ -644,9 +646,9 @@ export default function Dashboard() {
           {ev ? (
             <Card className="rounded-2xl border-border bg-card overflow-hidden">
               <div className="hero-sweep px-5 py-4 border-b flex flex-wrap items-center justify-between gap-2">
-                <div>
+                <div className="min-w-0 flex-1">
                   <PanelLabel>Upcoming / Active Event</PanelLabel>
-                  <Link to={`/events/${ev.id}`} className="font-display text-2xl text-foreground hover:underline" data-testid="dashboard-event-link">{ev.name}</Link>
+                  <Link to={`/events/${ev.id}`} className="block font-display text-2xl leading-tight text-foreground break-words hover:underline" data-testid="dashboard-event-link">{ev.name}</Link>
                   <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5"><CalendarDays className="h-3.5 w-3.5" /> {ev.date} · {ev.location}</p>
                 </div>
                 <StatusBadge status={ev.status} testId="event-status-badge" />
