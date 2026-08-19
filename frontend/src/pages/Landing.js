@@ -273,7 +273,8 @@ export default function Landing() {
   }, []);
 
   if (!loading && user) {
-    const home = user.role === "athlete" || user.role === "parent" ? "/my-id" : "/dashboard";
+    // Staff enter through the role-based mode picker, never straight into a workspace.
+    const home = user.role === "athlete" || user.role === "parent" ? "/my-id" : "/workspace";
     return <Navigate to={home} replace />;
   }
 

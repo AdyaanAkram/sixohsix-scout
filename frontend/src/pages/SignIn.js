@@ -16,7 +16,9 @@ export default function SignIn() {
   // registration wizard's "sign in to add another athlete" path).
   const nextPath = (() => {
     const n = new URLSearchParams(window.location.search).get("next") || "";
-    return n.startsWith("/") && !n.startsWith("//") ? n : null;
+    // "/" would bounce staff through the landing page's own redirect and skip
+    // the mode picker — treat it as "no destination".
+    return n.startsWith("/") && !n.startsWith("//") && n !== "/" ? n : null;
   })();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
