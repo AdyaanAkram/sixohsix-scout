@@ -4,13 +4,12 @@ import { api, errMsg } from "@/lib/api";
 import { cn, formatPermanentId } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { PlayerAvatar } from "@/components/common/PlayerAvatar";
+import { PlayerAvatar, resolvePhotoSrc } from "@/components/common/PlayerAvatar";
 import { IdRadarChart } from "@/components/common/IdRadarChart";
 import { VerificationBadge } from "@/components/common/StatusBadge";
 import { toast } from "sonner";
-import { ArrowLeft, GitCompare } from "lucide-react";
+import { ArrowLeft, Check, GitCompare, Search } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from "recharts";
@@ -67,6 +66,99 @@ const TOOLTIP_STYLE = {
   border: "1px solid hsl(var(--border))",
   borderRadius: 12,
   color: "hsl(var(--foreground))",
+};
+
+/* Photo header for the picker card — same idiom as the Athletes directory and
+   Scout (CardPhoto isn't exported from either, so it's re-declared here at
+   module level). Real photo when the athlete has one, otherwise a branded
+   monogram panel with a faded position watermark, so the many photo-less
+   athletes on a roster still look intentional rather than broken. */
+const CardPhoto = ({ p }) => {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { setFailed(false); }, [p.photo_url]);
+  const src = !failed ? resolvePhotoSrc(p.photo_url) : null;
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={`${p.first_name || ""} ${p.last_name || ""}`.trim() || "Player"}
+        className="h-full w-full object-cover object-top"
+        loading="lazy"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  const initials = `${(p.first_name || "?")[0] || ""}${(p.last_name || "")[0] || ""}`.toUpperCase();
+  return (
+    <div className="relative flex h-full w-full items-center justify-center bg-gradient-to-br from-brand-tertiary via-secondary to-background">
+      {p.primary_position && (
+        <span className="absolute -right-2 bottom-0 select-none font-display text-7xl font-extrabold leading-none text-foreground/[0.06]">
+          {p.primary_position}
+        </span>
+      )}
+      <span className="select-none font-display text-5xl text-brand/70">{initials}</span>
+    </div>
+  );
+};
+
+/* One selectable athlete card in the picker. The whole card is the toggle;
+   `disabled` is the max-four cap biting on an unselected card, in which case
+   clicks and keyboard activation are ignored. The roster payload carries no
+   evaluation score, so this card deliberately has no score chip — an empty
+   "—" chip would read as a real (zero) score. */
+const PickerCard = ({ p, checked, disabled, onToggle }) => {
+  const classLine = [p.graduation_year ? `Class of ${p.graduation_year}` : null, p.age_group || null]
+    .filter(Boolean)
+    .join(" · ");
+  const activate = () => { if (!disabled) onToggle(p.id); };
+  return (
+    <Card
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-pressed={checked}
+      aria-disabled={disabled || undefined}
+      onClick={activate}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(); }
+      }}
+      className={cn(
+        "h-full overflow-hidden rounded-2xl transition-all",
+        checked
+          ? "border-brand ring-2 ring-brand/50"
+          : "border-border hover:border-brand/50 hover:shadow-lg hover:-translate-y-0.5",
+        disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+      )}
+      data-testid={`compare-player-card-${p.id}`}
+    >
+      <div className="relative aspect-[4/3] w-full overflow-hidden">
+        <CardPhoto p={p} />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/55 to-transparent" />
+        {/* Selection affordance: filled brand check when picked, hollow ring otherwise. */}
+        <span
+          aria-hidden="true"
+          className={cn(
+            "absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full border-2 transition-colors",
+            checked
+              ? "border-brand bg-brand text-white shadow-md"
+              : "border-white/85 bg-black/30 backdrop-blur-sm"
+          )}
+        >
+          {checked && <Check className="h-4 w-4" strokeWidth={3} />}
+        </span>
+      </div>
+      <CardContent className="p-4 pt-3">
+        <div className="min-w-0">
+          <p className="font-display text-lg leading-tight text-foreground truncate">
+            {p.first_name} {p.last_name}
+          </p>
+          <p className="text-xs text-muted-foreground truncate">
+            {p.primary_position || "—"} · {p.bats || "—"}/{p.throws || "—"}
+          </p>
+          {classLine && <p className="text-xs text-muted-foreground truncate">{classLine}</p>}
+        </div>
+      </CardContent>
+    </Card>
+  );
 };
 
 /* Sticky first column of the comparison table: the metric name, kept visible
@@ -227,25 +319,53 @@ export default function PlayerCompare() {
         </div>
       </div>
 
-      <Input
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        placeholder="Search players…"
-        className="h-11 rounded-xl bg-card max-w-md"
-        data-testid="compare-search"
-      />
+      {/* Picker: search + a selectable grid of the app's standard athlete card. */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative min-w-[200px] flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search players…"
+            className="h-11 rounded-xl bg-card pl-9"
+            data-testid="compare-search"
+          />
+        </div>
+        <p className="text-xs font-semibold text-muted-foreground" data-testid="compare-selected-count">
+          <span className="font-mono-num text-foreground">{selected.length}</span> of 4 selected
+        </p>
+        {selected.length > 0 && (
+          <Button
+            variant="outline"
+            className="h-11 rounded-xl"
+            onClick={() => setSelected([])}
+            data-testid="compare-clear"
+          >
+            Clear
+          </Button>
+        )}
+      </div>
 
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 max-h-56 overflow-y-auto rounded-2xl border border-border bg-card p-3">
-        {filtered.map((p) => (
-          <label key={p.id} className="flex items-center gap-2 rounded-xl px-2 py-2 hover:bg-secondary cursor-pointer">
-            <Checkbox checked={selected.includes(p.id)} onCheckedChange={() => toggle(p.id)} />
-            <PlayerAvatar firstName={p.first_name} lastName={p.last_name} photoUrl={p.photo_url} size="sm" />
-            <div className="min-w-0">
-              <p className="text-sm font-semibold truncate">{p.first_name} {p.last_name}</p>
-              <p className="text-[11px] text-muted-foreground">{p.age_group} · {p.primary_position}</p>
-            </div>
-          </label>
-        ))}
+      {/* Capped at four, so unselected cards go inert once the cap is reached. */}
+      <div className="max-h-[70vh] overflow-y-auto pr-1">
+        {filtered.length === 0 ? (
+          <p className="py-6 text-sm text-muted-foreground">No players match “{q.trim()}”.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3" data-testid="compare-player-grid">
+            {filtered.map((p) => {
+              const checked = selected.includes(p.id);
+              return (
+                <PickerCard
+                  key={p.id}
+                  p={p}
+                  checked={checked}
+                  disabled={!checked && selected.length >= 4}
+                  onToggle={toggle}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {selected.length > 0 && (

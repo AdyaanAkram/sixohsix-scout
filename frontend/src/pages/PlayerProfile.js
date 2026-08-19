@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -20,11 +20,13 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { TimelineItem } from "@/components/common/TimelineItem";
 import { IdRadarChart } from "@/components/common/IdRadarChart";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   ArrowLeft, FileDown, Flag, Plus, TrendingUp, TrendingDown, Minus,
   ClipboardList, Image as ImageIcon, StickyNote, CalendarClock, Target, Archive, Camera, Mail,
   Gauge, Trophy, Sparkles, ChevronDown, ChevronRight, Check, X, Trash2,
+  Timer, Zap, User,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -638,6 +640,30 @@ function AiAssessmentCard({ row, athleteId, isAdmin, onChanged }) {
   );
 }
 
+// The app's canonical stat idiom (mirrors ReviewQueue's StatCard): tinted icon
+// square, mono-num value, tiny label that WRAPS instead of truncating.
+// A tile with nothing to show renders a short muted phrase at a smaller size —
+// never a bare "—", which families read as broken data.
+const ProfileStatTile = ({ icon: Icon, tint, value, empty, mono = true, valueClass, label, sub, badge, testId }) => (
+  <Card className="rounded-2xl border-border bg-card h-full" data-testid={testId}>
+    <CardContent className="pt-4 pb-4 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
+      <div className={cn("h-10 w-10 rounded-lg grid place-items-center shrink-0", tint)}>
+        <Icon className="h-5 w-5" />
+      </div>
+      <div className="min-w-0">
+        {value != null ? (
+          <p className={cn("font-bold text-2xl text-foreground leading-none", mono && "font-mono-num", valueClass)}>{value}</p>
+        ) : (
+          <p className="text-xs font-semibold text-muted-foreground leading-snug">{empty}</p>
+        )}
+        <p className="mt-1 text-xs font-semibold leading-snug text-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden">{label}</p>
+        {sub && <p className="text-[10px] text-muted-foreground truncate">{sub}</p>}
+        {badge && <div className="mt-1">{badge}</div>}
+      </div>
+    </CardContent>
+  </Card>
+);
+
 export default function PlayerProfile() {
   const { athleteId } = useParams();
   const navigate = useNavigate();
@@ -992,8 +1018,19 @@ export default function PlayerProfile() {
     story: "Player Story", media: "Videos & Photos", notes: "Coach Notes", development: "Development Goals",
     events: "Events", seasons: "Seasons", rankings: "Rankings", private: "Private", awards: "Awards", timeline: "Timeline",
   };
-  // The AI assessment chain is staff-facing — the tab only exists for coaching roles.
-  const PROFILE_TABS = ["overview", "evaluations", ...(canCoach ? ["assessment"] : []), "progress", "verified", "story", "media", "notes", "development", "awards", "events", "seasons", "rankings", "private"];
+  // Two-level nav: the primary bar groups fourteen leaves into five headings,
+  // but only a LEAF ever reaches the URL (?tab=<leaf>) — deep links from
+  // Development.js and AppLayout.js notification routing keep working.
+  // The AI assessment chain is staff-facing — the leaf only exists for coaching roles.
+  const TAB_GROUPS = [
+    { id: "overview", label: "Overview", leaves: ["overview"] },
+    { id: "performance", label: "Performance", leaves: ["evaluations", ...(canCoach ? ["assessment"] : []), "progress", "verified", "rankings"] },
+    { id: "development", label: "Development", leaves: ["development", "notes", "seasons"] },
+    { id: "profile", label: "Profile", leaves: ["story", "media", "awards"] },
+    { id: "records", label: "Records", leaves: ["events", "private"] },
+  ];
+  const activeGroup = TAB_GROUPS.find((g) => g.leaves.includes(tab));
+  const secondaryLeaves = activeGroup && activeGroup.leaves.length > 1 ? activeGroup.leaves : [];
 
   return (
     <div className="space-y-4">
@@ -1171,62 +1208,139 @@ export default function PlayerProfile() {
       {/* KPI row — the sketch order: evaluation, development, headline verified
           metrics (only when the athlete actually has them), goal, completion.
           Missing headline metrics fall back to real counts, never invented values. */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3" data-testid="profile-quick-cards">
-        <Card className="rounded-2xl border-border"><CardContent className="py-4 text-center">
-          <p className="text-2xl font-bold font-mono-num text-foreground">{summary.latest_overall ?? "—"}</p>
-          <p className="text-[10px] uppercase text-muted-foreground mt-1">Current evaluation</p>
-        </CardContent></Card>
-        <Card className="rounded-2xl border-brand/40 bg-brand/5" data-testid="kpi-development"><CardContent className="py-4 text-center">
-          <p className={`text-2xl font-bold font-mono-num flex items-center justify-center gap-1 ${change > 0 ? "text-success" : change < 0 ? "text-destructive" : "text-muted-foreground"}`}>
-            {change > 0 ? <TrendingUp className="h-5 w-5" /> : change < 0 ? <TrendingDown className="h-5 w-5" /> : <Minus className="h-5 w-5" />}
-            {change != null ? `${change > 0 ? "+" : ""}${change}` : "—"}
-          </p>
-          <p className="text-[10px] uppercase text-brand font-bold mt-1">Development</p>
-        </CardContent></Card>
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3" data-testid="profile-quick-cards">
+        <ProfileStatTile
+          icon={Gauge}
+          tint="bg-brand/15 text-brand"
+          value={summary.latest_overall != null ? summary.latest_overall : null}
+          empty="No eval yet"
+          label="Current evaluation"
+          testId="kpi-current-evaluation"
+        />
+        <ProfileStatTile
+          icon={change > 0 ? TrendingUp : change < 0 ? TrendingDown : Minus}
+          tint={change > 0 ? "bg-success/15 text-success" : change < 0 ? "bg-destructive/15 text-destructive" : "bg-secondary text-muted-foreground"}
+          value={change != null ? `${change > 0 ? "+" : ""}${change}` : null}
+          valueClass={change > 0 ? "text-success" : change < 0 ? "text-destructive" : "text-muted-foreground"}
+          empty="No change yet"
+          label="Development"
+          testId="kpi-development"
+        />
         {exitVeloKpi ? (
-          <Card className="rounded-2xl border-border" data-testid="kpi-exit-velocity"><CardContent className="py-4 text-center">
-            <p className="text-2xl font-bold font-mono-num text-foreground">{exitVeloKpi.value}<span className="text-sm font-semibold text-muted-foreground ml-1">{exitVeloKpi.unit}</span></p>
-            <p className="text-[10px] uppercase text-muted-foreground mt-1">Exit velocity{exitVeloKpi.isBest ? " · best" : ""}</p>
-            {exitVeloKpi.source && <div className="mt-1 flex justify-center"><VerificationBadge source={exitVeloKpi.source} compact /></div>}
-          </CardContent></Card>
+          <ProfileStatTile
+            icon={Zap}
+            tint="bg-warning/15 text-warning"
+            value={<>{exitVeloKpi.value}<span className="text-sm font-semibold text-muted-foreground ml-1">{exitVeloKpi.unit}</span></>}
+            label="Exit velocity"
+            sub={exitVeloKpi.isBest ? "Personal best" : null}
+            badge={exitVeloKpi.source ? <VerificationBadge source={exitVeloKpi.source} compact /> : null}
+            testId="kpi-exit-velocity"
+          />
         ) : (
-          <Card className="rounded-2xl border-border"><CardContent className="py-4 text-center">
-            <p className="text-2xl font-bold font-mono-num">{metricCount}</p>
-            <p className="text-[10px] uppercase text-muted-foreground mt-1">Verified metrics</p>
-          </CardContent></Card>
+          <ProfileStatTile
+            icon={Check}
+            tint="bg-success/15 text-success"
+            value={metricCount}
+            label="Verified metrics"
+            testId="kpi-verified-metrics"
+          />
         )}
         {sixtyKpi ? (
-          <Card className="rounded-2xl border-border" data-testid="kpi-sixty-yard"><CardContent className="py-4 text-center">
-            <p className="text-2xl font-bold font-mono-num text-foreground">{sixtyKpi.value}<span className="text-sm font-semibold text-muted-foreground ml-1">{sixtyKpi.unit}</span></p>
-            <p className="text-[10px] uppercase text-muted-foreground mt-1">60-yard{sixtyKpi.isBest ? " · best" : ""}</p>
-            {sixtyKpi.source && <div className="mt-1 flex justify-center"><VerificationBadge source={sixtyKpi.source} compact /></div>}
-          </CardContent></Card>
+          <ProfileStatTile
+            icon={Timer}
+            tint="bg-info/15 text-info"
+            value={<>{sixtyKpi.value}<span className="text-sm font-semibold text-muted-foreground ml-1">{sixtyKpi.unit}</span></>}
+            label="60-yard"
+            sub={sixtyKpi.isBest ? "Personal best" : null}
+            badge={sixtyKpi.source ? <VerificationBadge source={sixtyKpi.source} compact /> : null}
+            testId="kpi-sixty-yard"
+          />
         ) : (
-          <Card className="rounded-2xl border-border"><CardContent className="py-4 text-center">
-            <p className="text-2xl font-bold font-mono-num">{summary.evaluation_count ?? 0}</p>
-            <p className="text-[10px] uppercase text-muted-foreground mt-1">Evaluations</p>
-          </CardContent></Card>
+          <ProfileStatTile
+            icon={ClipboardList}
+            tint="bg-info/15 text-info"
+            value={summary.evaluation_count ?? 0}
+            label="Evaluations"
+            testId="kpi-evaluations"
+          />
         )}
-        <Card className="rounded-2xl border-border"><CardContent className="py-4 text-center px-2">
-          <p className="text-sm font-bold truncate">{activeGoal?.title || "—"}</p>
-          <p className="text-[10px] uppercase text-muted-foreground mt-1">Current goal</p>
-        </CardContent></Card>
-        <Card className="rounded-2xl border-border"><CardContent className="py-4 text-center">
-          <p className="text-2xl font-bold font-mono-num text-brand">{completion.pct}%</p>
-          <p className="text-[10px] uppercase text-muted-foreground mt-1">Profile complete</p>
-        </CardContent></Card>
+        <ProfileStatTile
+          icon={Target}
+          tint="bg-warning/15 text-warning"
+          value={activeGoal?.title || null}
+          mono={false}
+          valueClass="text-sm leading-snug [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden"
+          empty="No goal set"
+          label="Current goal"
+          testId="kpi-current-goal"
+        />
+        <ProfileStatTile
+          icon={User}
+          tint="bg-brand/15 text-brand"
+          value={`${completion.pct}%`}
+          valueClass="text-brand"
+          label="Profile complete"
+          testId="kpi-profile-complete"
+        />
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
-        <div className="overflow-x-auto -mx-4 px-4">
-          <TabsList className="rounded-xl bg-secondary h-11 w-max">
-            {PROFILE_TABS.map((t) => (
-              <TabsTrigger key={t} value={t} className="rounded-lg px-3.5 data-[state=active]:bg-primary data-[state=active]:text-white" data-testid={`profile-tab-${t}`}>
-                {TAB_LABELS[t] || t}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+        <div className="relative">
+          <div className="overflow-x-auto -mx-4 px-4 scroll-smooth" ref={(el) => {
+            // keep the active group visible on phones — the row scrolls, so a
+            // family deep-linked to Development/Records should never land on a
+            // bar that looks like it ends at "Performance"
+            if (el) { requestAnimationFrame(() => { const act = el.querySelector('[data-active]'); act?.scrollIntoView({ inline: "center", block: "nearest" }); }); }
+          }}>
+            <div role="tablist" className="inline-flex items-center gap-1 rounded-xl bg-secondary h-11 w-max p-1">
+              {TAB_GROUPS.map((g) => {
+                const isActive = activeGroup?.id === g.id;
+                const single = g.leaves.length === 1;
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    data-active={isActive ? "" : undefined}
+                    data-tabgroup={g.id}
+                    data-testid={single ? `profile-tab-${g.leaves[0]}` : `profile-tabgroup-${g.id}`}
+                    onClick={() => setParams({ tab: g.leaves[0] })}
+                    className={cn(
+                      "h-9 rounded-lg px-3.5 text-sm font-medium whitespace-nowrap transition-colors",
+                      isActive ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {g.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          {/* right-edge fade: signals there are more groups off-screen */}
+          <div className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-background to-transparent sm:hidden" />
         </div>
+
+        {secondaryLeaves.length > 0 && (
+          <div className="mt-2 overflow-x-auto -mx-4 px-4">
+            <div className="inline-flex items-center gap-1 w-max">
+              {secondaryLeaves.map((leaf) => (
+                <button
+                  key={leaf}
+                  type="button"
+                  data-testid={`profile-tab-${leaf}`}
+                  onClick={() => setParams({ tab: leaf })}
+                  className={cn(
+                    "h-8 rounded-lg px-3 text-sm font-medium whitespace-nowrap transition-colors",
+                    tab === leaf ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {TAB_LABELS[leaf] || leaf}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ---- Overview ---- */}
         {/* Development-first: the change headline and progress story render
