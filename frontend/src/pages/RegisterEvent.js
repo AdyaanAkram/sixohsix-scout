@@ -14,6 +14,7 @@ import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import GoogleButton, { googleEnabled } from "@/components/common/GoogleButton";
+import { resolvePhotoSrc } from "@/components/common/PlayerAvatar";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { CalendarDays, CheckCircle2, MapPin, Shield, UserRound } from "lucide-react";
@@ -467,13 +468,23 @@ export default function RegisterEvent() {
     <Card className="rounded-2xl border-border bg-card overflow-hidden">
       <CardContent className="py-4 flex items-center gap-4">
         {organization?.logo_url ? (
-          <img src={organization.logo_url} alt={organization?.name || "Organization"} className="h-12 w-12 rounded-xl object-contain bg-white border border-border p-0.5 shrink-0" />
+          <>
+            {/* Public page: the logo may live behind a signed URL — fall back
+                to the shield mark instead of a broken-image glyph. */}
+            <img
+              src={resolvePhotoSrc(organization.logo_url)}
+              alt={organization?.name || "Organization"}
+              className="h-12 w-12 rounded-xl object-contain bg-white border border-border p-0.5 shrink-0"
+              onError={(e) => { e.currentTarget.classList.add("hidden"); e.currentTarget.nextElementSibling?.classList.replace("hidden", "flex"); }}
+            />
+            <div className="hidden h-12 w-12 rounded-xl bg-brand-tertiary/50 items-center justify-center shrink-0"><Shield className="h-6 w-6 text-brand" /></div>
+          </>
         ) : (
           <div className="h-12 w-12 rounded-xl bg-brand-tertiary/50 flex items-center justify-center shrink-0"><Shield className="h-6 w-6 text-brand" /></div>
         )}
         <div className="min-w-0">
           <p className="text-xs uppercase tracking-widest text-brand font-semibold truncate">{organization?.name}</p>
-          <p className="font-display text-2xl text-foreground truncate">{event?.name}</p>
+          <p className="font-display text-2xl leading-tight text-foreground break-words">{event?.name}</p>
           <p className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
             {isProgram ? (
               <>
