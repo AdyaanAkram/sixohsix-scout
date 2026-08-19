@@ -346,8 +346,16 @@ export default function ReviewQueue() {
   };
 
   const totals = insights?.totals || null;
-  const awaiting = queue ? queue.filter((q) => q.status === "submitted").length : null;
+  // The review-queue endpoint is slow (per-evaluation joins); insights already
+  // knows how many are submitted-but-not-approved, so show that immediately and
+  // let the exact queue count refine it rather than parking a dash on the tile.
+  const awaiting = queue
+    ? queue.filter((q) => q.status === "submitted").length
+    : (totals ? Math.max(0, (totals.evaluations || 0) - (totals.verified || 0)) : null);
   const verifiedPct = totals && totals.evaluations > 0 ? Math.round((totals.verified / totals.evaluations) * 100) : 0;
+  // Top Performers and the position donut always render; Top Teams only when
+  // some athlete carries a team. Drives the insight grid's column count.
+  const panelCount = 2 + ((insights?.top_teams || []).length > 0 ? 1 : 0);
   const recent = insights?.recent || [];
   const filtered = (queue || []).filter((q) => statusFilter === "all" || q.status === statusFilter);
 
@@ -380,12 +388,12 @@ export default function ReviewQueue() {
 
       {/* B — Stat card row */}
       {insightsLoading && (
-        <div className="grid grid-cols-2 xl:grid-cols-5 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
           {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-20 rounded-2xl" />)}
         </div>
       )}
       {totals && (
-        <div className="grid grid-cols-2 xl:grid-cols-5 gap-2" data-testid="evals-stat-row">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2" data-testid="evals-stat-row">
           <StatCard icon={ClipboardList} tint="bg-brand/15 text-brand" value={totals.evaluations} label="Evaluations" sub="Total completed" />
           <StatCard icon={CheckCircle2} tint="bg-success/15 text-success" value={totals.verified} label="Verified" sub={`${verifiedPct}% verified`} />
           <StatCard icon={Users} tint="bg-warning/15 text-warning" value={totals.athletes_evaluated} label="Athletes" sub="Evaluated" />
@@ -394,9 +402,14 @@ export default function ReviewQueue() {
         </div>
       )}
 
-      {/* C — Insight panels */}
+      {/* C — Insight panels. The column count follows how many panels actually
+          render: Top Teams disappears when no athlete has a team, and a fixed
+          3-col grid would leave the survivors squeezed beside dead space. */}
       {insights && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <div className={cn(
+          "grid grid-cols-1 gap-3",
+          panelCount === 3 ? "lg:grid-cols-3" : panelCount === 2 ? "md:grid-cols-2" : "max-w-xl"
+        )}>
           <TopPerformersCard performers={insights.top_performers || []} />
           <TopTeamsCard teams={insights.top_teams || []} />
           <PositionDonutCard byPosition={insights.by_position || []} />
