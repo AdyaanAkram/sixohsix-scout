@@ -401,7 +401,7 @@ export default function Scout() {
       {/* Control bar — same h-11 rounded-xl bg-card language as the directory. */}
       <div className="flex flex-wrap items-center gap-2">
         <Select value={position} onValueChange={setPosition}>
-          <SelectTrigger className="w-[140px] h-11 rounded-xl bg-card" data-testid="scout-filter-position"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="h-10 sm:h-11 w-auto min-w-[112px] sm:w-[140px] rounded-xl bg-card" data-testid="scout-filter-position"><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="all">All positions</SelectItem>{POSITIONS.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
         </Select>
         {board && (

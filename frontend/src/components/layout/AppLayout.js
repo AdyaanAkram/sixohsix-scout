@@ -182,8 +182,8 @@ const SidebarLink = ({ item, onClick }) => {
 };
 
 const MOBILE_PRIMARY_BY_WORKSPACE = {
-  hq: ["dashboard", "evaluate", "players", "events"],
-  coach: ["dashboard", "my-teams", "my-athletes", "development"],
+  hq: ["dashboard", "review", "players", "events"],
+  coach: ["dashboard", "coach-evals", "my-athletes", "development"],
   scout: ["dashboard", "hs-review", "discover", "events"],
   evaluator: ["todays-event", "evaluate", "submitted"],
   athlete: ["my-id", "settings"],

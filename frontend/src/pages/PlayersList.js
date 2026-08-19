@@ -73,8 +73,10 @@ const AddPlayerDialog = ({ onCreated }) => {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="rounded-xl bg-primary hover:bg-brand-secondary h-11" data-testid="add-player-button">
-          <Plus className="h-4 w-4 mr-1" /> Add Athlete
+        <Button className="rounded-xl bg-primary hover:bg-brand-secondary h-10 sm:h-11" data-testid="add-player-button">
+          <Plus className="h-4 w-4 sm:mr-1" />
+          <span className="hidden sm:inline">Add Athlete</span>
+          <span className="sm:hidden ml-1">Add</span>
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl">
@@ -175,8 +177,10 @@ const RegistrySearchDialog = ({ onAdded }) => {
   return (
     <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setQ(""); setResults([]); } }}>
       <DialogTrigger asChild>
-        <Button variant="outline" className="rounded-xl h-11" data-testid="registry-search-button">
-          <UserSearch className="h-4 w-4 mr-1" /> Find registered athletes
+        <Button variant="outline" className="rounded-xl h-10 sm:h-11" data-testid="registry-search-button">
+          <UserSearch className="h-4 w-4 sm:mr-1" />
+          <span className="hidden sm:inline">Find registered athletes</span>
+          <span className="sm:hidden ml-1">Registry</span>
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-lg max-h-[85vh] flex flex-col rounded-2xl" data-testid="registry-search-dialog">
@@ -653,12 +657,14 @@ export default function PlayersList() {
         </div>
         {isAdmin && (
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" className="rounded-xl h-11" onClick={() => navigate("/players/import")} data-testid="import-players-button">
-              <Upload className="h-4 w-4 mr-1" /> Import Roster (CSV · Excel · Word)
+            <Button variant="outline" className="rounded-xl h-10 sm:h-11" onClick={() => navigate("/players/import")} data-testid="import-players-button">
+              <Upload className="h-4 w-4 sm:mr-1" />
+              <span className="hidden sm:inline">Import Roster (CSV · Excel · Word)</span>
+              <span className="sm:hidden ml-1">Import</span>
             </Button>
             <RegistrySearchDialog onAdded={() => { load(); loadPending(); }} />
-            <Button variant="outline" className="rounded-xl h-11" onClick={() => window.open(signedUrl("/athletes-export/csv"), "_blank")} data-testid="export-players-button">
-              <FileDown className="h-4 w-4 mr-1" /> Export
+            <Button variant="outline" className="rounded-xl h-10 sm:h-11" onClick={() => window.open(signedUrl("/athletes-export/csv"), "_blank")} data-testid="export-players-button">
+              <FileDown className="h-4 w-4 sm:mr-1" /> <span className="ml-1 sm:ml-0">Export</span>
             </Button>
             <AddPlayerDialog onCreated={load} />
           </div>
@@ -801,17 +807,17 @@ export default function PlayersList() {
       {/* Control bar: Search | Position | Team | More Filters | View
           (Grad Year lives in the class snapshot band above) */}
       <div className="flex flex-wrap gap-2">
-        <div className="relative flex-1 min-w-[200px]">
+        <div className="relative w-full sm:w-auto sm:flex-1 sm:min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name…" className="pl-9 h-11 rounded-xl bg-card" data-testid="players-search-input" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name…" className="pl-9 h-10 sm:h-11 rounded-xl bg-card" data-testid="players-search-input" />
         </div>
         <Select value={position} onValueChange={setPosition}>
-          <SelectTrigger className="w-[120px] h-11 rounded-xl bg-card" data-testid="players-filter-position"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="h-10 sm:h-11 w-auto min-w-[104px] sm:w-[120px] rounded-xl bg-card" data-testid="players-filter-position"><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="all">All positions</SelectItem>{POSITIONS.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
         </Select>
         {teams?.length > 0 && (
           <Select value={team} onValueChange={setTeam}>
-            <SelectTrigger className="w-[150px] h-11 rounded-xl bg-card" data-testid="players-filter-team"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="h-10 sm:h-11 w-auto min-w-[104px] sm:w-[150px] rounded-xl bg-card" data-testid="players-filter-team"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All teams</SelectItem>
               {teams.map((t) => (
@@ -824,8 +830,8 @@ export default function PlayersList() {
         )}
         <Popover>
           <PopoverTrigger asChild>
-            <Button variant="outline" className="h-11 rounded-xl bg-card" data-testid="players-more-filters">
-              <SlidersHorizontal className="h-4 w-4 mr-1.5" /> More Filters
+            <Button variant="outline" className="h-10 sm:h-11 rounded-xl bg-card px-3 sm:px-4" data-testid="players-more-filters" aria-label="More filters">
+              <SlidersHorizontal className="h-4 w-4 sm:mr-1.5" /> <span className="hidden sm:inline">More Filters</span>
               {moreFiltersActive > 0 && (
                 <span className="ml-1.5 rounded-full bg-primary text-white text-[10px] font-mono-num font-bold px-1.5 py-0.5 leading-none">{moreFiltersActive}</span>
               )}
@@ -852,24 +858,24 @@ export default function PlayersList() {
             </div>
           </PopoverContent>
         </Popover>
-        <div className="inline-flex h-11 items-center rounded-xl border border-border bg-card p-1" data-testid="players-view-toggle">
+        <div className="ml-auto inline-flex h-10 sm:h-11 items-center rounded-xl border border-border bg-card p-1 sm:ml-0" data-testid="players-view-toggle">
           <button
             type="button"
             onClick={() => setView("card")}
             aria-pressed={view === "card"}
             data-testid="players-view-toggle-card"
-            className={cn("inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition-colors", view === "card" ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground")}
+            className={cn("inline-flex h-8 sm:h-9 items-center gap-1.5 rounded-lg px-2.5 sm:px-3 text-sm font-semibold transition-colors", view === "card" ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground")}
           >
-            <LayoutGrid className="h-4 w-4" /> Cards
+            <LayoutGrid className="h-4 w-4" /> <span className="hidden sm:inline">Cards</span>
           </button>
           <button
             type="button"
             onClick={() => setView("list")}
             aria-pressed={view === "list"}
             data-testid="players-view-toggle-list"
-            className={cn("inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition-colors", view === "list" ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground")}
+            className={cn("inline-flex h-8 sm:h-9 items-center gap-1.5 rounded-lg px-2.5 sm:px-3 text-sm font-semibold transition-colors", view === "list" ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground")}
           >
-            <List className="h-4 w-4" /> List
+            <List className="h-4 w-4" /> <span className="hidden sm:inline">List</span>
           </button>
         </div>
       </div>

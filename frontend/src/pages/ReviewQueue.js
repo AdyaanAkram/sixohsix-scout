@@ -418,11 +418,11 @@ export default function ReviewQueue() {
         <div className="flex flex-col items-start sm:items-end gap-1">
           <div className="flex flex-wrap gap-2">
             <Select value={eventFilter} onValueChange={setEventFilter}>
-              <SelectTrigger className="w-[220px] h-11 rounded-xl bg-card" data-testid="review-event-filter"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-10 sm:h-11 w-[calc(60%-0.25rem)] sm:w-[220px] rounded-xl bg-card" data-testid="review-event-filter"><SelectValue /></SelectTrigger>
               <SelectContent><SelectItem value="all">All events</SelectItem>{events.map((e) => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}</SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[150px] h-11 rounded-xl bg-card" data-testid="review-status-filter"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-10 sm:h-11 w-[calc(40%-0.25rem)] sm:w-[150px] rounded-xl bg-card" data-testid="review-status-filter"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="submitted">Submitted</SelectItem>
                 <SelectItem value="approved">Approved</SelectItem>
