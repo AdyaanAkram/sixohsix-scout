@@ -20,7 +20,7 @@ import {
   Search, Plus, Upload, FileDown, Users, ChevronRight, LayoutGrid, List,
   SlidersHorizontal, Eye, TrendingUp, TrendingDown, Minus, ArrowRight,
   UserSearch, UserCheck, ClipboardCheck, AlertTriangle, BarChart3, Star,
-  CalendarPlus, Flag, Mail,
+  CalendarPlus, Flag, Mail, FileSpreadsheet,
 } from "lucide-react";
 
 const AGE_GROUPS = ["8U", "9U", "10U", "11U", "12U", "13U", "14U", "15U", "16U", "17U", "18U"];
@@ -750,9 +750,45 @@ export default function PlayersList() {
               <span className="sr-only sm:hidden">Import roster</span>
             </Button>
             <RegistrySearchDialog onAdded={() => { load(); loadPending(); }} />
-            <Button variant="outline" className="rounded-xl h-10 w-10 p-0 sm:h-11 sm:w-auto sm:px-4" onClick={() => window.open(signedUrl("/athletes-export/csv"), "_blank")} data-testid="export-players-button">
-              <FileDown className="h-4 w-4 sm:mr-1" /><span className="hidden sm:inline">Export</span><span className="sr-only sm:hidden">Export roster</span>
-            </Button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="rounded-xl h-10 w-10 p-0 sm:h-11 sm:w-auto sm:px-4" data-testid="export-players-button">
+                  <FileDown className="h-4 w-4 sm:mr-1" /><span className="hidden sm:inline">Export</span><span className="sr-only sm:hidden">Export roster</span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72 rounded-xl p-1.5">
+                <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Full master export
+                </p>
+                <p className="px-2.5 pb-2 text-[11px] leading-snug text-muted-foreground">
+                  Roster, every measured reading, evaluation and assessment state — plus what each profile is missing.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => window.open(signedUrl("/athletes-export/xlsx"), "_blank")}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-foreground hover:bg-secondary"
+                  data-testid="export-players-xlsx"
+                >
+                  <FileSpreadsheet className="h-4 w-4 text-success" />
+                  <span>
+                    Excel workbook
+                    <span className="block text-[11px] text-muted-foreground">Coach master + follow-up sheet</span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => window.open(signedUrl("/athletes-export/csv"), "_blank")}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-foreground hover:bg-secondary"
+                  data-testid="export-players-csv"
+                >
+                  <FileDown className="h-4 w-4 text-muted-foreground" />
+                  <span>
+                    CSV
+                    <span className="block text-[11px] text-muted-foreground">Same columns, one sheet</span>
+                  </span>
+                </button>
+              </PopoverContent>
+            </Popover>
             <AddPlayerDialog onCreated={load} />
           </div>
         )}

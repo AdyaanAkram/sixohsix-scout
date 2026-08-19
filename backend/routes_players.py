@@ -1671,26 +1671,209 @@ async def import_confirm(body: ImportConfirmBody, user=Depends(require_roles(*AD
     return {"imported": imported, "skipped": skipped, "metrics_written": metrics_written, "message": msg}
 
 
+# Measured tools, in the order the coach master view lists them. `lower` marks
+# metrics where a SMALLER number is better, so "best" means min not max.
+EXPORT_METRICS = [
+    ("home_to_first", "Home to 1st", "sec", True),
+    ("sixty_yard_dash", "60 Yard", "sec", True),
+    ("broad_jump", "Broad Jump", "in", False),
+    ("throwing_velocity", "Throw Velo", "mph", False),
+    ("pitching_velocity", "Pitch Velo", "mph", False),
+    ("pop_time", "Pop Time", "sec", True),
+]
+
+
+def _fmt_num(v):
+    """Trim a float that is really an int: 56.0 -> 56."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return v if v is not None else ""
+    return int(f) if f == int(f) else round(f, 2)
+
+
+async def _export_rows(org: str) -> tuple[list[str], list[list]]:
+    """Roster + every measured reading + evaluation/assessment state.
+
+    Built to match the coach master view the client works from: one row per
+    athlete, a best-of column per tool plus the raw readings behind it, and the
+    profile/data gaps spelled out so the sheet is directly actionable.
+    """
+    athletes = await db.athletes.find(
+        {"organization_id": org, "status": {"$ne": "merged"}}, {"_id": 0}
+    ).sort([("last_name", 1), ("first_name", 1)]).to_list(5000)
+    ids = [a["id"] for a in athletes]
+
+    metrics = await db.verified_metrics.find(
+        {"organization_id": org, "athlete_id": {"$in": ids}},
+        {"_id": 0, "athlete_id": 1, "metric_key": 1, "value": 1, "measured_at": 1},
+    ).to_list(50000)
+    by_athlete: dict = {}
+    for m in metrics:
+        key = canonical_metric_key(m.get("metric_key"))
+        by_athlete.setdefault(m["athlete_id"], {}).setdefault(key, []).append(m)
+
+    evals = await db.evaluations.find(
+        {"organization_id": org, "athlete_id": {"$in": ids},
+         "status": {"$in": ["submitted", "approved"]}},
+        {"_id": 0, "athlete_id": 1, "submitted_at": 1, "created_at": 1,
+         "computed.overall_score": 1},
+    ).to_list(20000)
+    ev_by_athlete: dict = {}
+    for e in evals:
+        ev_by_athlete.setdefault(e["athlete_id"], []).append(e)
+
+    assessments = await db.assessments.find(
+        {"organization_id": org, "athlete_id": {"$in": ids}},
+        {"_id": 0, "athlete_id": 1, "status": 1, "published_at": 1}).to_list(5000)
+    asmt_by_athlete: dict = {}
+    for a in assessments:
+        cur = asmt_by_athlete.get(a["athlete_id"])
+        if not cur or a.get("status") == "published":
+            asmt_by_athlete[a["athlete_id"]] = a
+
+    headers = ["Athlete", "First Name", "Last Name", "Grad Year", "Age", "Age Group",
+               "Primary Pos.", "Secondary Pos.", "Bats", "Throws", "Height", "Weight",
+               "Team", "School", "City", "State"]
+    for _, label, unit, _lower in EXPORT_METRICS:
+        headers += [f"{label} ({unit})", f"{label} readings"]
+    headers += ["Evaluations", "Latest Overall", "Last Evaluated",
+                "Assessment", "Assessment Published",
+                "Follow-Up Flag", "Guardian", "Guardian Email", "Guardian Phone",
+                "Missing Profile Fields", "Data Flag", "Status", "Athlete ID"]
+
+    rows = []
+    for a in athletes:
+        aid = a["id"]
+        row = [
+            f"{a.get('first_name', '')} {a.get('last_name', '')}".strip(),
+            a.get("first_name") or "", a.get("last_name") or "",
+            a.get("graduation_year") or "", a.get("age") if a.get("age") is not None else "",
+            a.get("age_group") or "", a.get("primary_position") or "",
+            "; ".join(a.get("secondary_positions") or []),
+            a.get("bats") or "", a.get("throws") or "",
+            a.get("height") or "", a.get("weight") or "",
+            a.get("current_team") or "", a.get("school") or "",
+            a.get("city") or "", a.get("state") or "",
+        ]
+        tools = by_athlete.get(aid, {})
+        for key, _label, _unit, lower in EXPORT_METRICS:
+            readings = tools.get(key) or []
+            vals = [r.get("value") for r in readings if r.get("value") is not None]
+            if vals:
+                best = min(vals) if lower else max(vals)
+                ordered = sorted(readings, key=lambda r: r.get("measured_at") or "")
+                row += [_fmt_num(best),
+                        "|".join(str(_fmt_num(r.get("value"))) for r in ordered
+                                 if r.get("value") is not None)]
+            else:
+                row += ["", ""]
+
+        a_evals = ev_by_athlete.get(aid, [])
+        scored = [e for e in a_evals
+                  if (e.get("computed") or {}).get("overall_score") is not None]
+        last_at = max((e.get("submitted_at") or e.get("created_at") or "" for e in a_evals),
+                      default="")
+        asmt = asmt_by_athlete.get(aid) or {}
+        missing = _missing_profile_fields(a)
+        # Anything a human should look at, in the spirit of the master sheet's
+        # follow-up column.
+        flags = []
+        if a.get("date_of_birth") and (a.get("age") in (0, None)):
+            flags.append("DOB looks wrong")
+        if not _family_addresses(a):
+            flags.append("No email on file")
+        if a_evals and not scored:
+            flags.append("Evaluated, not scored")
+
+        row += [
+            len(a_evals) or "",
+            _fmt_num((scored[-1].get("computed") or {}).get("overall_score")) if scored else "",
+            (last_at or "")[:10],
+            (asmt.get("status") or "").replace("generated", "draft"),
+            (asmt.get("published_at") or "")[:10],
+            "Yes" if a.get("flagged_follow_up") else "",
+            a.get("guardian_name") or "", a.get("guardian_email") or "",
+            a.get("guardian_phone") or "",
+            ", ".join(missing), "; ".join(flags),
+            a.get("status") or "", aid,
+        ]
+        rows.append(row)
+    return headers, rows
+
+
 @router.get("/athletes-export/csv")
 async def export_athletes(user=Depends(require_roles(*ADMIN_ROLES, "head_scout"))):
-    athletes = await db.athletes.find({"organization_id": user["organization_id"], "status": {"$ne": "merged"}}, {"_id": 0}).to_list(2000)
+    """Full roster export — identity, every measured reading, evaluation and
+    assessment state. Same content as the xlsx, for anything that wants CSV."""
+    headers, rows = await _export_rows(user["organization_id"])
     output = io.StringIO()
-    fields = ["id", "first_name", "last_name", "preferred_name", "date_of_birth", "age", "age_group", "graduation_year",
-              "primary_position", "secondary_positions", "bats", "throws", "height", "weight", "jersey_number",
-              "current_team", "school", "city", "state", "country", "guardian_name", "guardian_email", "guardian_phone", "status"]
     writer = csv.writer(output)
-    writer.writerow(fields)
-    for a in athletes:
-        row = []
-        for f in fields:
-            v = a.get(f)
-            if isinstance(v, list):
-                v = "; ".join(v)
-            row.append(v if v is not None else "")
-        writer.writerow(row)
-    await log_audit(user["organization_id"], user, "athletes_exported", "athlete", None)
+    writer.writerow(headers)
+    for r in rows:
+        writer.writerow(r)
+    await log_audit(user["organization_id"], user, "athletes_exported", "athlete", None,
+                    {"format": "csv", "rows": len(rows)})
     return Response(content=output.getvalue(), media_type="text/csv",
-                    headers={"Content-Disposition": "attachment; filename=606_players.csv"})
+                    headers={"Content-Disposition": "attachment; filename=606_athlete_master.csv"})
+
+
+@router.get("/athletes-export/xlsx")
+async def export_athletes_xlsx(user=Depends(require_roles(*ADMIN_ROLES, "head_scout"))):
+    """Coach-master-style workbook: one full sheet, plus a follow-up sheet
+    listing only the athletes with a data or profile gap to chase."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    org_doc = await db.organizations.find_one({"id": user["organization_id"]}, {"_id": 0, "name": 1})
+    headers, rows = await _export_rows(user["organization_id"])
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Athlete Master"
+    ws.append(headers)
+    for r in rows:
+        ws.append(r)
+
+    head_fill = PatternFill("solid", fgColor="0A0A0A")
+    head_font = Font(bold=True, color="FFFFFF", size=11)
+    for cell in ws[1]:
+        cell.fill = head_fill
+        cell.font = head_font
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ws.freeze_panes = "C2"
+    for i, h in enumerate(headers, start=1):
+        width = 26 if h == "Athlete" else 22 if "readings" in h.lower() or "Email" in h else 14
+        ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = width
+
+    # Follow-up sheet — only rows that need a human.
+    flag_i, missing_i = headers.index("Data Flag"), headers.index("Missing Profile Fields")
+    ws2 = wb.create_sheet("Profile Follow-Up")
+    keep = ["Athlete", "Grad Year", "Age Group", "Team", "Guardian Email",
+            "Missing Profile Fields", "Data Flag"]
+    ws2.append(keep)
+    idx = [headers.index(k) for k in keep]
+    for r in rows:
+        if r[flag_i] or r[missing_i]:
+            ws2.append([r[i] for i in idx])
+    for cell in ws2[1]:
+        cell.fill = head_fill
+        cell.font = head_font
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ws2.freeze_panes = "A2"
+    for i, h in enumerate(keep, start=1):
+        ws2.column_dimensions[ws2.cell(row=1, column=i).column_letter].width = 30 if "Missing" in h or "Flag" in h else 18
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    org_slug = (org_doc or {}).get("name", "606").replace(" ", "_")[:24]
+    await log_audit(user["organization_id"], user, "athletes_exported", "athlete", None,
+                    {"format": "xlsx", "rows": len(rows)})
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={org_slug}_Athlete_Master.xlsx"})
 
 
 # ---------------- Teams (derived from current_team — no schema change) ----------------
