@@ -730,17 +730,20 @@ export default function PlayersList() {
         </div>
       )}
 
-      <div className="rounded-2xl border border-border bg-card px-3 py-3 sm:px-6 sm:py-4" data-testid="players-snapshot">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:gap-x-6 sm:gap-y-4">
-          <div className="min-w-[104px]">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Class of</p>
+      {/* Class snapshot. A header line (class selector · count · report link)
+          over an even 4-up stat strip — the old flex-wrap ran the tiles and the
+          button into ragged rows on a phone. */}
+      <div className="rounded-2xl border border-border bg-card p-3 sm:p-4" data-testid="players-snapshot">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+          <div className="flex min-w-0 items-baseline gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Class of</span>
             <Select value={gradYear} onValueChange={setGradYear}>
               <SelectTrigger
                 className="h-auto w-auto gap-1.5 border-0 bg-transparent p-0 focus:ring-0 focus:ring-offset-0"
                 data-testid="players-gradyear-select"
               >
                 <SelectValue placeholder="Grad Year">
-                  <span className={cn("font-display text-3xl sm:text-4xl leading-none", gradYear === "all" ? "text-foreground" : "text-primary")}>
+                  <span className={cn("font-display text-2xl leading-none sm:text-3xl", gradYear === "all" ? "text-foreground" : "text-primary")}>
                     {gradYear === "all" ? "All" : gradYear}
                   </span>
                 </SelectValue>
@@ -754,54 +757,59 @@ export default function PlayersList() {
                 ))}
               </SelectContent>
             </Select>
-            <p className="mt-1 text-xs text-muted-foreground">{visible.length} athlete{visible.length === 1 ? "" : "s"}</p>
+            <span className="truncate text-xs text-muted-foreground">
+              {visible.length} athlete{visible.length === 1 ? "" : "s"}
+            </span>
           </div>
-          {snapshot && (
-            <>
-              <div className="hidden md:block w-px self-stretch bg-border" />
-              <SnapshotStat
-                icon={Users}
-                tint="bg-[hsl(var(--info)_/_0.15)] text-info"
-                label="Total Athletes"
-                value={snapshot.total}
-                testId="players-snapshot-total"
-              />
-              <SnapshotStat
-                icon={ClipboardCheck}
-                tint="bg-success/15 text-success"
-                label="Evaluated"
-                value={snapshot.evaluated}
-                sub={<span className="block font-mono-num text-[10px] font-semibold text-success">{pct(snapshot.evaluated, snapshot.total)}%</span>}
-                testId="players-snapshot-evaluated"
-              />
-              <SnapshotStat
-                icon={TrendingUp}
-                tint="bg-success/15 text-success"
-                label="Improving"
-                value={snapshot.improving}
-                sub={<span className="block font-mono-num text-[10px] font-semibold text-success">{pct(snapshot.improving, snapshot.total)}%</span>}
-                onClick={() => setQuickFilter(quickFilter === "improving" ? null : "improving")}
-                active={quickFilter === "improving"}
-                testId="players-snapshot-improving"
-              />
-              <SnapshotStat
-                icon={AlertTriangle}
-                tint="bg-warning/15 text-warning"
-                label="Need Follow-Up"
-                value={snapshot.follow_up}
-                sub={<span className="block font-mono-num text-[10px] font-semibold text-warning">{pct(snapshot.follow_up, snapshot.total)}%</span>}
-                onClick={() => setQuickFilter(quickFilter === "follow_up" ? null : "follow_up")}
-                active={quickFilter === "follow_up"}
-                testId="players-snapshot-follow-up"
-              />
-              <div className="ml-auto">
-                <Button variant="outline" className="rounded-xl h-9 px-3 text-xs sm:h-10 sm:px-4 sm:text-sm" onClick={() => navigate("/reports")} data-testid="players-view-class-report">
-                  <BarChart3 className="h-4 w-4 mr-1.5" /> <span className="hidden sm:inline">View Class Report</span><span className="sm:hidden">Class report</span>
-                </Button>
-              </div>
-            </>
-          )}
+          <button
+            type="button"
+            onClick={() => navigate("/reports")}
+            className="inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold text-primary hover:underline"
+            data-testid="players-view-class-report"
+          >
+            <BarChart3 className="h-3.5 w-3.5" /> Class report
+          </button>
         </div>
+
+        {snapshot && (
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <SnapshotStat
+              icon={Users}
+              tint="bg-[hsl(var(--info)_/_0.15)] text-info"
+              label="Total"
+              value={snapshot.total}
+              testId="players-snapshot-total"
+            />
+            <SnapshotStat
+              icon={ClipboardCheck}
+              tint="bg-success/15 text-success"
+              label="Evaluated"
+              value={snapshot.evaluated}
+              sub={<span className="block font-mono-num text-[10px] font-semibold text-success">{pct(snapshot.evaluated, snapshot.total)}%</span>}
+              testId="players-snapshot-evaluated"
+            />
+            <SnapshotStat
+              icon={TrendingUp}
+              tint="bg-success/15 text-success"
+              label="Improving"
+              value={snapshot.improving}
+              sub={<span className="block font-mono-num text-[10px] font-semibold text-success">{pct(snapshot.improving, snapshot.total)}%</span>}
+              onClick={() => setQuickFilter(quickFilter === "improving" ? null : "improving")}
+              active={quickFilter === "improving"}
+              testId="players-snapshot-improving"
+            />
+            <SnapshotStat
+              icon={AlertTriangle}
+              tint="bg-warning/15 text-warning"
+              label="Follow-Up"
+              value={snapshot.follow_up}
+              sub={<span className="block font-mono-num text-[10px] font-semibold text-warning">{pct(snapshot.follow_up, snapshot.total)}%</span>}
+              onClick={() => setQuickFilter(quickFilter === "follow_up" ? null : "follow_up")}
+              active={quickFilter === "follow_up"}
+              testId="players-snapshot-follow-up"
+            />
+          </div>
+        )}
       </div>
 
       {/* Control bar: Search | Position | Team | More Filters | View
