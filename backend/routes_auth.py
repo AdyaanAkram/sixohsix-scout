@@ -694,6 +694,59 @@ async def _clear_org_image(kind: str, user: dict) -> dict:
     return await _org_payload(org_id)
 
 
+class OrgCreateBody(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    full_name: str | None = None
+    contact_email: str | None = None
+    city: str | None = None
+    state: str | None = None
+
+
+@router.post("/organizations")
+async def create_organization(body: OrgCreateBody, user=Depends(require_roles("owner"))):
+    """Start a new organization. The caller becomes its owner and is switched
+    into it by the client afterwards.
+
+    Gated to existing owners: an org is a billing/data boundary, so a coach or
+    parent must never be able to spin one up. Everything else about the org
+    (logo, colors, join code) is edited afterwards through the normal
+    organization settings, so this stays a small, safe creation step.
+    """
+    name = _norm(body.name)
+    if not name:
+        raise HTTPException(status_code=422, detail="Organization name cannot be empty.")
+    email = _norm(body.contact_email)
+    if email:
+        email = email.lower()
+        if not _EMAIL_RE.match(email):
+            raise HTTPException(status_code=422, detail="contact_email must be a valid email address.")
+
+    from routes_signup import _org_join_code
+
+    org_id = new_id()
+    doc = {
+        "id": org_id,
+        "name": name,
+        "full_name": _norm(body.full_name),
+        "contact_email": email,
+        "city": _norm(body.city),
+        "state": _norm(body.state),
+        "feature_flags": {"athlete_portal": False, "parent_portal": False, "ai_features": False},
+        "created_by": user["id"],
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    await db.organizations.insert_one({**doc})
+    await db.memberships.insert_one({
+        "id": new_id(), "user_id": user["id"], "organization_id": org_id,
+        "role": "owner", "active": True,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    })
+    await _org_join_code(org_id)  # families need a join code from day one
+    await log_audit(org_id, user, "organization_created", "organization", org_id, {"name": name})
+    return await _org_payload(org_id)
+
+
 async def _serve_org_image(kind: str, user: dict):
     _, key_field = ORG_IMAGE_KINDS[kind]
     org = await db.organizations.find_one({"id": user["organization_id"]}, {"_id": 0})

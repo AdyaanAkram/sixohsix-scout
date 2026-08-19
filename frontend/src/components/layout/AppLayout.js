@@ -8,10 +8,14 @@ import {
   UserCog, FileSpreadsheet, Settings, LogOut, Home, ClipboardCheck,
   MoreHorizontal, ScrollText, IdCard, CalendarRange, Bell, Dumbbell,
   ChevronsUpDown, Building2, Check, Crosshair, Shield, Star, ArrowLeftRight, ShoppingBag,
+  Plus, SlidersHorizontal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -252,10 +256,77 @@ const OrgMark = ({ name, logoUrl, className }) => {
   );
 };
 
+/* Create a new organization. Module level ON PURPOSE — an inline component
+   would remount on every keystroke and the fields would lose focus. */
+const CreateOrgDialog = ({ open, onOpenChange, onCreated }) => {
+  const [form, setForm] = useState({ name: "", full_name: "", contact_email: "", city: "", state: "" });
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const r = await api.post("/organizations", {
+        name: form.name.trim(),
+        full_name: form.full_name.trim() || null,
+        contact_email: form.contact_email.trim() || null,
+        city: form.city.trim() || null,
+        state: form.state.trim() || null,
+      });
+      toast.success(`${form.name.trim()} created.`);
+      setForm({ name: "", full_name: "", contact_email: "", city: "", state: "" });
+      onOpenChange(false);
+      onCreated?.(r.data);
+    } catch (err) { toast.error(errMsg(err)); } finally { setBusy(false); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md rounded-2xl" data-testid="create-org-dialog">
+        <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">New organization</DialogTitle></DialogHeader>
+        <form onSubmit={submit} className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            You become its owner. Logo, colors and the family join code are set afterwards in Settings.
+          </p>
+          <div className="space-y-1">
+            <Label className="text-xs">Organization name *</Label>
+            <Input value={form.name} onChange={set("name")} className="h-10 rounded-lg" placeholder="606 Athletics South" data-testid="create-org-name" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Full legal name</Label>
+            <Input value={form.full_name} onChange={set("full_name")} className="h-10 rounded-lg" data-testid="create-org-full-name" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Contact email</Label>
+            <Input type="email" value={form.contact_email} onChange={set("contact_email")} className="h-10 rounded-lg" data-testid="create-org-email" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">City</Label>
+              <Input value={form.city} onChange={set("city")} className="h-10 rounded-lg" data-testid="create-org-city" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">State</Label>
+              <Input value={form.state} onChange={set("state")} className="h-10 rounded-lg" data-testid="create-org-state" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="submit" disabled={busy || !form.name.trim()} className="h-11 w-full rounded-xl bg-primary hover:bg-brand-secondary" data-testid="create-org-submit">
+              {busy ? "Creating…" : "Create organization"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 export const OrgSwitcher = ({ compact, large }) => {
   const { user, switchOrganization } = useAuth();
   const [orgs, setOrgs] = useState(user?.memberships || []);
   const [busy, setBusy] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
 
   useEffect(() => {
     api.get("/auth/memberships")
@@ -265,13 +336,16 @@ export const OrgSwitcher = ({ compact, large }) => {
 
   const multi = (orgs || []).length > 1;
   if (!user) return null;
+  // An owner always gets the menu — with one organization there would otherwise
+  // be no route to creating or managing another.
+  const canManageOrgs = user.role === "owner";
 
   // logo_url may arrive on the user payload or the current membership — render defensively.
   const current = (orgs || []).find((o) => o.organization_id === user.organization_id);
   const logoUrl = user.organization_logo_url || user.organization?.logo_url
     || current?.logo_url || current?.organization_logo_url || null;
 
-  if (!multi) {
+  if (!multi && !canManageOrgs) {
     return (
       <div className={cn("flex items-center gap-2.5 px-3 py-2 rounded-xl bg-secondary/60 border border-border", compact && "py-1.5", large && "px-4 py-3 gap-3")}>
         <OrgMark name={user.organization_name} logoUrl={logoUrl} />
@@ -341,7 +415,33 @@ export const OrgSwitcher = ({ compact, large }) => {
             </div>
           </DropdownMenuItem>
         ))}
+        {canManageOrgs && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => setCreateOpen(true)}
+              className="flex items-center gap-2 cursor-pointer"
+              data-testid="org-create-item"
+            >
+              <Plus className="h-4 w-4 text-brand" />
+              <span className="font-semibold">New organization</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild className="cursor-pointer" data-testid="org-manage-item">
+              <NavLink to="/settings" className="flex items-center gap-2">
+                <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+                <span>Edit this organization</span>
+              </NavLink>
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
+      {canManageOrgs && (
+        <CreateOrgDialog
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          onCreated={(org) => { if (org?.id) onSwitch(org.id); }}
+        />
+      )}
     </DropdownMenu>
   );
 };
