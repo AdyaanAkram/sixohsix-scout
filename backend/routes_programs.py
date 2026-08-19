@@ -335,25 +335,131 @@ async def enroll_athlete(program_id: str, body: EnrollBody, user=Depends(require
         "updated_at": now_iso(),
     }
     await db.enrollments.insert_one(doc)
+    added_to = await _sync_athlete_to_session_events(program_id, body.athlete_id, _org(user))
     await log_audit(_org(user), user, "enrollment_created", "enrollment", doc["id"],
-                    {"program_id": program_id, "athlete_id": body.athlete_id})
+                    {"program_id": program_id, "athlete_id": body.athlete_id,
+                     "session_events_updated": added_to})
     return clean(doc)
+
+
+async def _sync_athlete_to_session_events(program_id: str, athlete_id: str, org: str) -> int:
+    """Put a newly enrolled athlete on the roster of every session event that
+    already exists, so enrolling after an event was created still reaches the
+    session. Never duplicates an existing roster link."""
+    added = 0
+    for event_id in await _session_event_ids(program_id, org):
+        exists = await db.event_athletes.find_one(
+            {"event_id": event_id, "athlete_id": athlete_id, "organization_id": org},
+            {"_id": 0, "id": 1})
+        if exists:
+            continue
+        await db.event_athletes.insert_one({
+            "id": new_id(), "organization_id": org,
+            "event_id": event_id, "athlete_id": athlete_id, "status": "registered",
+            "bib_number": None, "group_id": None, "late_arrival": False,
+            "flagged_incomplete": False, "walk_up": False,
+            "created_at": now_iso(), "updated_at": now_iso(),
+        })
+        added += 1
+    return added
+
+
+async def _session_event_ids(program_id: str, org: str) -> list[str]:
+    """Event ids for every session of this program that has one."""
+    rows = await db.sessions.find(
+        {"program_id": program_id, "organization_id": org, "event_id": {"$ne": None}},
+        {"_id": 0, "event_id": 1}).to_list(200)
+    return [r["event_id"] for r in rows if r.get("event_id")]
+
+
+@router.get("/sessions/{session_id}/roster")
+async def session_roster(session_id: str, user=Depends(require_roles(*STAFF_ROLES))):
+    """Who is expected at THIS session.
+
+    A session with a linked event follows that event's roster — the event is
+    where a coach adds walk-ups and removes no-shows for the day, so attendance
+    must reflect it. Without an event, it falls back to the program's active
+    enrollments. Check-in on the event pre-fills the attendance state so the two
+    surfaces can never disagree.
+    """
+    org = _org(user)
+    session = await db.sessions.find_one({"id": session_id, "organization_id": org}, {"_id": 0})
+    if not session:
+        raise HTTPException(404, detail="Session not found.")
+
+    source = "program"
+    checked_in: dict[str, bool] = {}
+    if session.get("event_id"):
+        ev = await db.events.find_one(
+            {"id": session["event_id"], "organization_id": org}, {"_id": 0, "id": 1})
+        if ev:
+            source = "event"
+            links = await db.event_athletes.find(
+                {"event_id": ev["id"], "organization_id": org}, {"_id": 0}).to_list(2000)
+            athlete_ids = [l["athlete_id"] for l in links]
+            checked_in = {l["athlete_id"]: l.get("status") == "checked_in" for l in links}
+    if source == "program":
+        rows = await db.enrollments.find(
+            {"program_id": session["program_id"], "organization_id": org,
+             "status": {"$nin": ["withdrawn"]}}, {"_id": 0, "athlete_id": 1}).to_list(2000)
+        athlete_ids = [r["athlete_id"] for r in rows]
+
+    athletes = await db.athletes.find(
+        {"id": {"$in": athlete_ids}, "organization_id": org},
+        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "photo_url": 1,
+         "age_group": 1, "primary_position": 1},
+    ).to_list(2000)
+    amap = {a["id"]: a for a in athletes}
+
+    marked = await db.attendance.find(
+        {"session_id": session_id, "organization_id": org}, {"_id": 0}).to_list(2000)
+    status_by_athlete = {m["athlete_id"]: m.get("status") for m in marked}
+
+    out = []
+    for aid in athlete_ids:
+        a = amap.get(aid)
+        if not a:
+            continue  # athlete deleted from the org — never fabricate a row
+        out.append({
+            "athlete_id": aid, "athlete": a,
+            "attendance": status_by_athlete.get(aid),
+            "checked_in": checked_in.get(aid, False),
+        })
+    out.sort(key=lambda r: ((r["athlete"].get("last_name") or ""), (r["athlete"].get("first_name") or "")))
+    return {"source": source, "event_id": session.get("event_id"), "athletes": out}
 
 
 @router.delete("/{program_id}/enrollments/{athlete_id}")
 async def withdraw_enrollment(program_id: str, athlete_id: str,
                               user=Depends(require_roles(*ADMIN_ROLES, *COACH_ROLES))):
     """Remove an athlete from the program. Soft: the enrollment flips to
-    withdrawn so attendance history survives; re-enrolling revives it."""
+    withdrawn so attendance history survives; re-enrolling revives it.
+
+    Also drops them from the rosters of this program's session events, so a
+    removal doesn't leave them queued for the sessions themselves. Sessions
+    where they already have evaluation work are left alone — that is real data,
+    not a roster convenience.
+    """
+    org = _org(user)
     res = await db.enrollments.update_one(
         {"program_id": program_id, "athlete_id": athlete_id,
-         "organization_id": _org(user), "status": {"$ne": "withdrawn"}},
+         "organization_id": org, "status": {"$ne": "withdrawn"}},
         {"$set": {"status": "withdrawn", "updated_at": now_iso()}})
     if res.matched_count == 0:
         raise HTTPException(404, detail="Enrollment not found.")
-    await log_audit(_org(user), user, "enrollment_withdrawn", "enrollment", athlete_id,
-                    {"program_id": program_id, "athlete_id": athlete_id})
-    return {"message": "Athlete removed from the program."}
+    removed_from = 0
+    for event_id in await _session_event_ids(program_id, org):
+        has_work = await db.evaluations.count_documents({
+            "event_id": event_id, "athlete_id": athlete_id, "organization_id": org})
+        if has_work:
+            continue
+        r = await db.event_athletes.delete_one(
+            {"event_id": event_id, "athlete_id": athlete_id, "organization_id": org})
+        removed_from += r.deleted_count
+    await log_audit(org, user, "enrollment_withdrawn", "enrollment", athlete_id,
+                    {"program_id": program_id, "athlete_id": athlete_id,
+                     "session_events_updated": removed_from})
+    return {"message": "Athlete removed from the program.", "session_events_updated": removed_from}
 
 
 @router.post("/sessions/{session_id}/attendance")
