@@ -397,7 +397,6 @@ async def athletes_overview(
 # NOTE: current_team is deliberately NOT here — teams are assigned by staff,
 # so asking a family to fill it in would be asking for the wrong thing.
 PROFILE_FIELDS = [
-    ("photo_url", "a profile photo"),
     ("height", "height"),
     ("weight", "weight"),
     ("graduation_year", "graduation year"),

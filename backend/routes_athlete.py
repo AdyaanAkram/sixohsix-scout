@@ -240,8 +240,29 @@ async def me_athlete(athlete_id: str | None = None, user=Depends(get_current_use
 
 
 class MeAthletePatch(BaseModel):
+    """Fields a family may maintain themselves.
+
+    This model must stay in step with ATHLETE_PATCH_WHITELIST above. It only
+    declared bio/public_enabled while the whitelist already allowed the rest,
+    so extra="forbid" silently 422'd every other field — a parent could not
+    save their own child's height or weight even though that was the intent.
+    Photos stay org-only (Coach G): they are captured by staff at evaluations.
+    """
     bio: str | None = Field(default=None, max_length=500)
     public_enabled: bool | None = None
+    height: str | None = Field(default=None, max_length=20)
+    weight: str | None = Field(default=None, max_length=20)
+    current_team: str | None = Field(default=None, max_length=120)
+    school: str | None = Field(default=None, max_length=120)
+    city: str | None = Field(default=None, max_length=80)
+    state: str | None = Field(default=None, max_length=40)
+    phone: str | None = Field(default=None, max_length=40)
+    email: str | None = Field(default=None, max_length=200)
+    years_playing: int | None = Field(default=None, ge=0, le=30)
+    primary_position: str | None = Field(default=None, max_length=10)
+    secondary_positions: list[str] | None = None
+    bats: str | None = Field(default=None, max_length=1)
+    throws: str | None = Field(default=None, max_length=1)
 
     class Config:
         extra = "forbid"

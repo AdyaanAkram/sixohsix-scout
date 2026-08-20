@@ -450,9 +450,12 @@ def _family_emails(athlete: dict) -> list[str]:
     return out
 
 
+# Only asks for what a FAMILY can actually change. Photos are captured by staff
+# at evaluations (org-only by design), so naming one here would send parents to
+# a control they are not permitted to use.
 PROFILE_NOTE = (
-    "While you are signed in, please take a minute to finish their profile — a photo, "
-    "height and weight help coaches see the full picture at the next camp."
+    "While you are signed in, please take a minute to top up their profile — height, "
+    "weight and positions help coaches see the full picture at the next camp."
 )
 
 

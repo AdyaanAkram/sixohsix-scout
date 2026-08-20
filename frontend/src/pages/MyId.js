@@ -645,7 +645,7 @@ export default function MyId() {
                     </span>
                   )}
                   <Button asChild className="h-11 rounded-xl bg-primary hover:bg-brand-secondary">
-                    <Link to="/my-id/edit" data-testid="my-id-edit-link"><Pencil className="mr-1.5 h-4 w-4" /> Edit</Link>
+                    <Link to={selectedId ? `/my-id/edit?athlete_id=${selectedId}` : "/my-id/edit"} data-testid="my-id-edit-link"><Pencil className="mr-1.5 h-4 w-4" /> Edit</Link>
                   </Button>
                 </div>
               </div>
@@ -1187,7 +1187,7 @@ export default function MyId() {
               </ul>
               {completion.missing.length > 0 && (
                 <Button asChild variant="outline" className="w-full rounded-xl border-brand text-brand">
-                  <Link to="/my-id/edit">Add the missing bits</Link>
+                  <Link to={selectedId ? `/my-id/edit?athlete_id=${selectedId}` : "/my-id/edit"}>Add the missing bits</Link>
                 </Button>
               )}
             </CardContent>
