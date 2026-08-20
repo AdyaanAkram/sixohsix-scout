@@ -509,10 +509,16 @@ export default function MyId() {
   const change = devBase != null ? Math.round((devLatest - devBase) * 10) / 10 : null;
   const devPct = change != null && devBase > 0 ? Math.round((change / devBase) * 100) : null;
   const devWindowLabel = devIsSeason ? "this season" : "since your first evaluation";
+  // The headline used to look ONLY at scored evaluations, so an athlete with a
+  // published assessment and measured results on file was still told "first
+  // evaluation coming up" — directly contradicting the assessment card below it.
+  const hasResults = evals.length > 0 || assessments.length > 0;
   const devHeadline = change == null
     ? (scored.length === 1
         ? "Baseline set — your development trend starts with your next evaluation."
-        : "First evaluation coming up — that's where your development story starts.")
+        : hasResults
+          ? "First results are in — your development trend builds from the next camp."
+          : "First evaluation coming up — that's where your development story starts.")
     : `${devPct != null ? `${devPct > 0 ? "+" : ""}${devPct}%` : `${change > 0 ? "+" : ""}${change}`} development ${devWindowLabel}`;
 
   // Top 3 priorities — active coach goals, worst status first, nearest target
