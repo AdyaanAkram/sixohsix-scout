@@ -35,6 +35,24 @@ import {
 // the current value in the status control, but only canonical ones can be set.
 const EVENT_STATUSES = ["Draft", "Setup", "Ready", "Evaluation Active", "Evaluation Complete", "Review", "Published", "Closed"];
 
+// The header used to hand the event-runner all eight statuses and expect them to
+// know the order — picking the wrong one just 409'd. The backend now derives the
+// one sensible next step, and these turn that status into the verb for the button.
+const NEXT_STEP_LABELS = {
+  "Draft": "Back to draft",
+  "Setup": "Start setup",
+  "Ready": "Mark ready",
+  "Evaluation Active": "Start evaluating",
+  "Evaluation Complete": "Close scoring",
+  "Review": "Send to review",
+  "Published": "Publish results",
+  "Closed": "Close event",
+};
+const nextStepLabel = (status) => NEXT_STEP_LABELS[status] || `Set ${status}`;
+
+// Each readiness check maps to the tab that fixes it.
+const CHECK_TAB = { roster: "roster", stations: "stations", evaluators: "evaluators" };
+
 // ---------------- Roster CSV import wizard ----------------
 const IMPORT_STATUS_META = {
   matched: { label: "Matched", cls: "bg-success/15 text-success border-success/30" },
@@ -2436,12 +2454,31 @@ export default function EventDetail() {
   }, [eventId, navigate]);
   useEffect(() => { load(); }, [load]);
 
+  // What this event actually needs next, derived server-side from its real state.
+  // Optional by design: if the endpoint is missing or errors we keep `suggestion`
+  // null and the header falls back to exactly the old manual-status behaviour.
+  const [suggestion, setSuggestion] = useState(null);
+  const [statusBusy, setStatusBusy] = useState(false);
+  const loadSuggestion = useCallback(() => {
+    if (!isAdmin) return;
+    api.get(`/events/${eventId}/status-suggestion`)
+      .then((r) => setSuggestion(r.data))
+      .catch(() => setSuggestion(null));
+  }, [eventId, isAdmin]);
+  // Re-checked on mount and whenever the runner comes back from a tab where they
+  // could have fixed a blocker (roster/stations/evaluators all live behind ?tab=).
+  const tabParam = params.get("tab") || "";
+  useEffect(() => { loadSuggestion(); }, [loadSuggestion, tabParam]);
+
   const setStatus = async (status) => {
+    setStatusBusy(true);
     try {
       await api.post(`/events/${eventId}/status`, { status });
       toast.success(`Event status: ${status}`);
       load();
+      loadSuggestion();
     } catch (e) { toast.error(errMsg(e)); }
+    finally { setStatusBusy(false); }
   };
 
   if (!event) return <div className="space-y-3"><Skeleton className="h-24 rounded-2xl" /><Skeleton className="h-64 rounded-2xl" /></div>;
@@ -2489,21 +2526,84 @@ export default function EventDetail() {
               {event.location && <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" /> {event.location}</span>}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            {/* the select already shows the status for admins — one source on phones */}
-            <span className={isAdmin ? "hidden sm:inline-flex" : ""}>
+          {/* Status: the pill is the single source of truth, the primary button is
+              the one step this event actually needs, and the manual list of all
+              eight statuses stays one tap away behind "Change status". */}
+          <div className="flex flex-col items-start gap-2 sm:items-end">
+            <div className="flex flex-wrap items-center gap-2">
               <StatusBadge status={event.status} testId="event-status-badge" />
-            </span>
-            {isAdmin && (
-              <Select value={event.status} onValueChange={setStatus}>
-                <SelectTrigger className="h-10 w-[190px] rounded-xl bg-card" data-testid="event-status-select"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {!EVENT_STATUSES.includes(event.status) && (
-                    <SelectItem value={event.status}>{event.status}</SelectItem>
-                  )}
-                  {EVENT_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              {isAdmin && suggestion?.suggested && (
+                <Button
+                  className="h-10 rounded-xl bg-primary font-semibold"
+                  disabled={statusBusy}
+                  title={suggestion.reason || ""}
+                  onClick={() => setStatus(suggestion.suggested)}
+                  data-testid="event-next-step-button"
+                >
+                  {nextStepLabel(suggestion.suggested)}
+                  <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              )}
+              {isAdmin && (
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="h-10 rounded-xl bg-card text-xs font-semibold"
+                      disabled={statusBusy}
+                      data-testid="event-status-select"
+                    >
+                      Change status <ChevronDown className="h-3.5 w-3.5 ml-1" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-60 rounded-xl p-1">
+                    <p className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Set status manually
+                    </p>
+                    {(EVENT_STATUSES.includes(event.status) ? EVENT_STATUSES : [event.status, ...EVENT_STATUSES]).map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setStatus(s)}
+                        className={cn(
+                          "flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-secondary",
+                          s === event.status ? "font-semibold text-foreground" : "text-muted-foreground"
+                        )}
+                        data-testid={`event-status-option-${s}`}
+                      >
+                        {s}
+                        {s === event.status && <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" />}
+                      </button>
+                    ))}
+                  </PopoverContent>
+                </Popover>
+              )}
+            </div>
+            {isAdmin && !suggestion?.suggested && (suggestion?.blocked_by || []).length > 0 && (
+              <div
+                className="w-full rounded-xl border border-warning/40 bg-warning/10 px-3 py-2 sm:w-auto"
+                data-testid="event-status-blockers"
+              >
+                <p className="flex items-center gap-1.5 text-xs font-semibold text-warning">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {suggestion.reason}
+                </p>
+                <div className="mt-1.5 flex flex-wrap gap-1.5 sm:justify-end">
+                  {(suggestion.checks || []).filter((c) => !c.ok).map((c) => (
+                    <button
+                      key={c.key}
+                      type="button"
+                      onClick={() => setParams({ tab: CHECK_TAB[c.key] || "overview" })}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-warning/40 bg-card px-2.5 py-1 text-[11px] font-semibold text-foreground transition-colors hover:border-brand"
+                      data-testid={`event-status-blocker-${c.key}`}
+                    >
+                      <Circle className="h-3 w-3 shrink-0 text-warning" />
+                      {c.label}
+                      <span className="font-mono-num text-muted-foreground">{c.count ?? 0}</span>
+                      <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         </div>
