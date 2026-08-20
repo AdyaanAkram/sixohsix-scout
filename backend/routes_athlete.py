@@ -370,14 +370,26 @@ async def me_evaluations(athlete_id: str | None = None, user=Depends(get_current
         "athlete_id": a["id"], "organization_id": org,
         "status": {"$in": ["submitted", "approved"]},
     }, {"_id": 0}).sort("submitted_at", -1).to_list(200)
+    # Two lookups per evaluation puts a family's own history behind a round-trip
+    # per row; resolve the stations and events these evaluations name just once.
+    station_ids = {ev.get("station_id") for ev in evals if ev.get("station_id")}
+    event_ids = {ev.get("event_id") for ev in evals if ev.get("event_id")}
+    stations = {
+        st["id"]: st
+        for st in await db.stations.find(
+            {"id": {"$in": list(station_ids)}, "organization_id": org},
+            {"_id": 0, "id": 1, "name": 1}).to_list(len(station_ids) or 1)
+    }
+    events = {
+        e["id"]: e
+        for e in await db.events.find(
+            {"id": {"$in": list(event_ids)}, "organization_id": org},
+            {"_id": 0, "id": 1, "name": 1, "date": 1}).to_list(len(event_ids) or 1)
+    }
     out = []
     for ev in evals:
-        station = await db.stations.find_one(
-            {"id": ev.get("station_id"), "organization_id": org},
-            {"_id": 0, "name": 1})
-        event = await db.events.find_one(
-            {"id": ev.get("event_id"), "organization_id": org},
-            {"_id": 0, "name": 1, "date": 1})
+        station = stations.get(ev.get("station_id"))
+        event = events.get(ev.get("event_id"))
         out.append({
             **{k: ev.get(k) for k in ("id", "status", "submitted_at", "computed", "resolved_position",
                                       "template_id", "next_evaluation_date", "recommendation")},

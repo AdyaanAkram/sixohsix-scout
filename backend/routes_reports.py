@@ -87,9 +87,28 @@ async def _leaderboard_data(org_id, event_id=None, age_group=None, position=None
     by_athlete = defaultdict(list)
     for ev in evals:
         by_athlete[ev["athlete_id"]].append(ev)
+    # One athlete lookup per evaluated athlete, plus one roster lookup each when
+    # filtering by group, is a round-trip per row before a single score is read.
+    ids = list(by_athlete)
+    athletes = {
+        a["id"]: a
+        for a in await db.athletes.find(
+            {"id": {"$in": ids}, "organization_id": org_id},
+            {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "age_group": 1,
+             "primary_position": 1, "current_team": 1, "photo_url": 1}).to_list(len(ids) or 1)
+    }
+    entry_group = {}
+    if group_id and event_id:
+        entry_group = {
+            e["athlete_id"]: e.get("group_id")
+            for e in await db.event_athletes.find(
+                {"event_id": event_id, "athlete_id": {"$in": ids}},
+                {"_id": 0, "athlete_id": 1, "group_id": 1}).to_list(len(ids) or 1)
+        }
+
     rows = []
     for aid, evs in by_athlete.items():
-        athlete = await db.athletes.find_one({"id": aid, "organization_id": org_id}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "age_group": 1, "primary_position": 1, "current_team": 1, "photo_url": 1})
+        athlete = athletes.get(aid)
         if not athlete:
             continue
         if age_group and athlete.get("age_group") != age_group:
@@ -97,8 +116,8 @@ async def _leaderboard_data(org_id, event_id=None, age_group=None, position=None
         if position and athlete.get("primary_position") != position:
             continue
         if group_id and event_id:
-            entry = await db.event_athletes.find_one({"event_id": event_id, "athlete_id": aid})
-            if not entry or entry.get("group_id") != group_id:
+            # Absent from the roster is still a miss, exactly as before.
+            if entry_group.get(aid) != group_id:
                 continue
         agg = aggregate_player_scores(evs)
         score = agg["overall_score"]
@@ -247,9 +266,29 @@ async def event_completion(event_id: str, user=Depends(require_roles(*REVIEW_ROL
     # event's configured display_order (name breaks ties).
     from routes_events import module_state_of, station_sort_key
     stations.sort(key=station_sort_key)
+    # One athlete lookup and two evaluation lookups per roster-entry-per-station
+    # is roster x stations x 2 round-trips — 50 athletes across 20 stations was
+    # ~2,050 sequential queries and over 30s. Resolve both up front instead.
+    athlete_ids = [e["athlete_id"] for e in roster if e.get("athlete_id")]
+    athletes = {
+        a["id"]: a
+        for a in await db.athletes.find(
+            {"id": {"$in": athlete_ids}, "organization_id": user["organization_id"]},
+            {"_id": 0, "first_name": 1, "last_name": 1, "age_group": 1,
+             "primary_position": 1, "id": 1}).to_list(len(athlete_ids) or 1)
+    }
+    # (station_id, athlete_id) -> whether it is finished or merely started.
+    finished, started = set(), set()
+    async for ev in db.evaluations.find(
+        {"event_id": event_id, "status": {"$in": ["submitted", "approved", "draft"]}},
+        {"_id": 0, "station_id": 1, "athlete_id": 1, "status": 1},
+    ):
+        key = (ev.get("station_id"), ev.get("athlete_id"))
+        (finished if ev["status"] in ("submitted", "approved") else started).add(key)
+
     rows = []
     for entry in roster:
-        athlete = await db.athletes.find_one({"id": entry["athlete_id"], "organization_id": user["organization_id"]}, {"_id": 0, "first_name": 1, "last_name": 1, "age_group": 1, "primary_position": 1, "id": 1})
+        athlete = athletes.get(entry["athlete_id"])
         if not athlete:
             continue
         station_status = {}
@@ -263,12 +302,13 @@ async def event_completion(event_id: str, user=Depends(require_roles(*REVIEW_ROL
             if module_state_of(s) == "not_offered":
                 station_status[s["name"]] = "not_offered"
                 continue
-            ev = await db.evaluations.find_one({"event_id": event_id, "station_id": s["id"], "athlete_id": entry["athlete_id"], "status": {"$in": ["submitted", "approved"]}})
-            if ev:
+            key = (s["id"], entry["athlete_id"])
+            if key in finished:
                 station_status[s["name"]] = "complete"
             else:
-                draft = await db.evaluations.find_one({"event_id": event_id, "station_id": s["id"], "athlete_id": entry["athlete_id"], "status": "draft"})
-                station_status[s["name"]] = "draft" if draft else "missing"
+                # Unchanged from the per-row version: a draft still counts as
+                # outstanding work, so it lands in `missing` alongside a no-show.
+                station_status[s["name"]] = "draft" if key in started else "missing"
                 missing.append(s["name"])
         rows.append({"athlete": athlete, "bib_number": entry.get("bib_number"),
                      "check_in_status": entry.get("status"), "stations": station_status,

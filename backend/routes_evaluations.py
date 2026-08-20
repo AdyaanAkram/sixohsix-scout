@@ -1240,13 +1240,30 @@ async def my_evaluations(user=Depends(require_roles(*STAFF_ROLES))):
     templates = await db.evaluation_templates.find(
         {"organization_id": org}, {"_id": 0, "id": 1, "metrics": 1}).to_list(200)
     tmap = {t["id"]: t for t in templates}
+    # Same shape the review queue had: two round-trips per evaluation. An
+    # evaluator with 200 rows paid 400 sequential lookups to list their own work.
+    athlete_ids = {ev["athlete_id"] for ev in evals if ev.get("athlete_id")}
+    station_ids = {ev["station_id"] for ev in evals if ev.get("station_id")}
+    athletes = {
+        a["id"]: a
+        for a in await db.athletes.find(
+            {"id": {"$in": list(athlete_ids)}, "organization_id": org},
+            {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "age_group": 1,
+             "photo_url": 1, "primary_position": 1}).to_list(len(athlete_ids) or 1)
+    }
+    stations = {
+        st["id"]: st
+        for st in await db.stations.find(
+            {"id": {"$in": list(station_ids)}, "organization_id": org},
+            {"_id": 0, "id": 1, "name": 1}).to_list(len(station_ids) or 1)
+    }
     out = []
     for ev in evals:
-        athlete = await db.athletes.find_one(
-            {"id": ev["athlete_id"], "organization_id": org},
-            {"_id": 0, "first_name": 1, "last_name": 1, "age_group": 1, "photo_url": 1, "primary_position": 1})
-        station = await db.stations.find_one(
-            {"id": ev["station_id"], "organization_id": org}, {"_id": 0, "name": 1})
+        # Keep the echoed athlete blob shaped exactly as the old projection —
+        # it carried no "id" key, so strip the one the batch query needs.
+        a = athletes.get(ev.get("athlete_id"))
+        athlete = {k: v for k, v in a.items() if k != "id"} if a else None
+        station = stations.get(ev.get("station_id"))
         flags = evaluation_metric_flags(tmap.get(ev.get("template_id")) or {}, ev.get("scores") or {})
         out.append({**ev, "athlete": athlete, "station_name": (station or {}).get("name"),
                     "recommendation": ev.get("recommendation"),
