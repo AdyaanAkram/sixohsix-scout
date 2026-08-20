@@ -1261,15 +1261,38 @@ async def review_queue(event_id: str | None = None, user=Depends(require_roles(*
     templates = await db.evaluation_templates.find(
         {"organization_id": org}, {"_id": 0, "id": 1, "metrics": 1}).to_list(200)
     tmap = {t["id"]: t for t in templates}
+    # Three find_one calls per evaluation is 225 sequential round-trips on a
+    # 75-row queue — about 14s against Atlas. Resolve each collection once.
+    athlete_ids = {ev["athlete_id"] for ev in evals if ev.get("athlete_id")}
+    station_ids = {ev["station_id"] for ev in evals if ev.get("station_id")}
+    event_ids = {ev["event_id"] for ev in evals if ev.get("event_id")}
+    athletes = {
+        a["id"]: a
+        for a in await db.athletes.find(
+            {"id": {"$in": list(athlete_ids)}, "organization_id": org},
+            {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "age_group": 1,
+             "primary_position": 1, "photo_url": 1}).to_list(len(athlete_ids) or 1)
+    }
+    stations = {
+        st["id"]: st
+        for st in await db.stations.find(
+            {"id": {"$in": list(station_ids)}, "organization_id": org},
+            {"_id": 0, "id": 1, "name": 1}).to_list(len(station_ids) or 1)
+    }
+    events_by_id = {
+        e["id"]: e
+        for e in await db.events.find(
+            {"id": {"$in": list(event_ids)}, "organization_id": org},
+            {"_id": 0, "id": 1, "name": 1}).to_list(len(event_ids) or 1)
+    }
     out = []
     for ev in evals:
-        athlete = await db.athletes.find_one(
-            {"id": ev["athlete_id"], "organization_id": org},
-            {"_id": 0, "first_name": 1, "last_name": 1, "age_group": 1, "primary_position": 1, "photo_url": 1})
-        station = await db.stations.find_one(
-            {"id": ev["station_id"], "organization_id": org}, {"_id": 0, "name": 1})
-        event = await db.events.find_one(
-            {"id": ev["event_id"], "organization_id": org}, {"_id": 0, "name": 1})
+        # The athlete blob is echoed to the client, so keep the joined-in shape
+        # identical to the old find_one projection: no "id" key leaking through.
+        a = athletes.get(ev.get("athlete_id"))
+        athlete = {k: v for k, v in a.items() if k != "id"} if a else None
+        station = stations.get(ev.get("station_id"))
+        event = events_by_id.get(ev.get("event_id"))
         flags = evaluation_metric_flags(tmap.get(ev.get("template_id")) or {}, ev.get("scores") or {})
         out.append({**ev, "athlete": athlete, "station_name": (station or {}).get("name"),
                     "event_name": (event or {}).get("name"),
