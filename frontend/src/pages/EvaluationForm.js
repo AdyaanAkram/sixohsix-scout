@@ -9,10 +9,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { PlayerAvatar } from "@/components/common/PlayerAvatar";
 import { SaveStatusPill } from "@/components/common/SaveStatusPill";
-import { StatusBadge } from "@/components/common/StatusBadge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, Camera, CheckCircle2, Lock, MessageSquarePlus, Send, CloudUpload, RotateCcw, Upload } from "lucide-react";
+import {
+  ArrowLeft, Camera, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight,
+  CloudUpload, Lock, MessageSquarePlus, RotateCcw, Send, Upload, X,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   POSITIONS, loadStationTemplates, resolveTemplateLocal, saveStationTemplates,
@@ -113,10 +115,18 @@ const EVAL_STATES = [
 // Effective state of an entry — legacy drafts carry only `not_observed: true`.
 const entryState = (entry) => entry?.state || (entry?.not_observed ? "not_observed" : null);
 
+// Short chip copy for a metric that carries a state instead of a value.
+const EVAL_STATE_LABELS = Object.fromEntries(EVAL_STATES.map(({ key, label }) => [key, label]));
+
+// Section eyebrow — the app-wide tiny uppercase label (see ReviewQueue).
+const PanelLabel = ({ children, className }) => (
+  <p className={cn("text-[10px] font-semibold uppercase tracking-widest text-muted-foreground", className)}>{children}</p>
+);
+
 const StateControlRow = ({ metricKey, entry, onSelect }) => {
   const active = entryState(entry);
   return (
-    <div className="grid grid-cols-4 gap-1.5 mt-2" data-testid={`state-row-${metricKey}`}>
+    <div className="grid grid-cols-4 gap-1.5 mt-3" data-testid={`state-row-${metricKey}`}>
       {EVAL_STATES.map(({ key, label, full }) => {
         const selected = active === key;
         return (
@@ -128,7 +138,7 @@ const StateControlRow = ({ metricKey, entry, onSelect }) => {
             onClick={() => onSelect(selected ? null : key)}
             data-testid={key === "not_observed" ? `not-observed-${metricKey}` : `state-${key}-${metricKey}`}
             className={cn(
-              "flex flex-col items-center justify-center text-center rounded-xl border min-h-[44px] px-1 py-1 leading-tight transition active:scale-[0.97]",
+              "flex min-w-0 flex-col items-center justify-center rounded-xl border px-1 py-1.5 text-center leading-tight transition min-h-[52px] active:scale-[0.97]",
               selected
                 ? key === "retest"
                   ? "bg-warning/15 text-warning border-warning/40"
@@ -152,52 +162,32 @@ const RatingControl = ({ metric, entry, onChange }) => {
   const values = Array.from({ length: scale }, (_, i) => i + 1);
   return (
     <div>
-      {scale === 10 ? (
-        <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-0.5 px-0.5 snap-x">
-          {values.map((v) => (
-            <button
-              key={v}
-              type="button"
-              disabled={muted}
-              onClick={() => onChange({ ...entry, value: entry?.value === v ? null : v, not_observed: false, state: null })}
-              data-testid={`rating-${metric.key || metric.id}-toggle-${v}`}
-              className={cn(
-                "h-14 min-w-[44px] shrink-0 snap-start rounded-xl border text-lg font-bold transition-all duration-150 active:scale-[0.96]",
-                value === v
-                  ? "bg-primary text-white border-transparent"
-                  : "bg-card text-foreground border-border hover:bg-secondary",
-                muted && "opacity-40"
-              )}
-            >
-              {v}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="grid grid-cols-5 gap-1.5">
-          {values.map((v) => (
-            <button
-              key={v}
-              type="button"
-              disabled={muted}
-              onClick={() => onChange({ ...entry, value: entry?.value === v ? null : v, not_observed: false, state: null })}
-              data-testid={`rating-${metric.key || metric.id}-toggle-${v}`}
-              className={cn(
-                "h-14 rounded-xl border text-lg font-bold transition-all duration-150 active:scale-[0.96]",
-                value === v
-                  ? "bg-primary text-white border-transparent"
-                  : "bg-card text-foreground border-border hover:bg-secondary",
-                muted && "opacity-40"
-              )}
-            >
-              {v}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Five across at every scale — a 10-point set wraps to a second row rather
+          than a horizontal scroller, so no option hides off the edge of a phone. */}
+      <div className="grid grid-cols-5 gap-2">
+        {values.map((v) => (
+          <button
+            key={v}
+            type="button"
+            disabled={muted}
+            aria-pressed={value === v}
+            onClick={() => onChange({ ...entry, value: entry?.value === v ? null : v, not_observed: false, state: null })}
+            data-testid={`rating-${metric.key || metric.id}-toggle-${v}`}
+            className={cn(
+              "h-16 rounded-xl border text-xl font-bold transition-all duration-150 active:scale-[0.96]",
+              value === v
+                ? "bg-primary text-white border-transparent"
+                : "bg-card text-foreground border-border hover:bg-secondary",
+              muted && "opacity-40"
+            )}
+          >
+            {v}
+          </button>
+        ))}
+      </div>
       {/* Templates may carry an age-appropriate legend (e.g. developmental wording
           for the 8–12 model); the recruiting-style default only applies without one. */}
-      <p className="text-[11px] text-muted-foreground mt-1.5">
+      <p className="mt-2 text-[11px] text-muted-foreground">
         {metric.scale_legend || `1 = Needs work · ${Math.ceil(scale / 2)} = Average · ${scale} = Elite`}
       </p>
       <StateControlRow
@@ -211,43 +201,50 @@ const RatingControl = ({ metric, entry, onChange }) => {
 
 const MeasurementControl = ({ metric, entry, onChange }) => {
   const muted = !!entryState(entry);
+  const mKey = metric.key || metric.id;
   return (
     <div>
       <div className="flex flex-col sm:flex-row gap-2">
-        <div className="relative flex-1">
-          <Input
-            type="number"
-            inputMode="decimal"
-            step="any"
-            disabled={muted}
-            value={entry?.value ?? ""}
-            onChange={(e) => onChange({ ...entry, value: e.target.value === "" ? null : parseFloat(e.target.value), not_observed: false, state: null })}
-            placeholder="Attempt 1"
-            className="h-14 rounded-xl text-lg font-mono-num pr-14 bg-card"
-            data-testid={`measurement-${metric.key || metric.id}-input`}
-          />
-          {metric.unit && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground font-medium">{metric.unit}</span>}
+        <div className="min-w-0 flex-1">
+          <PanelLabel>Attempt 1</PanelLabel>
+          <div className="relative mt-1">
+            <Input
+              type="number"
+              inputMode="decimal"
+              step="any"
+              disabled={muted}
+              value={entry?.value ?? ""}
+              onChange={(e) => onChange({ ...entry, value: e.target.value === "" ? null : parseFloat(e.target.value), not_observed: false, state: null })}
+              placeholder="Attempt 1"
+              className="h-16 rounded-xl text-xl font-mono-num pr-14 bg-card"
+              data-testid={`measurement-${mKey}-input`}
+            />
+            {metric.unit && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground font-medium">{metric.unit}</span>}
+          </div>
         </div>
-        <div className="relative flex-1">
-          <Input
-            type="number"
-            inputMode="decimal"
-            step="any"
-            disabled={muted}
-            value={entry?.attempt_2 ?? ""}
-            onChange={(e) => onChange({ ...entry, attempt_2: e.target.value === "" ? null : parseFloat(e.target.value) })}
-            placeholder="Attempt 2 (opt.)"
-            className="h-14 rounded-xl text-lg font-mono-num pr-14 bg-card"
-            data-testid={`measurement-${metric.key || metric.id}-attempt2`}
-          />
-          {metric.unit && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground font-medium">{metric.unit}</span>}
+        <div className="min-w-0 flex-1">
+          <PanelLabel>Attempt 2 · optional</PanelLabel>
+          <div className="relative mt-1">
+            <Input
+              type="number"
+              inputMode="decimal"
+              step="any"
+              disabled={muted}
+              value={entry?.attempt_2 ?? ""}
+              onChange={(e) => onChange({ ...entry, attempt_2: e.target.value === "" ? null : parseFloat(e.target.value) })}
+              placeholder="Attempt 2 (opt.)"
+              className="h-16 rounded-xl text-xl font-mono-num pr-14 bg-card"
+              data-testid={`measurement-${mKey}-attempt2`}
+            />
+            {metric.unit && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground font-medium">{metric.unit}</span>}
+          </div>
         </div>
       </div>
-      <p className="text-[11px] text-muted-foreground mt-1.5">
+      <p className="mt-2 text-[11px] text-muted-foreground">
         {metric.higher_is_better === false ? "Lower is better · best attempt counts" : "Higher is better · best attempt counts"}
       </p>
       <StateControlRow
-        metricKey={metric.key || metric.id}
+        metricKey={mKey}
         entry={entry}
         onSelect={(s) => onChange({ ...entry, value: null, attempt_2: null, not_observed: !!s, state: s })}
       />
@@ -255,23 +252,55 @@ const MeasurementControl = ({ metric, entry, onChange }) => {
   );
 };
 
-const YesNoControl = ({ metric, entry, onChange }) => (
-  <div className="grid grid-cols-2 gap-2">
-    {[{ label: "Yes", v: true }, { label: "No", v: false }].map(({ label, v }) => (
-      <button
-        key={label}
-        type="button"
-        onClick={() => onChange({ value: entry?.value === v ? null : v })}
-        className={cn(
-          "h-14 rounded-xl border text-base font-bold transition active:scale-[0.97]",
-          entry?.value === v ? "bg-primary text-white border-transparent" : "bg-card text-foreground hover:bg-secondary"
-        )}
-      >
-        {label}
-      </button>
-    ))}
-  </div>
-);
+const YesNoControl = ({ metric, entry, onChange }) => {
+  const mKey = metric.key || metric.id;
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {[{ label: "Yes", v: true, Icon: Check }, { label: "No", v: false, Icon: X }].map(({ label, v, Icon }) => (
+        <button
+          key={label}
+          type="button"
+          aria-pressed={entry?.value === v}
+          onClick={() => onChange({ value: entry?.value === v ? null : v })}
+          data-testid={`yes-no-${mKey}-${v ? "yes" : "no"}`}
+          className={cn(
+            "flex h-16 items-center justify-center gap-2 rounded-xl border text-base font-bold transition active:scale-[0.97]",
+            entry?.value === v ? "bg-primary text-white border-transparent" : "bg-card text-foreground border-border hover:bg-secondary"
+          )}
+        >
+          <Icon className="h-5 w-5 shrink-0" /> {label}
+        </button>
+      ))}
+    </div>
+  );
+};
+
+// One option per row on a phone, two-up once there is width. Tapping the active
+// option again clears it — same toggle semantics as before.
+const ChoiceControl = ({ metric, entry, onChange }) => {
+  const mKey = metric.key || metric.id;
+  return (
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" data-testid={`choice-row-${mKey}`}>
+      {(metric.options || []).map((opt) => (
+        <button
+          key={opt}
+          type="button"
+          aria-pressed={entry?.value === opt}
+          onClick={() => onChange({ value: entry?.value === opt ? null : opt })}
+          data-testid={`choice-${mKey}-${slugifyTag(opt)}`}
+          className={cn(
+            "flex min-h-[56px] min-w-0 items-center justify-center rounded-xl border px-4 text-sm font-semibold transition active:scale-[0.97]",
+            entry?.value === opt
+              ? "bg-primary text-white border-transparent"
+              : "bg-card text-foreground border-border hover:bg-secondary"
+          )}
+        >
+          <span className="min-w-0 text-center">{opt}</span>
+        </button>
+      ))}
+    </div>
+  );
+};
 
 export default function EvaluationForm() {
   const { evaluationId } = useParams();
@@ -1039,8 +1068,9 @@ export default function EvaluationForm() {
 
   return (
     <div className="max-w-2xl mx-auto -mt-2">
-      {/* Sticky identity card — photo, name and BIG bib stay visible while scrolling scores */}
-      <div className="sticky top-0 z-30 -mx-4 sm:-mx-6 px-4 sm:px-6 py-2.5 bg-background/95 border-b border-divider" data-testid="evaluation-sticky-header">
+      {/* Sticky identity bar — who you are scoring, which station, and how far
+          through the sheet you are, all pinned while the metric list scrolls. */}
+      <div className="sticky top-0 z-30 -mx-4 sm:-mx-6 px-4 sm:px-6 py-2.5 glass-bar border-b" data-testid="evaluation-sticky-header">
         <div className="flex items-center gap-2.5">
           <button onClick={() => navigate(`/evaluate/${evaluation.assignment_id}`)} className="inline-flex items-center justify-center text-info min-h-[44px] min-w-[36px] shrink-0" aria-label="Back to player list" data-testid="evaluation-back-button">
             <ArrowLeft className="h-5 w-5" />
@@ -1051,19 +1081,24 @@ export default function EvaluationForm() {
               {evaluation.bib_number != null && evaluation.bib_number !== "" && (
                 <span className="font-mono-num font-extrabold text-2xl text-brand leading-none shrink-0">#{evaluation.bib_number}</span>
               )}
-              <p className="font-semibold text-base text-foreground truncate" data-testid="evaluation-player-name">
+              <p className="font-display text-lg text-foreground truncate min-w-0" data-testid="evaluation-player-name">
                 {(athlete.first_name || athlete.last_name) ? `${athlete.first_name || ""} ${athlete.last_name || ""}`.trim() : "—"}
               </p>
             </div>
-            <div className="flex items-center gap-1.5 mt-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5 mt-1 min-w-0">
               <span
                 className="inline-flex items-center rounded-full bg-brand text-primary-foreground px-2 py-0.5 text-[10px] font-bold tracking-wide shrink-0"
                 data-testid="resolved-position-badge"
               >
                 {evaluateAs || evaluation.resolved_position || athlete.primary_position || "POS?"}
               </span>
-              <span className="text-[11px] text-muted-foreground truncate">
-                {athlete.age_group || "—"}{evaluation.station_name ? ` · ${evaluation.station_name}` : ""}
+              {athlete.age_group && (
+                <span className="inline-flex items-center rounded-full bg-secondary text-muted-foreground px-2 py-0.5 text-[10px] font-semibold shrink-0">
+                  {athlete.age_group}
+                </span>
+              )}
+              <span className="min-w-0 truncate text-[11px] font-semibold text-foreground" data-testid="evaluation-station-name">
+                {evaluation.station_name || "Station not set"}
               </span>
             </div>
           </div>
@@ -1075,29 +1110,33 @@ export default function EvaluationForm() {
             ) : (
               <SaveStatusPill status={saveStatus} lastSaved={lastSaved} onRetry={retrySync} warning={storageWarn} />
             )}
-            <p className="font-mono-num text-xs font-bold text-foreground leading-none">
-              {completionPct}%
-              <span className={cn("ml-1 font-sans font-semibold", missingRequired.length ? "text-warning" : "text-success")}>
-                {missingRequired.length ? `· ${missingRequired.length} req` : "· done"}
-              </span>
-            </p>
           </div>
         </div>
-        <div className="mt-2 h-1 rounded-full bg-muted overflow-hidden">
-          <div
-            className={cn("h-full rounded-full transition-all duration-300", missingRequired.length ? "bg-warning" : "bg-success")}
-            style={{ width: `${completionPct}%` }}
-          />
+        {/* Progress — the fraction is the honest number, the bar is the glance. */}
+        <div className="mt-2 flex items-center gap-2" data-testid="evaluation-progress">
+          <div className="h-1.5 flex-1 min-w-0 rounded-full bg-muted overflow-hidden">
+            <div
+              className={cn("h-full rounded-full transition-all duration-300", missingRequired.length ? "bg-warning" : "bg-success")}
+              style={{ width: `${completionPct}%` }}
+            />
+          </div>
+          <p className="font-mono-num text-[11px] font-bold text-foreground leading-none shrink-0">
+            {filledCount}/{scorableMetrics.length}
+            <span className="ml-1 font-sans">{completionPct}%</span>
+            <span className={cn("ml-1 font-sans font-semibold", missingRequired.length ? "text-warning" : "text-success")}>
+              {missingRequired.length ? `· ${missingRequired.length} req` : "· done"}
+            </span>
+          </p>
         </div>
       </div>
 
       {/* Secondary detail lives behind a collapsible so the scoring flow stays clean */}
-      <details className="group mt-3 mb-4 rounded-xl border border-border bg-card" data-testid="evaluation-details-collapsible">
-        <summary className="flex items-center justify-between gap-2 px-3 min-h-[44px] cursor-pointer list-none [&::-webkit-details-marker]:hidden text-xs font-semibold text-muted-foreground uppercase tracking-wide select-none">
-          Details &amp; position override
-          <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
+      <details className="group mt-3 mb-4 rounded-2xl border border-border bg-card" data-testid="evaluation-details-collapsible">
+        <summary className="flex min-h-[52px] cursor-pointer select-none list-none items-center justify-between gap-2 px-4 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground [&::-webkit-details-marker]:hidden">
+          <span className="min-w-0 truncate">Details &amp; position override</span>
+          <ChevronDown className="h-4 w-4 shrink-0 transition-transform group-open:rotate-180" />
         </summary>
-        <div className="px-3 pb-3 pt-1 space-y-3 border-t border-divider">
+        <div className="space-y-3 border-t border-divider px-4 pb-4 pt-3">
           <p className="text-xs text-muted-foreground">
             {evaluation.event_name || "—"}{evaluation.station_name ? ` · ${evaluation.station_name}` : ""}
             {resolutionReason && (
@@ -1108,7 +1147,7 @@ export default function EvaluationForm() {
           </p>
           {!locked && (
             <div className="flex flex-wrap items-center gap-2">
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide" htmlFor="evaluate-as">Evaluate as</label>
+              <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground" htmlFor="evaluate-as">Evaluate as</label>
               <select
                 id="evaluate-as"
                 disabled={overrideBusy}
@@ -1123,7 +1162,7 @@ export default function EvaluationForm() {
                   }
                   applyPositionOverride(v);
                 }}
-                className="h-12 rounded-xl border border-input bg-background px-3 text-sm font-semibold min-w-[8rem]"
+                className="h-12 min-h-[48px] rounded-xl border border-input bg-background px-3 text-sm font-semibold min-w-[8rem]"
                 data-testid="evaluate-as-select"
               >
                 <option value="">Registered ({athlete.primary_position || "—"})</option>
@@ -1138,33 +1177,34 @@ export default function EvaluationForm() {
       </details>
 
       {storageWarn && (
-        <div className="mb-4 rounded-xl bg-warning/15 border border-warning/40 px-4 py-3 text-sm text-warning" data-testid="storage-warning-banner">
+        <div className="mb-4 rounded-2xl bg-warning/15 border border-warning/40 px-4 py-3 text-sm text-warning" data-testid="storage-warning-banner">
           {storageWarn}
         </div>
       )}
 
       {!template && (
-        <div className="mb-4 rounded-xl bg-destructive/15 border border-destructive/40 px-4 py-3 text-sm text-destructive" data-testid="missing-template-error">
+        <div className="mb-4 rounded-2xl bg-destructive/15 border border-destructive/40 px-4 py-3 text-sm text-destructive" data-testid="missing-template-error">
           No evaluation template could be resolved for this athlete&apos;s position. Contact an admin — do not score a blank form.
         </div>
       )}
 
       {locked && (
-        <div className="mb-4 rounded-xl bg-success/15 border border-success/40 px-4 py-3 text-sm text-success flex items-center gap-2">
-          <Lock className="h-4 w-4" /> This evaluation is locked. Contact your Head Scout or admin for an authorized revision.
+        <div className="mb-4 flex items-center gap-2 rounded-2xl bg-success/15 border border-success/40 px-4 py-3 text-sm text-success">
+          <Lock className="h-4 w-4 shrink-0" /> <span className="min-w-0">This evaluation is locked. Contact your Head Scout or admin for an authorized revision.</span>
         </div>
       )}
       {evaluation.returned && evaluation.review_note && !locked && (
-        <div className="mb-4 rounded-xl bg-destructive/15 border border-destructive/40 px-4 py-3 text-sm text-destructive">
-          <p className="font-semibold">Returned for revision:</p> {evaluation.review_note}
+        <div className="mb-4 rounded-2xl bg-destructive/15 border border-destructive/40 px-4 py-3 text-sm text-destructive">
+          <PanelLabel className="text-destructive">Returned for revision</PanelLabel>
+          <p className="mt-1 min-w-0">{evaluation.review_note}</p>
         </div>
       )}
 
       {/* Spec §9 — position filter notice + override. Only shown when there is
           actually a position-specific category to hide for this athlete. */}
       {filterableHidden.length > 0 && !locked && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-3 py-2.5" data-testid="category-filter-bar">
-          <p className="text-[11px] text-muted-foreground min-w-0">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border bg-card px-4 py-3" data-testid="category-filter-bar">
+          <p className="text-[11px] text-muted-foreground min-w-0 flex-1">
             {showAllCategories
               ? "Showing all categories, including ones outside this player's positions."
               : `Showing categories for ${athletePositions.join(", ")}. ${filterableHidden.length} position-specific ${filterableHidden.length > 1 ? "categories" : "category"} hidden (${filterableHidden.join(", ")}).`}
@@ -1172,7 +1212,7 @@ export default function EvaluationForm() {
           <button
             type="button"
             onClick={() => setShowAllCategories((v) => !v)}
-            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary text-foreground px-3 min-h-[40px] text-xs font-semibold shrink-0"
+            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary text-foreground px-4 min-h-[44px] text-xs font-semibold shrink-0"
             data-testid="toggle-all-categories"
           >
             {showAllCategories ? "Filter to position" : "Show all categories"}
@@ -1182,46 +1222,89 @@ export default function EvaluationForm() {
 
       {/* Metric sections grouped by category */}
       <div className="space-y-6">
-        {categories.map((cat) => (
-          <div key={cat}>
-            <h2 className="font-display text-xl text-foreground mb-2.5 flex items-center gap-2">
-              <span className="h-4 w-1 rounded bg-warning inline-block" /> {cat}
-            </h2>
+        {categories.map((cat, ci) => {
+          const catMetrics = (template?.metrics || [])
+            .filter((m) => m.category === cat)
+            .sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+          // Same rule as the header counter: comments never count toward progress.
+          const catScorable = catMetrics.filter((m) => !["comment", "observation"].includes(m.metric_type));
+          const catDone = catScorable.filter((m) => entrySatisfied(scores[m.id])).length;
+          const catComplete = catScorable.length > 0 && catDone === catScorable.length;
+          return (
+          <div key={cat} data-testid={`category-section-${slugifyTag(cat)}`}>
+            <div className="mb-2.5 flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <PanelLabel>Section {ci + 1} of {categories.length}</PanelLabel>
+                <h2 className="font-display text-xl text-foreground truncate">{cat}</h2>
+              </div>
+              {catScorable.length > 0 && (
+                <span
+                  data-testid={`category-progress-${slugifyTag(cat)}`}
+                  className={cn(
+                    "shrink-0 rounded-full px-2.5 py-1 font-mono-num text-xs font-bold",
+                    catComplete ? "bg-success/15 text-success" : "bg-secondary text-muted-foreground",
+                  )}
+                >
+                  {catDone}/{catScorable.length}
+                </span>
+              )}
+            </div>
             <div className="space-y-4">
-              {(template?.metrics || []).filter((m) => m.category === cat).sort((a, b) => (a.display_order || 0) - (b.display_order || 0)).map((m) => {
+              {catMetrics.map((m) => {
                 const mKey = m.key || m.id;
                 // Rev 5 §3 — observation tag chips (optional, one tap each).
                 const metricTagSet = ["comment", "observation"].includes(m.metric_type) ? null : tagSetFor(m);
                 const selectedTags = Array.isArray(scores[m.id]?.tags) ? scores[m.id].tags : [];
                 const tagsExpanded = !!tagsOpen[m.id] || selectedTags.length > 0;
+                // Presentation only — mirrors the existing "has a value" check.
+                const scored = scores[m.id]?.value !== undefined && scores[m.id]?.value !== null && scores[m.id]?.value !== "" && !scores[m.id]?.not_observed;
+                const mState = entryState(scores[m.id]);
+                const needsAttention = !!m.required && !entrySatisfied(scores[m.id]) && !locked;
                 return (
-                <div key={m.id} className="rounded-2xl bg-card border border-border p-4">
-                  <div className="flex items-center justify-between mb-2.5">
-                    <p className="font-semibold text-foreground text-sm">
-                      {m.name} {m.required && <span className="text-destructive">*</span>}
-                    </p>
-                    {scores[m.id]?.value !== undefined && scores[m.id]?.value !== null && scores[m.id]?.value !== "" && !scores[m.id]?.not_observed && (
-                      <CheckCircle2 className="h-4 w-4 text-success" />
-                    )}
+                <div
+                  key={m.id}
+                  data-testid={`metric-card-${mKey}`}
+                  className={cn(
+                    "rounded-2xl bg-card border p-4 transition-colors",
+                    scored ? "border-success/40" : needsAttention ? "border-warning/40" : "border-border",
+                  )}
+                >
+                  <div className="mb-3 flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-foreground text-sm">
+                        {m.name} {m.required && <span className="text-destructive">*</span>}
+                      </p>
+                      {m.description && <p className="mt-0.5 text-xs text-muted-foreground">{m.description}</p>}
+                    </div>
+                    <span className="shrink-0">
+                      {scored ? (
+                        <CheckCircle2 className="h-5 w-5 text-success" />
+                      ) : mState ? (
+                        <span className={cn(
+                          "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                          mState === "retest" ? "bg-warning/15 text-warning" : "bg-info/15 text-info",
+                        )}>
+                          {EVAL_STATE_LABELS[mState] || mState}
+                        </span>
+                      ) : m.required ? (
+                        <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-warning">Required</span>
+                      ) : null}
+                    </span>
                   </div>
-                  {m.description && <p className="text-xs text-muted-foreground -mt-1.5 mb-2">{m.description}</p>}
                   <fieldset disabled={locked} className={cn(locked && "opacity-70 pointer-events-none")}>
                     {["rating_5", "rating_10"].includes(m.metric_type) && <RatingControl metric={m} entry={scores[m.id]} onChange={(e) => setMetric(m.id, e)} />}
                     {["numeric", "time", "velocity"].includes(m.metric_type) && <MeasurementControl metric={m} entry={scores[m.id]} onChange={(e) => setMetric(m.id, e)} />}
                     {m.metric_type === "yes_no" && <YesNoControl metric={m} entry={scores[m.id]} onChange={(e) => setMetric(m.id, e)} />}
-                    {m.metric_type === "multiple_choice" && (
-                      <div className="flex flex-wrap gap-2">
-                        {(m.options || []).map((opt) => (
-                          <button key={opt} type="button" onClick={() => setMetric(m.id, { value: scores[m.id]?.value === opt ? null : opt })}
-                            className={cn("rounded-xl border px-4 h-11 text-sm font-semibold transition",
-                              scores[m.id]?.value === opt ? "bg-primary text-white border-transparent" : "bg-card text-foreground")}>
-                            {opt}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                    {m.metric_type === "multiple_choice" && <ChoiceControl metric={m} entry={scores[m.id]} onChange={(e) => setMetric(m.id, e)} />}
                     {["comment", "observation"].includes(m.metric_type) && (
-                      <Textarea value={scores[m.id]?.value || ""} onChange={(e) => setMetric(m.id, { value: e.target.value })} rows={2} className="rounded-xl bg-card" placeholder="Notes…" />
+                      <Textarea
+                        value={scores[m.id]?.value || ""}
+                        onChange={(e) => setMetric(m.id, { value: e.target.value })}
+                        rows={3}
+                        className="min-h-[96px] rounded-xl bg-card text-base"
+                        placeholder="Notes…"
+                        data-testid={`metric-note-${mKey}`}
+                      />
                     )}
                     {/* Rev 5 §3 — optional one-tap observation tags riding the
                         same autosave entry (additive `tags` array). */}
@@ -1232,7 +1315,7 @@ export default function EvaluationForm() {
                             type="button"
                             onClick={() => setTagsOpen((o) => ({ ...o, [m.id]: true }))}
                             data-testid={`tags-toggle-${mKey}`}
-                            className="inline-flex items-center min-h-[44px] px-1.5 text-xs font-semibold text-info"
+                            className="inline-flex min-h-[44px] items-center rounded-full border border-border bg-secondary px-3 text-xs font-semibold text-info"
                           >
                             + Tags
                           </button>
@@ -1264,48 +1347,50 @@ export default function EvaluationForm() {
               })}
             </div>
           </div>
-        ))}
+          );
+        })}
 
         {/* Comments */}
         <div ref={commentsRef} className="scroll-mt-32">
-          <h2 className="font-display text-xl text-foreground mb-2.5 flex items-center gap-2">
-            <span className="h-4 w-1 rounded bg-destructive inline-block" /> Comments
-          </h2>
+          <div className="mb-2.5">
+            <PanelLabel>Final step</PanelLabel>
+            <h2 className="font-display text-xl text-foreground">Comments</h2>
+          </div>
           <div className="rounded-2xl bg-card border border-border p-4 space-y-4">
             <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Quick tags</p>
+              <PanelLabel className="mb-2">Quick tags</PanelLabel>
               <div className="flex flex-wrap gap-2">
                 {QUICK_TAGS.map((tag) => (
                   <button key={tag} type="button" disabled={locked} onClick={() => toggleTag(tag)}
                     data-testid={`quick-tag-${tag.toLowerCase().replace(/\s+/g, "-")}`}
-                    className={cn("rounded-full border px-3.5 min-h-[44px] text-xs font-semibold transition active:scale-[0.96]",
-                      (comments.quick_tags || []).includes(tag) ? "bg-primary text-white border-transparent" : "bg-card text-muted-foreground hover:bg-secondary")}>
+                    className={cn("rounded-full border px-4 min-h-[48px] text-xs font-semibold transition active:scale-[0.96]",
+                      (comments.quick_tags || []).includes(tag) ? "bg-primary text-white border-transparent" : "bg-card text-muted-foreground border-border hover:bg-secondary")}>
                     {tag}
                   </button>
                 ))}
               </div>
             </div>
             <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Strengths</p>
-              <Textarea disabled={locked} value={comments.strengths} onChange={(e) => setComment("strengths", e.target.value)} rows={2} className="rounded-xl" placeholder="What stood out…" data-testid="comments-strengths-textarea" />
+              <PanelLabel className="mb-1.5">Strengths</PanelLabel>
+              <Textarea disabled={locked} value={comments.strengths} onChange={(e) => setComment("strengths", e.target.value)} rows={3} className="min-h-[88px] rounded-xl text-base" placeholder="What stood out…" data-testid="comments-strengths-textarea" />
             </div>
             <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Development needs</p>
-              <Textarea disabled={locked} value={comments.development_needs} onChange={(e) => setComment("development_needs", e.target.value)} rows={2} className="rounded-xl" placeholder="Areas to work on…" data-testid="comments-needs-textarea" />
+              <PanelLabel className="mb-1.5">Development needs</PanelLabel>
+              <Textarea disabled={locked} value={comments.development_needs} onChange={(e) => setComment("development_needs", e.target.value)} rows={3} className="min-h-[88px] rounded-xl text-base" placeholder="Areas to work on…" data-testid="comments-needs-textarea" />
             </div>
             <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">General comment</p>
-              <Textarea disabled={locked} value={comments.general} onChange={(e) => setComment("general", e.target.value)} rows={2} className="rounded-xl" placeholder="Anything else…" data-testid="comments-general-textarea" />
+              <PanelLabel className="mb-1.5">General comment</PanelLabel>
+              <Textarea disabled={locked} value={comments.general} onChange={(e) => setComment("general", e.target.value)} rows={3} className="min-h-[88px] rounded-xl text-base" placeholder="Anything else…" data-testid="comments-general-textarea" />
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" className="rounded-xl h-12" onClick={() => setMediaOpen(true)} disabled={locked} data-testid="add-media-button">
-                <Camera className="h-4 w-4 mr-1.5" /> Add Photo / Video
+              <Button variant="outline" className="rounded-xl h-14 text-sm font-semibold" onClick={() => setMediaOpen(true)} disabled={locked} data-testid="add-media-button">
+                <Camera className="h-5 w-5 mr-1.5 shrink-0" /> Add Photo / Video
               </Button>
               {mediaQueued > 0 && (
                 <button
                   type="button"
                   onClick={() => flushMediaQueue(true)}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-warning/40 bg-warning/15 text-warning px-3 min-h-[44px] text-xs font-semibold"
+                  className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-warning/40 bg-warning/15 text-warning px-3.5 min-h-[48px] text-xs font-semibold"
                   data-testid="media-queue-chip"
                   title="Queued on this device — tap to retry the upload"
                 >
@@ -1319,9 +1404,9 @@ export default function EvaluationForm() {
       </div>
 
       {/* Sticky footer — sits above bottom nav only when nav is visible; evaluation route hides tabs */}
-      <div className="sticky bottom-0 z-30 -mx-4 sm:-mx-6 mt-6 px-4 sm:px-6 py-3 bg-card border-t safe-bottom-pad">
+      <div className="sticky bottom-0 z-30 -mx-4 sm:-mx-6 mt-6 px-4 sm:px-6 py-3 bg-card border-t border-border safe-bottom-pad">
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="rounded-xl h-14 px-2 min-w-[56px] flex-col gap-0.5" disabled={!prevPlayer} onClick={() => goTo(-1)} data-testid="prev-player-button" aria-label={prevPlayer ? `Previous player: ${prevPlayer.first_name} ${prevPlayer.last_name}` : "Previous player"} title={prevPlayer ? `${prevPlayer.first_name} ${prevPlayer.last_name}` : ""}>
+          <Button variant="outline" className="rounded-xl h-16 px-2 min-w-[56px] flex-col gap-0.5" disabled={!prevPlayer} onClick={() => goTo(-1)} data-testid="prev-player-button" aria-label={prevPlayer ? `Previous player: ${prevPlayer.first_name} ${prevPlayer.last_name}` : "Previous player"} title={prevPlayer ? `${prevPlayer.first_name} ${prevPlayer.last_name}` : ""}>
             <ChevronLeft className="h-5 w-5" />
             {prevPlayer && (
               <span className="text-[10px] font-semibold leading-none truncate max-w-[72px]">
@@ -1330,20 +1415,20 @@ export default function EvaluationForm() {
             )}
           </Button>
           {!locked && (
-            <Button variant="outline" className="rounded-xl h-14 w-12 px-0 shrink-0" onClick={() => commentsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} aria-label="Jump to notes" title="Jump to notes" data-testid="jump-to-notes-button">
+            <Button variant="outline" className="rounded-xl h-16 w-12 px-0 shrink-0" onClick={() => commentsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} aria-label="Jump to notes" title="Jump to notes" data-testid="jump-to-notes-button">
               <MessageSquarePlus className="h-5 w-5" />
             </Button>
           )}
           {!locked ? (
-            <Button className="flex-1 rounded-xl h-14 bg-brand hover:bg-brand-secondary text-base font-semibold active:scale-[0.98]" onClick={() => setSubmitOpen(true)} data-testid="evaluation-submit-button">
-              <Send className="h-4 w-4 mr-1.5" /> Submit
+            <Button className="flex-1 min-w-0 rounded-xl h-16 bg-brand hover:bg-brand-secondary text-base font-bold active:scale-[0.98]" onClick={() => setSubmitOpen(true)} data-testid="evaluation-submit-button">
+              <Send className="h-5 w-5 mr-1.5 shrink-0" /> Submit
             </Button>
           ) : (
-            <Button className="flex-1 rounded-xl h-14 bg-brand hover:bg-brand-secondary text-base font-semibold" onClick={() => nextPlayer ? goTo(1) : navigate(`/evaluate/${evaluation.assignment_id}`)} data-testid="post-submit-next">
-              {nextPlayer ? `Next · ${nextPlayer.bib_number ? `#${nextPlayer.bib_number} ` : ""}${nextPlayer.last_name || nextPlayer.first_name}` : "Back to list"}
+            <Button className="flex-1 min-w-0 rounded-xl h-16 bg-brand hover:bg-brand-secondary text-base font-bold" onClick={() => nextPlayer ? goTo(1) : navigate(`/evaluate/${evaluation.assignment_id}`)} data-testid="post-submit-next">
+              <span className="min-w-0 truncate">{nextPlayer ? `Next · ${nextPlayer.bib_number ? `#${nextPlayer.bib_number} ` : ""}${nextPlayer.last_name || nextPlayer.first_name}` : "Back to list"}</span>
             </Button>
           )}
-          <Button variant="outline" className="rounded-xl h-14 px-2 min-w-[56px] flex-col gap-0.5" disabled={!nextPlayer} onClick={() => goTo(1)} data-testid="next-player-button" aria-label={nextPlayer ? `Next player: ${nextPlayer.first_name} ${nextPlayer.last_name}` : "Next player"} title={nextPlayer ? `${nextPlayer.first_name} ${nextPlayer.last_name}` : ""}>
+          <Button variant="outline" className="rounded-xl h-16 px-2 min-w-[56px] flex-col gap-0.5" disabled={!nextPlayer} onClick={() => goTo(1)} data-testid="next-player-button" aria-label={nextPlayer ? `Next player: ${nextPlayer.first_name} ${nextPlayer.last_name}` : "Next player"} title={nextPlayer ? `${nextPlayer.first_name} ${nextPlayer.last_name}` : ""}>
             <ChevronRight className="h-5 w-5" />
             {nextPlayer && (
               <span className="text-[10px] font-semibold leading-none truncate max-w-[72px]">
@@ -1353,7 +1438,7 @@ export default function EvaluationForm() {
           </Button>
         </div>
         {missingRequired.length > 0 && !locked && (
-          <p className="text-[11px] text-center text-warning font-semibold mt-1.5 truncate" data-testid="footer-missing-required">
+          <p className="mt-2 truncate text-center text-[11px] font-semibold text-warning" data-testid="footer-missing-required">
             {missingRequired.length} required metric{missingRequired.length > 1 ? "s" : ""} still empty
           </p>
         )}
@@ -1364,26 +1449,26 @@ export default function EvaluationForm() {
         <DialogContent className="rounded-2xl max-w-sm" data-testid="evaluation-submit-checklist">
           <DialogHeader><DialogTitle className="font-display text-2xl text-foreground">Ready to submit?</DialogTitle></DialogHeader>
           <div className="space-y-2 text-sm">
-            <div className="flex items-center justify-between rounded-xl bg-secondary px-3.5 py-2.5">
-              <span>Metrics completed</span>
-              <span className="font-mono-num font-bold">{filledCount}/{scorableMetrics.length} ({completionPct}%)</span>
+            <div className="flex min-h-[48px] items-center justify-between gap-3 rounded-xl bg-secondary px-3.5 py-2.5">
+              <span className="min-w-0">Metrics completed</span>
+              <span className="shrink-0 font-mono-num font-bold">{filledCount}/{scorableMetrics.length} ({completionPct}%)</span>
             </div>
-            <div className="flex items-center justify-between rounded-xl bg-secondary px-3.5 py-2.5">
-              <span>Comments</span>
-              <span className="font-semibold">{comments.strengths || comments.development_needs || comments.general ? "Added" : "None"}</span>
+            <div className="flex min-h-[48px] items-center justify-between gap-3 rounded-xl bg-secondary px-3.5 py-2.5">
+              <span className="min-w-0">Comments</span>
+              <span className="shrink-0 font-semibold">{comments.strengths || comments.development_needs || comments.general ? "Added" : "None"}</span>
             </div>
             {missingRequired.length > 0 && (
               <div className="rounded-xl bg-destructive/15 border border-destructive/40 px-3.5 py-2.5 text-destructive">
-                <p className="font-semibold mb-1">Missing required metrics:</p>
+                <PanelLabel className="mb-1 text-destructive">Missing required metrics</PanelLabel>
                 <ul className="list-disc pl-4 space-y-0.5">{missingRequired.map((m) => <li key={m.id}>{m.name}</li>)}</ul>
               </div>
             )}
             <p className="text-xs text-muted-foreground pt-1">After submitting, this evaluation is locked and sent to the Head Scout for review.</p>
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" className="rounded-xl" onClick={() => setSubmitOpen(false)}>Keep editing</Button>
+            <Button variant="outline" className="rounded-xl h-12" onClick={() => setSubmitOpen(false)}>Keep editing</Button>
             <Button
-              className="rounded-xl bg-primary hover:bg-brand-secondary"
+              className="rounded-xl bg-primary hover:bg-brand-secondary h-12 font-bold"
               disabled={submitting || missingRequired.length > 0 || ["saving", "sync_pending", "offline"].includes(saveStatus)}
               onClick={submit}
               data-testid="confirm-submit-button"
@@ -1450,13 +1535,13 @@ export default function EvaluationForm() {
                   <p className="text-[11px] text-muted-foreground truncate min-w-0">
                     {mediaFile.name} · <span className="font-mono-num">{fmtBytes(mediaFile.size)}</span>
                   </p>
-                  <Button variant="outline" size="sm" className="rounded-xl h-10 shrink-0" onClick={() => { resetMedia(); }} data-testid="media-retake-button">
+                  <Button variant="outline" size="sm" className="rounded-xl h-11 shrink-0" onClick={() => { resetMedia(); }} data-testid="media-retake-button">
                     <RotateCcw className="h-4 w-4 mr-1.5" /> Retake
                   </Button>
                 </div>
 
                 <div>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">What is this?</p>
+                  <PanelLabel className="mb-1.5">What is this?</PanelLabel>
                   <div className="flex flex-wrap gap-1.5" data-testid="media-category-picker">
                     {MEDIA_CATEGORIES.map((c) => {
                       const isVideo = mediaFile.type?.startsWith("video");
@@ -1465,7 +1550,7 @@ export default function EvaluationForm() {
                         <button
                           key={c} type="button" disabled={disabled} onClick={() => setMediaCategory(c)}
                           className={cn(
-                            "rounded-full border px-3.5 h-11 text-xs font-semibold transition active:scale-[0.96]",
+                            "rounded-full border px-3.5 min-h-[48px] text-xs font-semibold transition active:scale-[0.96]",
                             mediaCategory === c ? "bg-primary text-white border-transparent" : "bg-card text-muted-foreground border-border",
                             disabled && "opacity-40",
                           )}
@@ -1479,7 +1564,7 @@ export default function EvaluationForm() {
 
                 <Textarea
                   value={mediaDesc} onChange={(e) => setMediaDesc(e.target.value)} rows={2} maxLength={200}
-                  placeholder="Short caption (optional)" className="rounded-xl" data-testid="media-caption-input"
+                  placeholder="Short caption (optional)" className="rounded-xl text-base" data-testid="media-caption-input"
                 />
 
                 <label className="flex items-start gap-2 text-xs text-muted-foreground">
@@ -1498,7 +1583,7 @@ export default function EvaluationForm() {
           </div>
           <DialogFooter>
             <Button
-              className="w-full rounded-xl bg-primary hover:bg-brand-secondary h-12 text-base"
+              className="w-full rounded-xl bg-primary hover:bg-brand-secondary h-14 text-base font-bold"
               disabled={!mediaFile || !mediaConsent || mediaBusy}
               onClick={submitMedia}
               data-testid="media-upload-button"
