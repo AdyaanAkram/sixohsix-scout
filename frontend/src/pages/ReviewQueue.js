@@ -13,7 +13,7 @@ import { StatusBadge } from "@/components/common/StatusBadge";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { AlertTriangle, BarChart3, Calendar, CheckCircle2, ChevronDown, ChevronUp, ClipboardList, Clock, Loader2, Mail, MailWarning, Send, Undo2, Unlock, Users, XCircle } from "lucide-react";
+import { AlertTriangle, Archive, BarChart3, Calendar, CheckCircle2, ChevronDown, ChevronUp, ClipboardList, Clock, Loader2, Mail, MailWarning, Send, Undo2, Unlock, Users, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /* ---------------------------------- helpers ---------------------------------- */
@@ -26,6 +26,17 @@ const shortDate = (iso) => {
   if (!iso) return "—";
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+};
+
+// Group headers carry the year: two camps a season apart otherwise read as the
+// same day. Returns null (not a dash) when there is no usable date, so the
+// header can simply omit the line.
+const groupDate = (iso) => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? null
+    : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 };
 
 const teamInitials = (team) =>
@@ -46,6 +57,86 @@ const ACT_TOASTS = {
   approve: "Evaluation approved.",
   return: "Returned to evaluator for revision.",
   unlock: "Approval withdrawn — the evaluation is a draft again.",
+};
+
+/* --------------------------- queue grouping by event -------------------------- */
+
+// An event whose lifecycle has finished should not compete with a live camp for
+// the reviewer's attention. Every other status — Draft, Setup, Ready, Evaluation
+// Active, Evaluation Complete, Review, and any legacy value — stays in the live
+// queue, because work can still land against it.
+const ARCHIVED_EVENT_STATUSES = ["Closed", "Published", "Cancelled"];
+const isArchivedEventStatus = (status) => ARCHIVED_EVENT_STATUSES.includes(status);
+
+const UNASSIGNED_GROUP_KEY = "__unassigned__";
+
+// Newest event first. An event with no usable date sinks below every dated one
+// rather than sorting as the epoch; name breaks the remaining ties. The
+// Unassigned bucket is appended after sorting, so it never reaches here.
+const groupTime = (g) => {
+  const t = g.date ? new Date(g.date).getTime() : NaN;
+  return Number.isNaN(t) ? null : t;
+};
+
+const compareGroups = (a, b) => {
+  const ta = groupTime(a);
+  const tb = groupTime(b);
+  if (ta === null && tb !== null) return 1;
+  if (tb === null && ta !== null) return -1;
+  if (ta !== null && tb !== null && ta !== tb) return tb - ta;
+  return (a.name || "").localeCompare(b.name || "");
+};
+
+/**
+ * Fold the flat queue into one group per event, in display order.
+ * `events` supplies date + lifecycle status; the queue row itself supplies the
+ * name as a fallback for events the filtered /events list does not return.
+ */
+const groupQueueByEvent = (rows, events) => {
+  const meta = {};
+  (events || []).forEach((e) => { meta[e.id] = e; });
+
+  const byEvent = new Map();
+  const unassigned = [];
+
+  (rows || []).forEach((ev) => {
+    const id = ev.event_id;
+    if (!id) { unassigned.push(ev); return; }
+    if (!byEvent.has(id)) {
+      const e = meta[id] || {};
+      byEvent.set(id, {
+        key: id,
+        name: e.name || ev.event_name || "Untitled event",
+        date: e.date || null,
+        status: e.status || null,
+        archived: isArchivedEventStatus(e.status),
+        items: [],
+      });
+    }
+    byEvent.get(id).items.push(ev);
+  });
+
+  const groups = [...byEvent.values()].sort(compareGroups);
+
+  if (unassigned.length > 0) {
+    groups.push({
+      key: UNASSIGNED_GROUP_KEY,
+      name: "Unassigned",
+      date: null,
+      status: null,
+      archived: false,
+      items: unassigned,
+    });
+  }
+  return groups;
+};
+
+// "3 awaiting review" is the number a reviewer acts on. When a group holds none
+// — the Approved or All filter — fall back to a plain count rather than "0".
+const groupCountLabel = (items) => {
+  const awaiting = items.filter((x) => x.status === "submitted").length;
+  if (awaiting > 0) return `${awaiting} awaiting review`;
+  return `${items.length} ${items.length === 1 ? "evaluation" : "evaluations"}`;
 };
 
 /* ------------------------------ existing detail ------------------------------ */
@@ -73,6 +164,122 @@ const EvalDetail = ({ ev }) => {
         <div className="flex flex-wrap gap-1 mt-1">{ev.comments.quick_tags.map((t) => <span key={t} className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold">{t}</span>)}</div>
       )}
     </div>
+  );
+};
+
+/* ------------------------------ queue group cards ----------------------------- */
+
+// Most evaluations in this org carry raw measurements and no normalized overall
+// score, so a bare "—" would read as a broken record rather than a real state.
+// Same wording as My Evaluations.
+const QueueScore = ({ ev }) => {
+  const score = ev.computed?.overall_score;
+  if (score !== null && score !== undefined) {
+    return <p className="font-mono-num font-bold text-lg text-foreground shrink-0">{score}</p>;
+  }
+  return (
+    <span className="shrink-0 rounded-lg bg-secondary px-2 py-1 text-[11px] font-semibold text-muted-foreground">
+      {ev.status === "draft" ? "Not scored yet" : "Metrics recorded"}
+    </span>
+  );
+};
+
+// Module-level so the row keeps its identity across parent renders. Every action
+// stays a prop — the page still owns the handlers and the shared review dialog.
+const ReviewEvalRow = ({ ev, expanded, onToggleExpand, templates, onApprove, onReview }) => {
+  const meta = [ev.station_name, ev.evaluator_name && `by ${ev.evaluator_name}`].filter(Boolean).join(" · ");
+  return (
+    <Card className="rounded-2xl border-border" data-testid={`review-item-${ev.id}`}>
+      <CardContent className="py-4">
+        <div className="flex items-center gap-3">
+          <PlayerAvatar firstName={ev.athlete?.first_name} lastName={ev.athlete?.last_name} size="sm" />
+          <div className="flex-1 min-w-0">
+            <Link to={`/players/${ev.athlete_id}`} className="text-sm font-semibold text-foreground hover:underline">
+              {ev.athlete?.first_name} {ev.athlete?.last_name}
+            </Link>
+            {meta && <p className="text-xs text-muted-foreground truncate">{meta}</p>}
+          </div>
+          <QueueScore ev={ev} />
+          <StatusBadge status={ev.status} />
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => onToggleExpand(ev.id)}
+            className="inline-flex items-center gap-1 text-xs font-semibold text-info"
+            data-testid={`review-expand-${ev.id}`}
+          >
+            {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />} {expanded ? "Hide detail" : "View detail"}
+          </button>
+          <Link
+            to={`/evaluation/${ev.id}/results`}
+            className="inline-flex items-center gap-1 text-xs font-semibold text-brand"
+            data-testid={`review-results-${ev.id}`}
+          >
+            <BarChart3 className="h-3.5 w-3.5" /> Results summary
+          </Link>
+          <div className="flex-1" />
+          {ev.status === "submitted" && (
+            <>
+              <Button size="sm" variant="outline" className="rounded-lg h-9" onClick={() => onReview(ev, "return")} data-testid="review-return-button">
+                <Undo2 className="h-3.5 w-3.5 mr-1" /> Return
+              </Button>
+              <Button size="sm" className="rounded-lg h-9 bg-success hover:bg-[hsl(var(--success))]" onClick={() => onApprove(ev.id, "approve")} data-testid="review-approve-button">
+                <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Approve
+              </Button>
+            </>
+          )}
+          {ev.status === "approved" && (
+            <Button size="sm" variant="outline" className="rounded-lg h-9" onClick={() => onReview(ev, "unlock")} data-testid="review-unlock-button">
+              <Unlock className="h-3.5 w-3.5 mr-1" /> Unlock
+            </Button>
+          )}
+        </div>
+        {expanded && <EvalDetail ev={{ ...ev, template_metrics: Object.values(templates).filter((m) => (ev.computed?.metric_results || {})[m.id]) }} />}
+      </CardContent>
+    </Card>
+  );
+};
+
+// One card per event: the header names the camp, the body holds its rows. The
+// group is the unit a reviewer works through, so the count lives in the header.
+const EventGroupCard = ({ group, expanded, onToggleExpand, templates, onApprove, onReview }) => {
+  const dateLabel = groupDate(group.date);
+  return (
+    <Card className="rounded-2xl border-border bg-card" data-testid={`review-group-${group.key}`}>
+      <CardContent className="pt-4 pb-4">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <div className="min-w-0 flex-1">
+            <h3 className="font-display text-xl text-foreground truncate">{group.name}</h3>
+            {dateLabel ? (
+              <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Calendar className="h-3 w-3 shrink-0" /> {dateLabel}
+              </p>
+            ) : (
+              group.key === UNASSIGNED_GROUP_KEY && (
+                <p className="text-xs text-muted-foreground">Evaluations with no event on record</p>
+              )
+            )}
+          </div>
+          {group.status && <StatusBadge status={group.status} />}
+          <span className="shrink-0 rounded-full bg-warning/15 px-2.5 py-0.5 text-xs font-mono-num font-bold text-warning">
+            {groupCountLabel(group.items)}
+          </span>
+        </div>
+        <div className="mt-3 space-y-2">
+          {group.items.map((ev) => (
+            <ReviewEvalRow
+              key={ev.id}
+              ev={ev}
+              expanded={!!expanded[ev.id]}
+              onToggleExpand={onToggleExpand}
+              templates={templates}
+              onApprove={onApprove}
+              onReview={onReview}
+            />
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 };
 
@@ -412,7 +619,6 @@ const PublishAllDialog = ({
 
 const AssessmentsPublishCard = ({ onPublished }) => {
   const [readiness, setReadiness] = useState(null);
-  const [showMissing, setShowMissing] = useState(false);
   const [showPending, setShowPending] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
@@ -459,9 +665,6 @@ const AssessmentsPublishCard = ({ onPublished }) => {
   };
 
   const drafts = readiness?.drafts ?? 0;
-  const willEmail = readiness?.will_email ?? 0;
-  const noEmail = readiness?.no_email ?? 0;
-  const missing = readiness?.missing_email_athletes || [];
   const mailConfigured = readiness?.mail_configured !== false;
 
   // Every hook above this line. Nothing renders when readiness failed (or the
@@ -577,6 +780,9 @@ export default function ReviewQueue() {
   const [eventFilter, setEventFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("submitted");
   const [expanded, setExpanded] = useState({});
+  // Finished events collapse behind one disclosure — closed camps are history,
+  // not work. Default shut, same plain button + state idiom as the pending list.
+  const [showArchived, setShowArchived] = useState(false);
   const [templates, setTemplates] = useState({});
   // One reason dialog serves both review actions: "return" and "unlock".
   const [reviewFor, setReviewFor] = useState(null);
@@ -673,6 +879,13 @@ export default function ReviewQueue() {
   const panelCount = 2 + ((insights?.top_teams || []).length > 0 ? 1 : 0);
   const recent = insights?.recent || [];
   const filtered = (queue || []).filter((q) => statusFilter === "all" || q.status === statusFilter);
+  // Grouping runs on the already-filtered rows, so the event and status filters
+  // keep working unchanged: picking one event simply leaves one group standing.
+  const groups = groupQueueByEvent(filtered, events);
+  const activeGroups = groups.filter((g) => !g.archived);
+  const archivedGroups = groups.filter((g) => g.archived);
+
+  const toggleExpand = (id) => setExpanded((x) => ({ ...x, [id]: !x[id] }));
 
   return (
     <div className="space-y-5">
@@ -836,57 +1049,58 @@ export default function ReviewQueue() {
         ) : filtered.length === 0 ? (
           <EmptyState icon={ClipboardList} title="Queue is clear" hint="Submitted evaluations will appear here for review and approval." />
         ) : (
-          <div className="space-y-2">
-            {filtered.map((ev) => (
-              <Card key={ev.id} className="rounded-2xl border-border" data-testid={`review-item-${ev.id}`}>
-                <CardContent className="py-4">
-                  <div className="flex items-center gap-3">
-                    <PlayerAvatar firstName={ev.athlete?.first_name} lastName={ev.athlete?.last_name} size="sm" />
-                    <div className="flex-1 min-w-0">
-                      <Link to={`/players/${ev.athlete_id}`} className="text-sm font-semibold text-foreground hover:underline">
-                        {ev.athlete?.first_name} {ev.athlete?.last_name}
-                      </Link>
-                      <p className="text-xs text-muted-foreground">{ev.station_name} · {ev.event_name} · by {ev.evaluator_name}</p>
-                    </div>
-                    <p className="font-mono-num font-bold text-lg text-foreground">{ev.computed?.overall_score ?? "—"}</p>
-                    <StatusBadge status={ev.status} />
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <button
-                      onClick={() => setExpanded((x) => ({ ...x, [ev.id]: !x[ev.id] }))}
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-info"
-                      data-testid={`review-expand-${ev.id}`}
-                    >
-                      {expanded[ev.id] ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />} {expanded[ev.id] ? "Hide detail" : "View detail"}
-                    </button>
-                    <Link
-                      to={`/evaluation/${ev.id}/results`}
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-brand"
-                      data-testid={`review-results-${ev.id}`}
-                    >
-                      <BarChart3 className="h-3.5 w-3.5" /> Results summary
-                    </Link>
-                    <div className="flex-1" />
-                    {ev.status === "submitted" && (
-                      <>
-                        <Button size="sm" variant="outline" className="rounded-lg h-9" onClick={() => openReview(ev, "return")} data-testid="review-return-button">
-                          <Undo2 className="h-3.5 w-3.5 mr-1" /> Return
-                        </Button>
-                        <Button size="sm" className="rounded-lg h-9 bg-success hover:bg-[hsl(var(--success))]" onClick={() => act(ev.id, "approve")} data-testid="review-approve-button">
-                          <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Approve
-                        </Button>
-                      </>
-                    )}
-                    {ev.status === "approved" && (
-                      <Button size="sm" variant="outline" className="rounded-lg h-9" onClick={() => openReview(ev, "unlock")} data-testid="review-unlock-button">
-                        <Unlock className="h-3.5 w-3.5 mr-1" /> Unlock
-                      </Button>
-                    )}
-                  </div>
-                  {expanded[ev.id] && <EvalDetail ev={{ ...ev, template_metrics: Object.values(templates).filter((m) => (ev.computed?.metric_results || {})[m.id]) }} />}
-                </CardContent>
-              </Card>
+          <div className="space-y-3">
+            {activeGroups.map((g) => (
+              <EventGroupCard
+                key={g.key}
+                group={g}
+                expanded={expanded}
+                onToggleExpand={toggleExpand}
+                templates={templates}
+                onApprove={act}
+                onReview={openReview}
+              />
             ))}
+
+            {/* Nothing live matched, but the rows are not gone — say where they
+                went rather than leaving an apparently empty queue. */}
+            {activeGroups.length === 0 && archivedGroups.length > 0 && !showArchived && (
+              <p className="text-sm text-muted-foreground">
+                Every evaluation matching these filters belongs to a finished event.
+              </p>
+            )}
+
+            {archivedGroups.length > 0 && (
+              <div className="space-y-3" data-testid="review-archived-section">
+                <button
+                  type="button"
+                  onClick={() => setShowArchived((v) => !v)}
+                  className="flex w-full items-center gap-2 rounded-2xl border border-border bg-card px-4 py-3 text-left transition-colors hover:bg-secondary/50"
+                  data-testid="review-archived-toggle"
+                >
+                  <Archive className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 text-sm font-semibold text-foreground">
+                    Archived events ({archivedGroups.length})
+                  </span>
+                  {showArchived ? <ChevronUp className="h-4 w-4 shrink-0 text-info" /> : <ChevronDown className="h-4 w-4 shrink-0 text-info" />}
+                </button>
+                {showArchived && (
+                  <div className="space-y-3" data-testid="review-archived-list">
+                    {archivedGroups.map((g) => (
+                      <EventGroupCard
+                        key={g.key}
+                        group={g}
+                        expanded={expanded}
+                        onToggleExpand={toggleExpand}
+                        templates={templates}
+                        onApprove={act}
+                        onReview={openReview}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
