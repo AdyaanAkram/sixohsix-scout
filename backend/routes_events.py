@@ -303,6 +303,73 @@ async def _require_event_assignment(event_id: str, user):
         raise HTTPException(status_code=403, detail="You are not assigned to this event.")
 
 
+@router.get("/events/{event_id}/status-suggestion")
+async def event_status_suggestion(event_id: str, user=Depends(require_roles(*STAFF_ROLES))):
+    """What this event actually needs next, derived from its real state.
+
+    The UI used to present all eight lifecycle statuses as a free dropdown, so
+    running an event meant remembering the order and hand-picking each step —
+    and picking the wrong one just 409'd. This returns the single sensible next
+    step plus the checks behind it, so the page can offer one button and say
+    exactly what is missing when it cannot.
+    """
+    org = user["organization_id"]
+    ev = await get_org_event(event_id, user)
+    base = {"event_id": event_id, "organization_id": org}
+
+    roster = await db.event_athletes.count_documents(base)
+    checked_in = await db.event_athletes.count_documents({**base, "status": "checked_in"})
+    stations = await db.stations.find(base, {"_id": 0, "module_state": 1}).to_list(200)
+    offered = [s for s in stations if module_state_of(s) != "not_offered"]
+    assignments = await db.evaluator_assignments.count_documents(
+        {**base, **active_assignment_filter()})
+    submitted = await db.evaluations.count_documents(
+        {**base, "status": {"$in": ["submitted", "approved"]}})
+    approved = await db.evaluations.count_documents({**base, "status": "approved"})
+    pending_review = await db.evaluations.count_documents({**base, "status": "submitted"})
+
+    checks = [
+        {"key": "roster", "label": "Athletes on the roster", "count": roster, "ok": roster > 0},
+        {"key": "stations", "label": "Stations offered", "count": len(offered), "ok": len(offered) > 0},
+        {"key": "evaluators", "label": "Evaluators assigned", "count": assignments, "ok": assignments > 0},
+    ]
+    unmet = [c["label"] for c in checks if not c["ok"]]
+    current = ev.get("status") or "Draft"
+
+    # The next step that matches reality, not a fixed march through the list.
+    if current in ("Closed", "Cancelled"):
+        nxt, why = None, "This event is closed."
+    elif current == "Published":
+        nxt, why = "Closed", "Results are out — close the event when you are done."
+    elif approved and approved >= submitted and submitted > 0 and current in ("Review", "Evaluation Complete"):
+        nxt, why = "Published", f"All {approved} evaluations are approved and ready to release."
+    elif pending_review > 0:
+        nxt, why = "Review", f"{pending_review} evaluation{'s' if pending_review != 1 else ''} waiting on your review."
+    elif current == "Evaluation Active" and submitted > 0:
+        nxt, why = "Evaluation Complete", f"{submitted} evaluations are in. Close scoring when the day is done."
+    elif unmet:
+        nxt, why = None, "Still needs " + ", ".join(unmet).lower() + "."
+    elif current in ("Draft", "Setup"):
+        nxt, why = "Ready", "Roster, stations and evaluators are all set."
+    elif current == "Ready":
+        nxt, why = "Evaluation Active", "Everything is in place — start scoring."
+    else:
+        nxt, why = None, "Nothing to do right now."
+
+    return {
+        "current": current,
+        "suggested": nxt,
+        "reason": why,
+        "blocked_by": unmet,
+        "checks": checks,
+        "counts": {"roster": roster, "checked_in": checked_in,
+                   "stations_offered": len(offered), "evaluators": assignments,
+                   "submitted": submitted, "approved": approved,
+                   "pending_review": pending_review},
+        "registration_open": current not in ("Closed", "Published", "Evaluation Complete", "Cancelled"),
+    }
+
+
 @router.get("/events/{event_id}/export/csv")
 async def export_event_roster(event_id: str,
                               user=Depends(require_roles(*ADMIN_ROLES, "head_scout"))):
