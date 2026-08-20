@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, errMsg } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -33,7 +33,9 @@ const shortDate = (iso) => {
 // header can simply omit the line.
 const groupDate = (iso) => {
   if (!iso) return null;
-  const d = new Date(iso);
+  // A bare "2026-08-16" parses as UTC midnight and renders as Aug 15 in every
+  // US timezone. Pin date-only strings to local midnight instead.
+  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso}T00:00:00` : iso);
   return Number.isNaN(d.getTime())
     ? null
     : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -780,6 +782,10 @@ export default function ReviewQueue() {
   const [eventFilter, setEventFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("submitted");
   const [expanded, setExpanded] = useState({});
+  // "Submitted" is the right default only while something is submitted. An org
+  // that has approved everything would otherwise land on "Queue is clear" with
+  // 75 evaluations sitting one dropdown away. Resolved once, on first load.
+  const settledDefaults = useRef(false);
   // Finished events collapse behind one disclosure — closed camps are history,
   // not work. Default shut, same plain button + state idiom as the pending list.
   const [showArchived, setShowArchived] = useState(false);
@@ -800,6 +806,22 @@ export default function ReviewQueue() {
     api.get("/review/queue", { params }).then((r) => setQueue(r.data)).catch((e) => toast.error(errMsg(e)));
   }, [eventFilter]);
   useEffect(() => { load(); }, [load]);
+  // Once the queue and the event list have both landed, point the page at the
+  // work that actually exists: drop to "All" when nothing is awaiting review,
+  // and open the archive when every event behind those rows is already closed.
+  // One shot — after this the filters are the reviewer's to drive.
+  useEffect(() => {
+    if (settledDefaults.current) return;
+    if (!queue || events.length === 0) return;
+    settledDefaults.current = true;
+    if (!queue.some((q) => q.status === "submitted")) setStatusFilter("all");
+    // Every event these rows belong to is finished — the archive is the page,
+    // so open it. Plain state, so the toggle still collapses it afterwards.
+    const live = new Set(
+      events.filter((e) => !isArchivedEventStatus(e.status)).map((e) => e.id),
+    );
+    if (!queue.some((q) => !q.event_id || live.has(q.event_id))) setShowArchived(true);
+  }, [queue, events]);
   useEffect(() => {
     api.get("/events").then((r) => setEvents(r.data));
     api.get("/templates").then((r) => {
