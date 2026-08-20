@@ -12,6 +12,7 @@ import { StatusBadge } from "@/components/common/StatusBadge";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { CalendarDays, MapPin, Plus, Users, UserCog, ChevronRight } from "lucide-react";
 
 // Chip styling for the canonical lifecycle statuses StatusBadge doesn't know
@@ -35,6 +36,23 @@ const EVENT_TYPES = [
   "Showcase",
   "Private Lesson Block",
 ];
+
+// Events store their date as a plain YYYY-MM-DD string. Parsing it with
+// new Date(str) would read it as UTC midnight and show the previous day in
+// western timezones, so build the local date from the parts instead.
+const eventDate = (raw) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(raw || ""));
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (Number.isNaN(d.getTime())) return null;
+  const opts = { weekday: "short", month: "short", day: "numeric" };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+  return {
+    month: d.toLocaleDateString("en-US", { month: "short" }),
+    day: String(Number(m[3])),
+    full: d.toLocaleDateString("en-US", opts),
+  };
+};
 
 const CreateEventDialog = ({ onCreated }) => {
   const [open, setOpen] = useState(false);
@@ -65,7 +83,8 @@ const CreateEventDialog = ({ onCreated }) => {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button className="rounded-xl bg-primary hover:bg-brand-secondary h-11" data-testid="create-event-button">
-          <Plus className="h-4 w-4 mr-1" /> Create Event
+          <Plus className="h-4 w-4 sm:mr-1" /> <span className="hidden sm:inline">Create Event</span>
+          <span className="sr-only sm:hidden">Create Event</span>
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-md rounded-2xl">
@@ -76,11 +95,11 @@ const CreateEventDialog = ({ onCreated }) => {
             <Input required value={form.name} onChange={set("name")} className="h-10 rounded-lg" data-testid="event-name-input" placeholder="e.g. Summer Evaluation Camp" />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
+            <div className="min-w-0 space-y-1">
               <Label className="text-xs">Date *</Label>
               <Input type="date" required value={form.date} onChange={set("date")} className="h-10 rounded-lg" data-testid="event-date-input" />
             </div>
-            <div className="space-y-1">
+            <div className="min-w-0 space-y-1">
               <Label className="text-xs">Event type</Label>
               <select
                 value={form.event_type}
@@ -91,11 +110,11 @@ const CreateEventDialog = ({ onCreated }) => {
                 {EVENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
-            <div className="space-y-1">
+            <div className="min-w-0 space-y-1">
               <Label className="text-xs">Start time</Label>
               <Input type="time" value={form.start_time} onChange={set("start_time")} className="h-10 rounded-lg" />
             </div>
-            <div className="space-y-1">
+            <div className="min-w-0 space-y-1">
               <Label className="text-xs">End time</Label>
               <Input type="time" value={form.end_time} onChange={set("end_time")} className="h-10 rounded-lg" />
             </div>
@@ -123,23 +142,109 @@ const CreateEventDialog = ({ onCreated }) => {
   );
 };
 
+const CountTile = ({ icon: Icon, tint, value, label }) => (
+  <span className="inline-flex min-w-0 items-center gap-1.5">
+    <span className={cn("h-7 w-7 shrink-0 rounded-lg grid place-items-center", tint)}>
+      <Icon className="h-3.5 w-3.5" />
+    </span>
+    <span className="font-mono-num text-sm font-bold text-foreground">{value ?? 0}</span>
+    <span className="hidden truncate text-xs text-muted-foreground sm:inline">{label}</span>
+  </span>
+);
+
+const EventCard = ({ ev }) => {
+  const d = eventDate(ev.date);
+  // end_time is optional on older events — never print "09:00–undefined".
+  const time = ev.start_time ? [ev.start_time, ev.end_time].filter(Boolean).join("–") : null;
+
+  return (
+    <Link to={`/events/${ev.id}`} data-testid={`event-card-${ev.id}`} className="block min-w-0">
+      <Card className="h-full rounded-2xl border-border transition-all hover:border-brand/50 hover:-translate-y-0.5">
+        <CardContent className="flex h-full flex-col p-4 sm:p-5">
+          <div className="flex items-start gap-3">
+            {/* Tinted date block — the calendar chip reads before the name does. */}
+            <div className="flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-lg bg-brand/15 text-brand">
+              {d ? (
+                <>
+                  <span className="text-[10px] font-semibold uppercase leading-none tracking-wide">{d.month}</span>
+                  <span className="font-mono-num text-lg font-bold leading-none">{d.day}</span>
+                </>
+              ) : (
+                <CalendarDays className="h-5 w-5" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              {/* Names run long ("… Fall Development Series — Session #1"). Clamp
+                  to two lines so one event can never stretch the whole card. */}
+              <p className="font-display text-lg sm:text-xl leading-tight text-foreground break-words [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden">
+                {ev.name}
+              </p>
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <StatusBadge status={ev.status} className={LIFECYCLE_BADGE_CLS[ev.status]} />
+                {ev.event_type && (
+                  <span className="max-w-full truncate rounded-full bg-secondary px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+                    {ev.event_type}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 space-y-1 text-sm text-muted-foreground">
+            <p className="flex min-w-0 items-center gap-1.5">
+              <CalendarDays className="h-4 w-4 shrink-0" />
+              <span className="truncate">{d ? d.full : (ev.date || "Date to be confirmed")}{time ? ` · ${time}` : ""}</span>
+            </p>
+            {ev.location && (
+              <p className="flex min-w-0 items-center gap-1.5">
+                <MapPin className="h-4 w-4 shrink-0" />
+                <span className="truncate">{ev.location}</span>
+              </p>
+            )}
+          </div>
+
+          <div className="mt-3 flex items-center gap-3 border-t border-border pt-3 sm:gap-4">
+            <CountTile icon={Users} tint="bg-info/15 text-info" value={ev.player_count} label="players" />
+            <CountTile icon={UserCog} tint="bg-success/15 text-success" value={ev.evaluator_count} label="evaluators" />
+            <span className="ml-auto inline-flex shrink-0 items-center gap-0.5 text-xs font-semibold text-info">
+              Open <ChevronRight className="h-3.5 w-3.5" />
+            </span>
+          </div>
+        </CardContent>
+      </Card>
+    </Link>
+  );
+};
+
 export default function EventsList() {
   const { user } = useAuth();
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
   const isAdmin = ["owner", "admin"].includes(user?.role);
 
   const load = () => {
     setLoading(true);
-    api.get("/events").then((r) => setEvents(r.data)).finally(() => setLoading(false));
+    setFailed(false);
+    api.get("/events")
+      .then((r) => setEvents(r.data))
+      .catch(() => setFailed(true))
+      .finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, []);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="font-display text-3xl sm:text-4xl text-foreground">Events</h1>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="font-display text-3xl sm:text-4xl text-foreground">Events</h1>
+            {!loading && !failed && events.length > 0 && (
+              <span className="rounded-full bg-brand/15 px-2.5 py-0.5 text-[11px] font-mono-num font-bold text-brand">
+                {events.length}
+              </span>
+            )}
+          </div>
           <p className="text-sm text-muted-foreground mt-1">
             Short-term camps, clinics, and evaluation days for this organization.
           </p>
@@ -148,32 +253,20 @@ export default function EventsList() {
       </div>
 
       {loading ? (
-        <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}</div>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-44 rounded-2xl" />)}
+        </div>
+      ) : failed ? (
+        <EmptyState
+          icon={CalendarDays}
+          title="Could not load events"
+          hint="Something went wrong fetching the schedule. Refresh the page to try again."
+        />
       ) : events.length === 0 ? (
         <EmptyState icon={CalendarDays} title="No events yet" hint={isAdmin ? "Create your first evaluation event to get started." : "You have not been assigned to any events yet."} />
       ) : (
-        <div className="grid gap-3 md:grid-cols-2">
-          {events.map((ev) => (
-            <Link key={ev.id} to={`/events/${ev.id}`} data-testid={`event-card-${ev.id}`}>
-              <Card className="rounded-2xl border-border hover:border-brand/50 transition-colors h-full">
-                <CardContent className="pt-4 pb-4 sm:pt-5 sm:pb-5">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="font-display text-lg sm:text-2xl text-foreground leading-tight [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden">{ev.name}</p>
-                    <StatusBadge status={ev.status} className={LIFECYCLE_BADGE_CLS[ev.status]} />
-                  </div>
-                  <div className="mt-2 space-y-1 text-sm text-muted-foreground">
-                    <p className="flex items-center gap-1.5"><CalendarDays className="h-4 w-4 text-muted-foreground" /> {ev.date} {ev.start_time && `· ${ev.start_time}–${ev.end_time}`}</p>
-                    {ev.location && <p className="flex items-center gap-1.5"><MapPin className="h-4 w-4 text-muted-foreground" /> {ev.location}</p>}
-                  </div>
-                  <div className="mt-3 flex items-center gap-4 text-xs text-muted-foreground">
-                    <span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" /> {ev.player_count} players</span>
-                    <span className="inline-flex items-center gap-1"><UserCog className="h-3.5 w-3.5" /> {ev.evaluator_count} evaluators</span>
-                    <span className="ml-auto inline-flex items-center gap-0.5 text-info font-medium">Open <ChevronRight className="h-3.5 w-3.5" /></span>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" data-testid="events-grid">
+          {events.map((ev) => <EventCard key={ev.id} ev={ev} />)}
         </div>
       )}
     </div>
