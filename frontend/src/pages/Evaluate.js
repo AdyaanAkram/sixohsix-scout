@@ -270,7 +270,13 @@ export default function Evaluate() {
       total: list.length,
       done: list.filter((p) => isDone(p.evaluation_status)).length,
       progress: list.filter((p) => isInProgress(p.evaluation_status)).length,
+      // `todo` drives the Todo tab and the Next button, so a started-but-unfinished
+      // athlete belongs in it — they still need work. That makes it overlap
+      // `progress`, which is why the header line uses `notStarted` instead:
+      // "0 submitted · 7 in progress · 13 remaining" on a 13-athlete station
+      // reads as 20 people.
       todo: list.filter((p) => !isDone(p.evaluation_status)).length,
+      notStarted: list.filter((p) => !isDone(p.evaluation_status) && !isInProgress(p.evaluation_status)).length,
     };
   }, [athletes]);
 
@@ -417,7 +423,7 @@ export default function Evaluate() {
           )}
         </div>
         <p className="text-xs font-mono-num text-muted-foreground mt-1" data-testid="station-progress">
-          {counts.done} submitted · {counts.progress} in progress · {counts.todo} remaining
+          {counts.done} submitted · {counts.progress} in progress · {counts.notStarted} not started
         </p>
         {cacheStatus && <p className="text-[11px] text-muted-foreground mt-0.5" data-testid="template-cache-status">{cacheStatus}</p>}
         <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">

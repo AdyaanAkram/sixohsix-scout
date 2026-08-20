@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>60'6" ID — Evaluator Guide</title>
+<meta name="description" content="How to score athletes at a 60'6&quot; ID evaluation. Written for coaches, not computer people.">
+<style>
+  :root{
+    --brand:hsl(0 72% 50%); --brand-2:hsl(0 78% 58%);
+    --bg:hsl(0 0% 4%); --card:hsl(0 0% 7%); --card-2:hsl(0 0% 11%);
+    --fg:hsl(0 0% 100%); --mut:hsl(0 0% 64%); --bd:hsl(0 0% 15%);
+    --ok:hsl(134 61% 41%); --warn:hsl(42 100% 50%); --info:hsl(210 80% 52%);
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:400 17px/1.65 Geist,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:840px;margin:0 auto;padding:0 20px 90px}
+
+  /* ---------- header ---------- */
+  header{padding:52px 0 30px;border-bottom:3px solid var(--brand);margin-bottom:8px}
+  .logo{display:flex;align-items:center;gap:12px;margin-bottom:26px}
+  .logo .mark{width:44px;height:44px;border-radius:50%;background:var(--brand);
+    display:grid;place-items:center;font-weight:800;font-size:15px;letter-spacing:-.5px}
+  .logo b{font-size:19px;letter-spacing:-.3px;display:block;line-height:1.15}
+  .logo span{font-size:10px;color:var(--mut);letter-spacing:2.5px;text-transform:uppercase}
+  h1{font-size:clamp(34px,7vw,52px);line-height:1.05;margin:0 0 14px;letter-spacing:-1.4px;font-weight:800}
+  .lede{font-size:20px;color:var(--mut);margin:0;max-width:36em}
+
+  /* ---------- reassurance strip ---------- */
+  .calm{background:linear-gradient(180deg,rgba(220,38,38,.10),rgba(220,38,38,.03));
+    border:1px solid rgba(220,38,38,.28);border-radius:16px;padding:22px 24px;margin:34px 0 10px}
+  .calm p{margin:0;font-size:17px}
+  .calm p+p{margin-top:10px}
+
+  /* ---------- sections ---------- */
+  section{padding-top:46px}
+  h2{font-size:13px;letter-spacing:2.6px;text-transform:uppercase;color:var(--brand-2);
+     margin:0 0 6px;font-weight:700}
+  h3{font-size:clamp(24px,4.4vw,31px);line-height:1.2;margin:0 0 16px;letter-spacing:-.7px;font-weight:700}
+  p{margin:0 0 15px}
+  .mut{color:var(--mut)}
+
+  /* ---------- numbered steps ---------- */
+  .step{display:flex;gap:20px;align-items:flex-start;margin:0 0 12px}
+  .num{flex:0 0 42px;height:42px;border-radius:50%;background:var(--brand);color:#fff;
+    display:grid;place-items:center;font-weight:800;font-size:19px;margin-top:2px}
+  .step-body{min-width:0;flex:1}
+  .step-body h4{margin:6px 0 8px;font-size:22px;letter-spacing:-.3px;font-weight:700}
+
+  /* ---------- app screen mockups ---------- */
+  .screen{background:var(--card);border:1px solid var(--bd);border-radius:16px;
+    overflow:hidden;margin:18px 0 30px;font-size:14px}
+  .screen .bar{background:var(--card-2);padding:9px 14px;font-size:11px;color:var(--mut);
+    letter-spacing:1.6px;text-transform:uppercase;border-bottom:1px solid var(--bd)}
+  .screen .body{padding:18px}
+  .tile{background:var(--card-2);border:1px solid var(--bd);border-radius:12px;padding:15px;margin-bottom:11px}
+  .tile:last-child{margin-bottom:0}
+  .tile .kicker{font-size:10.5px;color:var(--mut);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:5px}
+  .tile .title{font-size:20px;font-weight:700;letter-spacing:-.3px;margin-bottom:3px}
+  .tile .sub{font-size:13.5px;color:var(--mut)}
+  .tile .foot{display:flex;justify-content:space-between;align-items:center;margin-top:11px;
+    font-size:12.5px;color:var(--mut)}
+  .tile .foot .open{color:var(--brand-2);font-weight:700}
+  .bar-track{height:5px;background:var(--card);border-radius:99px;margin-top:9px;overflow:hidden}
+  .bar-fill{height:100%;background:var(--brand);border-radius:99px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+  @media(max-width:620px){.grid2{grid-template-columns:1fr}}
+
+  /* athlete rows */
+  .arow{display:flex;align-items:center;gap:12px;padding:11px 13px;background:var(--card-2);
+    border:1px solid var(--bd);border-radius:11px;margin-bottom:8px}
+  .av{width:34px;height:34px;border-radius:50%;background:#2a2a2a;display:grid;place-items:center;
+    font-size:11.5px;font-weight:700;color:var(--mut);flex:0 0 34px}
+  .arow .nm{flex:1;min-width:0}
+  .arow .nm b{display:block;font-size:15px;font-weight:600}
+  .arow .nm small{color:var(--mut);font-size:12px}
+  .pill{font-size:11px;padding:3px 10px;border-radius:99px;white-space:nowrap;font-weight:600}
+  .pill.todo{background:#242424;color:var(--mut)}
+  .pill.ret{background:rgba(220,38,38,.18);color:var(--brand-2)}
+  .pill.done{background:rgba(34,160,60,.16);color:var(--ok)}
+
+  /* score choices */
+  .choice{display:block;width:100%;text-align:left;padding:13px 15px;border-radius:11px;
+    border:1px solid var(--bd);background:var(--card-2);margin-bottom:9px;font-size:14.5px}
+  .choice.sel{background:var(--brand);border-color:var(--brand);font-weight:700}
+  .marks{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+  .mark{border:1px solid var(--bd);border-radius:10px;padding:8px 12px;background:var(--card-2);
+    text-align:center;font-size:12px;min-width:74px}
+  .mark b{display:block;font-size:14px;margin-bottom:1px}
+  .mark small{color:var(--mut);font-size:10.5px}
+
+  /* callouts over a screen */
+  .callout{display:flex;gap:13px;align-items:flex-start;margin:11px 0}
+  .cnum{flex:0 0 25px;height:25px;border-radius:50%;background:var(--brand);color:#fff;
+    display:grid;place-items:center;font-size:13px;font-weight:800;margin-top:2px}
+  .callout div{flex:1;min-width:0;font-size:15.5px}
+
+  /* note boxes */
+  .note{border-left:3px solid var(--brand);background:var(--card);padding:15px 19px;
+    border-radius:0 12px 12px 0;margin:20px 0}
+  .note.good{border-left-color:var(--ok)}
+  .note.warn{border-left-color:var(--warn)}
+  .note b{display:block;margin-bottom:5px;font-size:15px}
+  .note p{margin:0;font-size:15.5px;color:var(--mut)}
+  .note p+p{margin-top:8px}
+
+  /* faq */
+  details{border:1px solid var(--bd);border-radius:12px;padding:15px 18px;margin-bottom:10px;background:var(--card)}
+  details[open]{background:var(--card-2)}
+  summary{cursor:pointer;font-weight:600;font-size:17px;list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:"+";color:var(--brand-2);font-weight:800;margin-right:11px;font-size:19px}
+  details[open] summary::before{content:"–"}
+  details p{margin:13px 0 0;color:var(--mut);font-size:15.5px}
+
+  /* misc */
+  .big-quote{font-size:clamp(21px,4vw,27px);line-height:1.4;font-weight:600;letter-spacing:-.4px;
+    border-left:4px solid var(--brand);padding-left:22px;margin:34px 0}
+  footer{margin-top:70px;padding-top:26px;border-top:1px solid var(--bd);color:var(--mut);font-size:14px}
+  a{color:var(--brand-2)}
+  .tocwrap{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:22px 26px;margin-top:34px}
+  .tocwrap b{font-size:11px;letter-spacing:2.4px;text-transform:uppercase;color:var(--mut);display:block;margin-bottom:12px}
+  .tocwrap ol{margin:0;padding-left:22px}
+  .tocwrap li{margin-bottom:7px}
+  .tocwrap a{text-decoration:none;font-weight:600}
+  .tocwrap a:hover{text-decoration:underline}
+
+  @media print{
+    body{background:#fff;color:#000}
+    .screen,.tile,.arow,.note,details,.tocwrap,.calm{background:#fff!important;border-color:#bbb!important}
+    .mut,.note p,details p{color:#333}
+    h1,h3,.step-body h4{color:#000}
+    details{page-break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="logo">
+    <div class="mark">60</div>
+    <div><b>60'6" ID</b><span>Athletics</span></div>
+  </div>
+  <h1>Evaluator Guide</h1>
+  <p class="lede">Everything you need to score athletes at a camp. Written for coaches — no computer knowledge needed.</p>
+</header>
+
+<div class="calm">
+  <p><b>Before you worry about breaking something: you can't.</b></p>
+  <p>You only ever see the stations you were assigned. You can't delete anything, you can't change another coach's scores, and every tap saves itself. If you tap the wrong answer, just tap the right one — the last tap wins.</p>
+</div>
+
+<div class="tocwrap">
+  <b>What's in here</b>
+  <ol>
+    <li><a href="#day">The whole job in 30 seconds</a></li>
+    <li><a href="#signin">Signing in</a></li>
+    <li><a href="#station">Finding your station</a></li>
+    <li><a href="#athlete">Picking an athlete</a></li>
+    <li><a href="#score">Scoring — the main screen</a></li>
+    <li><a href="#marks">When an athlete doesn't do the drill</a></li>
+    <li><a href="#submit">Submitting</a></li>
+    <li><a href="#returned">If something comes back to you</a></li>
+    <li><a href="#faq">Questions coaches actually ask</a></li>
+  </ol>
+</div>
+
+<!-- ============ 1 ============ -->
+<section id="day">
+  <h2>The shape of the day</h2>
+  <h3>The whole job in 30 seconds</h3>
+  <p>You stand at one station. Athletes come to you in groups. For each athlete you watch them do the drill, tap how it went, and move to the next one.</p>
+  <p class="big-quote">Sign in → open your station → tap an athlete → tap what you saw → Submit → next athlete.</p>
+  <p class="mut">That's the entire system. Everything below is just detail on those six steps.</p>
+</section>
+
+<!-- ============ 2 ============ -->
+<section id="signin">
+  <h2>Step 1</h2>
+  <h3>Signing in</h3>
+
+  <div class="step">
+    <div class="num">1</div>
+    <div class="step-body">
+      <h4>Go to 606athletics.com</h4>
+      <p>Use any phone, tablet or laptop. A tablet is easiest at a station. Sign in with the email and password you were given.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="num">2</div>
+    <div class="step-body">
+      <h4>If you're asked "How would you like to continue?"</h4>
+      <p>Choose <b>Evaluation Mode</b>. You'll only see this question if you also help out in another role — most evaluators go straight to their stations and never see it.</p>
+    </div>
+  </div>
+
+  <div class="screen">
+    <div class="bar">What you'll see</div>
+    <div class="body">
+      <div class="tile" style="border-color:rgba(220,38,38,.5)">
+        <div class="kicker">Mode</div>
+        <div class="title">Evaluation Mode</div>
+        <div class="sub">Score athletes at your assigned stations</div>
+        <div class="foot"><span></span><span class="open">Enter Evaluation Mode →</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note good">
+    <b>Do this once, at home, the night before</b>
+    <p>Sign in before you get to the field. Ballpark wifi is unreliable, and signing in early means the app has already downloaded everything it needs.</p>
+  </div>
+</section>
+
+<!-- ============ 3 ============ -->
+<section id="station">
+  <h2>Step 2</h2>
+  <h3>Finding your station</h3>
+  <p>Tap <b>Evaluate</b> in the menu on the left. You'll see the events you're working. Tap yours, then tap your station.</p>
+
+  <div class="screen">
+    <div class="bar">Evaluate — pick your event</div>
+    <div class="body">
+      <div class="tile">
+        <div class="kicker">Aug 16, 2026 &nbsp;·&nbsp; Evaluation Active</div>
+        <div class="title">2026 PBG Midwest Evaluation</div>
+        <div class="sub">4 stations</div>
+        <div class="foot"><span>13/52 submitted · 39 left</span><span class="open">Open →</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:25%"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout"><div class="cnum">1</div><div><b>The date and status</b> tell you which event is which. Finished events drop to the bottom under "Completed events" so today's work is always on top.</div></div>
+  <div class="callout"><div class="cnum">2</div><div><b>The number</b> is how many scores are in across all stations at that event, and how many are still to do.</div></div>
+
+  <p style="margin-top:28px">Tap the event and you'll see only <em>your</em> stations:</p>
+
+  <div class="screen">
+    <div class="bar">Your stations at this event</div>
+    <div class="body">
+      <div class="grid2">
+        <div class="tile">
+          <div class="title">Base Running</div>
+          <div class="sub">Ages 7-8</div>
+          <div class="foot"><span>0/13 submitted · 13 left</span><span class="open">Open →</span></div>
+          <div class="bar-track"><div class="bar-fill" style="width:0%"></div></div>
+        </div>
+        <div class="tile">
+          <div class="title">Catching</div>
+          <div class="sub">Ages 7-8</div>
+          <div class="foot"><span>13/13 submitted · done</span><span class="open">Open →</span></div>
+          <div class="bar-track"><div class="bar-fill" style="width:100%"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>You will only ever see your own stations</b>
+    <p>If a station you expected isn't here, you haven't been assigned to it yet. Tell whoever is running the event — it takes them about ten seconds to fix.</p>
+  </div>
+</section>
+
+<!-- ============ 4 ============ -->
+<section id="athlete">
+  <h2>Step 3</h2>
+  <h3>Picking an athlete</h3>
+  <p>Open your station and you get your list of athletes for the day.</p>
+
+  <div class="screen">
+    <div class="bar">Base Running &nbsp;·&nbsp; 0 submitted · 7 in progress · 6 not started</div>
+    <div class="body">
+      <div class="arow"><div class="av">NG</div><div class="nm"><b>Nico Guenther</b><small>Ages 7-8</small></div><span class="pill ret">Returned</span></div>
+      <div class="arow"><div class="av">CL</div><div class="nm"><b>Carter Lantin</b><small>Ages 7-8</small></div><span class="pill todo">Not started</span></div>
+      <div class="arow"><div class="av">RL</div><div class="nm"><b>Rudy Lebata</b><small>Ages 7-8</small></div><span class="pill todo">Not started</span></div>
+      <div class="arow"><div class="av">DM</div><div class="nm"><b>Dylan Madrigal</b><small>Ages 7-8</small></div><span class="pill done">Submitted</span></div>
+    </div>
+  </div>
+
+  <div class="callout"><div class="cnum">1</div><div><b>The big red "Next" button</b> at the top right jumps straight to the next athlete who still needs scoring. On a busy station, just keep tapping that.</div></div>
+  <div class="callout"><div class="cnum">2</div><div><b>Search by name or bib number.</b> If a kid walks up out of order, type their bib number and they come straight up.</div></div>
+  <div class="callout"><div class="cnum">3</div><div><b>Todo / All / Done tabs</b> filter the list. "Todo" is the one you want during the session.</div></div>
+
+  <div class="note">
+    <b>What the labels mean</b>
+    <p><b>Not started</b> — you haven't scored them yet.<br>
+       <b>In progress</b> — you started and it's saved, but you haven't submitted.<br>
+       <b>Submitted</b> — done and sent for review.<br>
+       <b>Returned</b> — a head coach sent it back with a note. See <a href="#returned">the last section</a>.</p>
+  </div>
+</section>
+
+<!-- ============ 5 ============ -->
+<section id="score">
+  <h2>Step 4 — the important one</h2>
+  <h3>Scoring an athlete</h3>
+  <p>Tap an athlete and you get the scoring screen. It asks you one thing at a time. There are no numbers to remember and nothing to calculate.</p>
+
+  <div class="screen">
+    <div class="bar">Nico Guenther &nbsp;·&nbsp; Base Running</div>
+    <div class="body">
+      <div style="font-size:11px;color:var(--mut);letter-spacing:1.6px;text-transform:uppercase;margin-bottom:4px">Section 1 of 1 · Athleticism</div>
+      <div style="font-weight:700;font-size:16px;margin:10px 0 12px">Rep 1 — First-step quickness</div>
+      <button class="choice sel">Did it well — smooth and confident</button>
+      <button class="choice">Got it done — still building consistency</button>
+      <button class="choice">Battled — needs more reps</button>
+      <button class="choice">Not yet — needs teaching reps</button>
+      <div style="margin-top:16px;font-weight:700;font-size:14px">Rep 1 — Feedback <span class="mut" style="font-weight:400">(optional)</span></div>
+      <div style="border:1px solid var(--bd);border-radius:10px;padding:12px;color:var(--mut);margin-top:7px;font-size:13.5px">Notes…</div>
+    </div>
+  </div>
+
+  <div class="callout"><div class="cnum">1</div><div><b>Tap the sentence that matches what you saw.</b> That's the whole scoring action. It turns red so you know it took.</div></div>
+  <div class="callout"><div class="cnum">2</div><div><b>Notes are optional</b> — but a single line like "quick first step, slows through the bag" is worth a great deal to the family reading it later.</div></div>
+  <div class="callout"><div class="cnum">3</div><div><b>Tags</b> are one-tap shorthand: Hustle, Great attitude, Quick hands, Strong arm, Needs reps, High motor, Raw but projectable, Team leader.</div></div>
+  <div class="callout"><div class="cnum">4</div><div><b>The bar at the top</b> fills as you answer. When it's full, you've answered everything required.</div></div>
+
+  <div class="note good">
+    <b>Your work saves as you go</b>
+    <p>Every tap is saved the moment you make it. If your battery dies, if the app closes, if you hand the tablet to someone else — nothing is lost. Sign back in and pick up where you were.</p>
+  </div>
+
+  <div class="note warn">
+    <b>Score what you actually saw</b>
+    <p>Don't average a kid against the group, and don't soften a score because a parent is watching. A head coach reviews everything before any family sees it, and honest scores are what make the report worth reading.</p>
+  </div>
+</section>
+
+<!-- ============ 6 ============ -->
+<section id="marks">
+  <h2>Step 5</h2>
+  <h3>When an athlete doesn't do the drill</h3>
+  <p>Sometimes you can't score something. Rather than guessing, use one of these four marks:</p>
+
+  <div class="screen">
+    <div class="body">
+      <div class="marks">
+        <div class="mark"><b>N/O</b><small>Not Observed</small></div>
+        <div class="mark"><b>N/A</b><small>Not Applicable</small></div>
+        <div class="mark"><b>DNP</b><small>Did Not Participate</small></div>
+        <div class="mark"><b>Retest</b><small>Needs Retest</small></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout"><div class="cnum">1</div><div><b>N/O — Not Observed.</b> You were there but didn't get a clean look. Rotation moved too fast, you were helping another kid.</div></div>
+  <div class="callout"><div class="cnum">2</div><div><b>N/A — Not Applicable.</b> The drill doesn't apply to this athlete. Catcher framing for a kid who never catches.</div></div>
+  <div class="callout"><div class="cnum">3</div><div><b>DNP — Did Not Participate.</b> They sat out. Injured, left early, didn't want to.</div></div>
+  <div class="callout"><div class="cnum">4</div><div><b>Retest — Needs Retest.</b> Something went wrong with the rep itself. Bad bounce, equipment failure, a clear do-over. This flags it so someone can run it again.</div></div>
+
+  <div class="note">
+    <b>These are better than a low score</b>
+    <p>A kid who never got a fair rep should not carry a bad number for the rest of the season. Marking it honestly is the right call every time.</p>
+  </div>
+</section>
+
+<!-- ============ 7 ============ -->
+<section id="submit">
+  <h2>Step 6</h2>
+  <h3>Submitting</h3>
+  <p>When the bar at the top is full, tap the big red <b>Submit</b> button at the bottom of the screen. That sends your scores to the head coach for review, and moves the athlete to <b>Done</b>.</p>
+
+  <div class="note">
+    <b>After you submit, you can't edit</b>
+    <p>That's deliberate — it keeps the record trustworthy. If you got something wrong, tell the head coach. They can send it back to you in one tap, and then you can fix and resubmit.</p>
+  </div>
+
+  <p>Your finished work lives under <b>Submitted</b> in the left-hand menu, so you can always look back at what you scored.</p>
+</section>
+
+<!-- ============ 8 ============ -->
+<section id="returned">
+  <h2>Step 7</h2>
+  <h3>If something comes back to you</h3>
+  <p>An athlete with a red <b>Returned</b> label means a head coach looked at your scores and wants a second pass. Their note sits in a red box at the top of the scoring screen telling you why.</p>
+
+  <div class="screen">
+    <div class="body">
+      <div style="border:1px solid rgba(220,38,38,.45);background:rgba(220,38,38,.10);border-radius:11px;padding:14px">
+        <div style="font-size:10.5px;letter-spacing:1.6px;text-transform:uppercase;color:var(--brand-2);font-weight:700;margin-bottom:6px">Returned for revision</div>
+        <div style="font-size:14.5px">Please add a note on the throwing mechanics — the score alone won't tell the family much.</div>
+      </div>
+    </div>
+  </div>
+
+  <p style="margin-top:22px">Fix what they asked for and tap Submit again. That's it. Being returned isn't a mark against you — it's usually a request for a bit more detail.</p>
+</section>
+
+<!-- ============ FAQ ============ -->
+<section id="faq">
+  <h2>Reference</h2>
+  <h3>Questions coaches actually ask</h3>
+
+  <details><summary>The wifi at the field is terrible. Will this work?</summary>
+    <p>Yes, if you open your station once while you still have signal. The app downloads the scoring sheets to your device the moment you open a station — you'll see a line saying templates are cached. After that you can score with no signal at all, and it sends everything up when you're back online. Open your station in the parking lot before you walk out.</p></details>
+
+  <details><summary>I tapped the wrong answer.</summary>
+    <p>Tap the right one. The last tap is what counts. Nothing is locked until you hit Submit.</p></details>
+
+  <details><summary>I don't see any athletes in my list.</summary>
+    <p>Usually the group hasn't been checked in yet — the list only shows athletes who are checked in at the event. Ask whoever is running the front table. If your whole station is missing, you haven't been assigned to it.</p></details>
+
+  <details><summary>An athlete walked up who isn't on my list.</summary>
+    <p>Search their name or bib number at the top. If they genuinely aren't there, they haven't been checked in — send them to the front table rather than scoring someone else's record.</p></details>
+
+  <details><summary>Can I see another coach's scores?</summary>
+    <p>No. You see your own work only. That's on purpose, so nobody is anchored by someone else's number.</p></details>
+
+  <details><summary>My tablet died mid-athlete.</summary>
+    <p>Nothing is lost. Sign back in, open your station, and the athlete will be sitting in "In progress" exactly where you left off.</p></details>
+
+  <details><summary>Do parents see this straight away?</summary>
+    <p>No. Every evaluation goes to a head coach first. Families only see a finished assessment after it's reviewed and published — often days later.</p></details>
+
+  <details><summary>How long should one athlete take?</summary>
+    <p>A minute or two. If you're spending much longer, you're probably overthinking it — tap what you saw and move on. Your first instinct at a station is usually the honest one.</p></details>
+
+  <details><summary>Something is broken or looks wrong.</summary>
+    <p>Tell whoever is running the event, and keep scoring — your work is saved either way. Don't try to fix data yourself.</p></details>
+</section>
+
+<footer>
+  <p><b>60'6" ID</b> — Evaluator Guide · 606athletics.com<br>
+  <span class="mut">Keep this page bookmarked on your tablet. It works offline once you've opened it.</span></p>
+</footer>
+
+</div>
+</body>
+</html>
