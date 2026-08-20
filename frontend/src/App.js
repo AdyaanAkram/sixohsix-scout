@@ -95,6 +95,8 @@ function App() {
             <Route path="/events" element={<Protected><StaffOnly><EventsList /></StaffOnly></Protected>} />
             <Route path="/events/:eventId" element={<Protected><StaffOnly><EventDetail /></StaffOnly></Protected>} />
             <Route path="/evaluate" element={<Protected><StaffOnly><Evaluate /></StaffOnly></Protected>} />
+            {/* Static segment outranks /evaluate/:assignmentId, so "event" is unambiguous. */}
+            <Route path="/evaluate/event/:eventId" element={<Protected><StaffOnly><Evaluate /></StaffOnly></Protected>} />
             <Route path="/evaluate/:assignmentId" element={<Protected><StaffOnly><Evaluate /></StaffOnly></Protected>} />
             <Route path="/evaluation/:evaluationId" element={<Protected><StaffOnly><EvaluationForm /></StaffOnly></Protected>} />
             <Route path="/evaluation/:evaluationId/results" element={<Protected><StaffOnly><EvaluationResults /></StaffOnly></Protected>} />

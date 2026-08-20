@@ -499,12 +499,19 @@ async def _assignment_with_context(a, org_id):
     q = {"event_id": a["event_id"], "status": "checked_in", "organization_id": org_id}
     if group_ids:
         q["group_id"] = {"$in": group_ids}
-    expected = await db.event_athletes.count_documents(q)
-    done = await db.evaluations.count_documents({
+    roster = await db.event_athletes.find(q, {"_id": 0, "athlete_id": 1}).to_list(1000)
+    expected = len(roster)
+    done_q = {
         "event_id": a["event_id"], "station_id": a["station_id"],
         "evaluator_id": a["evaluator_id"], "organization_id": org_id,
         "status": {"$in": ["submitted", "approved"]},
-    })
+    }
+    # Without this, an evaluator working several groups at one station counts
+    # every group's work against each assignment — the progress line read
+    # "26/13 submitted" on a 13-athlete group. Progress is of YOUR roster.
+    if group_ids:
+        done_q["athlete_id"] = {"$in": [r["athlete_id"] for r in roster]}
+    done = await db.evaluations.count_documents(done_q)
     return {
         **a, "event": event, "station": station, "groups": groups,
         "template": template, "expected": expected, "completed": done,

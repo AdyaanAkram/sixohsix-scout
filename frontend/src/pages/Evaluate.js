@@ -16,6 +16,139 @@ import { cn } from "@/lib/utils";
 // Returned-for-revision first so evaluators clear head-scout feedback before new starts.
 const STATUS_RANK = { returned: 0, not_started: 1, draft: 2, submitted: 3, approved: 4 };
 
+// Scoring is over in every one of these — the stations under them are history,
+// not today's work, so they sit below the live events rather than above them.
+// (Wider than the review queue's archive set on purpose: "Evaluation Complete"
+// and "Review" still carry review work, but no new scores get entered.)
+const FINISHED_EVENT_STATUSES = ["Evaluation Complete", "Review", "Published", "Closed", "Cancelled"];
+const isFinishedEvent = (status) => FINISHED_EVENT_STATUSES.includes(status);
+
+// A bare "2026-08-16" parses as UTC midnight and renders a day early in every
+// US timezone; pin date-only strings to local midnight.
+const eventDate = (iso) => {
+  if (!iso) return null;
+  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso}T00:00:00` : iso);
+  return Number.isNaN(d.getTime())
+    ? null
+    : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+};
+
+// Newest first; an undated event sinks below every dated one rather than
+// sorting as the epoch, and the name breaks the remaining ties.
+const compareEventGroups = (a, b) => {
+  const ta = a.date ? new Date(a.date).getTime() : NaN;
+  const tb = b.date ? new Date(b.date).getTime() : NaN;
+  const va = Number.isNaN(ta) ? null : ta;
+  const vb = Number.isNaN(tb) ? null : tb;
+  if (va === null && vb !== null) return 1;
+  if (vb === null && va !== null) return -1;
+  if (va !== null && vb !== null && va !== vb) return vb - va;
+  return (a.name || "").localeCompare(b.name || "");
+};
+
+/** Fold the flat assignment list into one entry per event, totals included. */
+const groupAssignmentsByEvent = (assignments) => {
+  const byEvent = new Map();
+  (assignments || []).forEach((a) => {
+    const id = a.event_id;
+    if (!byEvent.has(id)) {
+      byEvent.set(id, {
+        key: id,
+        name: a.event?.name || "Untitled event",
+        date: a.event?.date || null,
+        status: a.event?.status || null,
+        finished: isFinishedEvent(a.event?.status),
+        stations: [],
+      });
+    }
+    byEvent.get(id).stations.push(a);
+  });
+  const groups = [...byEvent.values()];
+  groups.forEach((g) => {
+    g.expected = g.stations.reduce((n, a) => n + (a.expected || 0), 0);
+    g.completed = g.stations.reduce((n, a) => n + (a.completed || 0), 0);
+    g.remaining = Math.max(0, g.expected - g.completed);
+  });
+  return groups.sort(compareEventGroups);
+};
+
+const pct = (done, total) => (total ? Math.min(100, Math.round((done / total) * 100)) : 0);
+
+const ProgressBar = ({ done, total, muted }) => (
+  <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
+    <div
+      className={cn("h-full rounded-full transition-all", muted ? "bg-muted-foreground/50" : "bg-brand")}
+      style={{ width: `${pct(done, total)}%` }}
+    />
+  </div>
+);
+
+// One station. Shared by the event drill-down and nothing else yet, but kept at
+// module level so it is not redefined on every render.
+const StationCard = ({ a, onOpen, muted }) => {
+  const remaining = Math.max(0, (a.expected || 0) - (a.completed || 0));
+  return (
+    <Card
+      className={cn(
+        "rounded-2xl border-border cursor-pointer transition active:scale-[0.99]",
+        muted ? "hover:border-border/80" : "hover:border-brand/50",
+      )}
+      onClick={() => onOpen(a.id)}
+      data-testid={`assignment-card-${a.id}`}
+    >
+      <CardContent className="pt-5 pb-5">
+        <p className="font-display text-2xl text-foreground">{a.station?.name}</p>
+        <p className="text-sm text-muted-foreground">{(a.groups || []).map((g) => g.name).join(", ") || "All groups"}</p>
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <p className="text-xs font-mono-num text-muted-foreground">
+            {a.completed}/{a.expected} submitted{remaining > 0 ? ` · ${remaining} left` : " · done"}
+          </p>
+          <span className={cn("inline-flex items-center gap-1 text-sm font-semibold", muted ? "text-muted-foreground" : "text-brand")}>
+            Open <ArrowRight className="h-4 w-4" />
+          </span>
+        </div>
+        <ProgressBar done={a.completed} total={a.expected} muted={muted} />
+      </CardContent>
+    </Card>
+  );
+};
+
+// One event in the top-level picker. Drills into its stations.
+const EventCard = ({ g, onOpen }) => (
+  <Card
+    className={cn(
+      "rounded-2xl border-border cursor-pointer transition active:scale-[0.99]",
+      g.finished ? "hover:border-border/80" : "hover:border-brand/50",
+    )}
+    onClick={() => onOpen(g.key)}
+    data-testid={`evaluate-event-${g.key}`}
+  >
+    <CardContent className="pt-5 pb-5">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        {eventDate(g.date) && <p className="text-xs text-muted-foreground uppercase tracking-widest">{eventDate(g.date)}</p>}
+        {g.status && (
+          <span className="rounded-full bg-secondary px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+            {g.status}
+          </span>
+        )}
+      </div>
+      <p className="font-display text-2xl text-foreground mt-0.5 break-words">{g.name}</p>
+      <p className="text-sm text-muted-foreground">
+        {g.stations.length} {g.stations.length === 1 ? "station" : "stations"}
+      </p>
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <p className="text-xs font-mono-num text-muted-foreground">
+          {g.completed}/{g.expected} submitted{g.remaining > 0 ? ` · ${g.remaining} left` : " · done"}
+        </p>
+        <span className={cn("inline-flex items-center gap-1 text-sm font-semibold", g.finished ? "text-muted-foreground" : "text-brand")}>
+          Open <ArrowRight className="h-4 w-4" />
+        </span>
+      </div>
+      <ProgressBar done={g.completed} total={g.expected} muted={g.finished} />
+    </CardContent>
+  </Card>
+);
+
 function isDone(status) {
   return ["submitted", "approved"].includes(status);
 }
@@ -33,7 +166,7 @@ function idLabel(p) {
 }
 
 export default function Evaluate() {
-  const { assignmentId } = useParams();
+  const { assignmentId, eventId } = useParams();
   const navigate = useNavigate();
   const [assignments, setAssignments] = useState(null);
   const [athletes, setAthletes] = useState(null);
@@ -178,45 +311,78 @@ export default function Evaluate() {
     [athletes],
   );
 
-  // ---- Assignment picker ----
+  // ---- Event picker, then stations within one event ----
+  const eventGroups = useMemo(() => groupAssignmentsByEvent(assignments), [assignments]);
+
   if (!assignmentId) {
     if (!assignments) return <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-24 rounded-2xl" />)}</div>;
+
+    // Drill-down: one event's stations.
+    if (eventId) {
+      const g = eventGroups.find((x) => x.key === eventId);
+      if (!g) {
+        return (
+          <div className="space-y-4">
+            <button onClick={() => navigate("/evaluate")} className="inline-flex items-center gap-1 text-sm text-info hover:underline min-h-[44px]" data-testid="back-to-events">
+              <ArrowLeft className="h-3.5 w-3.5" /> All events
+            </button>
+            <EmptyState icon={ClipboardCheck} title="Event not found" hint="You have no station assignments for this event." />
+          </div>
+        );
+      }
+      return (
+        <div className="space-y-4">
+          <div>
+            <button onClick={() => navigate("/evaluate")} className="inline-flex items-center gap-1 text-sm text-info hover:underline mb-1 min-h-[44px]" data-testid="back-to-events">
+              <ArrowLeft className="h-3.5 w-3.5" /> All events
+            </button>
+            <h1 className="font-display text-3xl sm:text-4xl text-foreground break-words">{g.name}</h1>
+            <p className="text-sm text-muted-foreground">
+              {[eventDate(g.date), g.status, `${g.completed}/${g.expected} submitted`].filter(Boolean).join(" · ")}
+            </p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2" data-testid="evaluate-station-grid">
+            {g.stations.map((a) => (
+              <StationCard key={a.id} a={a} muted={g.finished} onOpen={(id) => navigate(`/evaluate/${id}`)} />
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // Top level: events, live first.
+    const live = eventGroups.filter((g) => !g.finished);
+    const finished = eventGroups.filter((g) => g.finished);
     return (
       <div className="space-y-4">
         <div>
           <h1 className="font-display text-3xl sm:text-4xl text-foreground">Evaluate</h1>
-          <p className="text-sm text-muted-foreground">Select your station — templates cache when you open it.</p>
+          <p className="text-sm text-muted-foreground">Pick your event, then your station.</p>
         </div>
-        {assignments.length === 0 ? (
+        {eventGroups.length === 0 ? (
           <EmptyState icon={ClipboardCheck} title="No assignments" hint="You are not assigned to any station yet. Ask your administrator." />
         ) : (
-          <div className="grid gap-3 md:grid-cols-2">
-            {assignments.map((a) => {
-              const remaining = Math.max(0, (a.expected || 0) - (a.completed || 0));
-              return (
-                <Card key={a.id} className="rounded-2xl border-border cursor-pointer hover:border-brand/50 transition active:scale-[0.99]" onClick={() => navigate(`/evaluate/${a.id}`)} data-testid={`assignment-card-${a.id}`}>
-                  <CardContent className="pt-5 pb-5">
-                    <p className="text-xs text-muted-foreground uppercase tracking-widest">{a.event?.name}</p>
-                    <p className="font-display text-2xl text-foreground mt-0.5">{a.station?.name}</p>
-                    <p className="text-sm text-muted-foreground">{(a.groups || []).map((g) => g.name).join(", ") || "All groups"}</p>
-                    <div className="mt-3 flex items-center justify-between gap-2">
-                      <p className="text-xs font-mono-num text-muted-foreground">
-                        {a.completed}/{a.expected} submitted
-                        {remaining > 0 ? ` · ${remaining} left` : " · done"}
-                      </p>
-                      <span className="inline-flex items-center gap-1 text-sm font-semibold text-brand">Open <ArrowRight className="h-4 w-4" /></span>
-                    </div>
-                    <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className="h-full bg-brand rounded-full transition-all"
-                        style={{ width: `${a.expected ? Math.min(100, Math.round((a.completed / a.expected) * 100)) : 0}%` }}
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
+          <>
+            {live.length > 0 && (
+              <div className="grid gap-3 md:grid-cols-2" data-testid="evaluate-live-events">
+                {live.map((g) => <EventCard key={g.key} g={g} onOpen={(id) => navigate(`/evaluate/event/${id}`)} />)}
+              </div>
+            )}
+
+            {/* Finished events stay reachable — an evaluator still opens them to
+                re-read past work — but they sit below anything still live and
+                never dressed up as today's job. */}
+            {finished.length > 0 && (
+              <div className="space-y-2" data-testid="evaluate-finished-events">
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground pt-1">
+                  {live.length > 0 ? "Completed events" : `Completed events (${finished.length})`}
+                </p>
+                <div className="grid gap-3 md:grid-cols-2 opacity-70">
+                  {finished.map((g) => <EventCard key={g.key} g={g} onOpen={(id) => navigate(`/evaluate/event/${id}`)} />)}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     );
@@ -226,8 +392,12 @@ export default function Evaluate() {
   return (
     <div className="space-y-3">
       <div>
-        <button onClick={() => navigate("/evaluate")} className="inline-flex items-center gap-1 text-sm text-info hover:underline mb-1 min-h-[44px]" data-testid="back-to-assignments">
-          <ArrowLeft className="h-3.5 w-3.5" /> My assignments
+        <button
+          onClick={() => navigate(assignment?.event_id ? `/evaluate/event/${assignment.event_id}` : "/evaluate")}
+          className="inline-flex items-center gap-1 text-sm text-info hover:underline mb-1 min-h-[44px]"
+          data-testid="back-to-assignments"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" /> {assignment?.event?.name || "My assignments"}
         </button>
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
