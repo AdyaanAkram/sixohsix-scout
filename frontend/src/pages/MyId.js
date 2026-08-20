@@ -35,7 +35,6 @@ import {
   TrendingDown,
   TrendingUp,
   Trophy,
-  UserCheck,
 } from "lucide-react";
 
 /** Same five checks the staff PlayerProfile uses — athlete and staff must not disagree. */
@@ -714,14 +713,6 @@ export default function MyId() {
             testId="my-glance-evaluations"
           />
         )}
-        <StatTile
-          icon={UserCheck}
-          tint="bg-warning/15 text-warning"
-          value={`${completion.pct}%`}
-          label="Profile complete"
-          sub={completion.missing.length === 0 ? "All set" : `${completion.missing.length} to add`}
-          testId="my-glance-completion"
-        />
       </div>
 
       {pendingMedia.length > 0 && (
