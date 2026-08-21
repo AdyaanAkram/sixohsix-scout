@@ -82,7 +82,7 @@ export default function AcceptInvitation() {
 
   const headline = isAthleteInvite ? "Claim your ID" : "You're invited";
   const subhead = (() => {
-    if (!invite) return "Paste the invitation token from your email to get started.";
+    if (!invite) return "Paste the invitation code from your email to get started.";
     if (invite.role === "parent") {
       return `${orgName || "This organization"} invited you to manage this athlete's My ID profile.`;
     }
@@ -107,7 +107,7 @@ export default function AcceptInvitation() {
           <form onSubmit={submit} className="space-y-4">
             {!tokenParam && (
               <div className="space-y-1.5">
-                <Label htmlFor="invite-token">Invitation token</Label>
+                <Label htmlFor="invite-token">Invitation code</Label>
                 <Input
                   id="invite-token"
                   required
@@ -115,7 +115,7 @@ export default function AcceptInvitation() {
                   onChange={(e) => setToken(e.target.value)}
                   className="h-12 rounded-xl font-mono-num"
                   data-testid="invite-token-input"
-                  placeholder="Paste your invitation token"
+                  placeholder="Paste your invitation code"
                 />
                 <p className="text-xs text-muted-foreground">It is in the invitation email, at the end of the link.</p>
               </div>

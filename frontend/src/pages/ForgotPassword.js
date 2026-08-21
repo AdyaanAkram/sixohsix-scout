@@ -79,8 +79,8 @@ export default function ForgotPassword() {
         <h1 className="font-display text-4xl sm:text-5xl text-foreground">Reset password</h1>
         <p className="text-sm text-muted-foreground mt-2 max-w-xs">
           {sent
-            ? "Enter the reset token and choose a new password."
-            : "We will create a reset token for your 60'6\" ID account."}
+            ? "Enter the reset code and choose a new password."
+            : "We will create a reset code for your 60'6\" ID account."}
         </p>
       </div>
 
@@ -102,7 +102,7 @@ export default function ForgotPassword() {
                   data-testid="forgot-email-input"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Your administrator can also retrieve the token from the audit log.
+                  Your administrator can also look up the code for you.
                 </p>
               </div>
               <Button
@@ -111,7 +111,7 @@ export default function ForgotPassword() {
                 className="w-full h-12 rounded-full bg-brand hover:bg-brand-secondary text-base font-semibold active:scale-[0.98] transition"
                 data-testid="forgot-submit-button"
               >
-                {busy ? "Working…" : "Generate Reset Token"}
+                {busy ? "Working…" : "Get a reset code"}
               </Button>
             </form>
           ) : (
@@ -119,7 +119,7 @@ export default function ForgotPassword() {
               <div className="flex items-start gap-2.5 rounded-xl border border-success/40 bg-success/10 px-3 py-2.5" data-testid="forgot-sent-confirmation">
                 <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5 text-success" />
                 <p className="min-w-0 text-sm font-semibold text-success">
-                  {requestedFor ? `Reset token created for ${requestedFor}.` : "Reset token ready."}
+                  {requestedFor ? `Reset code created for ${requestedFor}.` : "Reset code ready."}
                 </p>
               </div>
               <div className="space-y-1.5">
