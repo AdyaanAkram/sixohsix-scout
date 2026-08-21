@@ -61,12 +61,39 @@ jobs:
           done
           curl -fsS http://127.0.0.1:8000/ready
 
+      # The revision suite skips every test when the seed accounts are absent —
+      # which reads as a pass. Seed first so those 33 tests actually run.
+      - name: Seed database
+        working-directory: backend
+        env:
+          MONGO_URL: mongodb://localhost:27017
+          DB_NAME: pbg_scout_ci
+        run: python seed.py
+
       - name: Org isolation + athlete tests
         env:
           PBG_API_BASE: http://127.0.0.1:8000/api
           MONGO_URL: mongodb://localhost:27017
           DB_NAME: pbg_scout_ci
         run: pytest tests/test_org_isolation.py -n 0 -q --tb=short
+
+      - name: Revision feature tests
+        env:
+          PBG_API_BASE: http://127.0.0.1:8000/api
+          MONGO_URL: mongodb://localhost:27017
+          DB_NAME: pbg_scout_ci
+        run: pytest tests/test_revision_features.py -n 0 -q --tb=short
+
+      # A suite that skips everything must not read as green.
+      - name: Fail if the revision suite skipped wholesale
+        env:
+          PBG_API_BASE: http://127.0.0.1:8000/api
+          MONGO_URL: mongodb://localhost:27017
+          DB_NAME: pbg_scout_ci
+        run: |
+          out=$(pytest tests/test_revision_features.py -n 0 -q --tb=no 2>&1 | tail -3)
+          echo "$out"
+          echo "$out" | grep -qE "[0-9]+ passed" || { echo "::error::revision suite ran no tests — seed likely failed"; exit 1; }
 
   frontend-build:
     runs-on: ubuntu-latest

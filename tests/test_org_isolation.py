@@ -401,17 +401,39 @@ def test_athlete_staff_endpoints_forbidden(athlete_users, tenants):
 
 
 def test_athlete_patch_rejects_privileged_fields(athlete_users):
+    """A family may maintain their own profile, but must not be able to move the
+    athlete between orgs, re-link them to another account, un-archive them, or
+    set a photo (photos are captured by staff at evaluations — org-only)."""
     a_ath = athlete_users["A"]
     for payload in (
-        {"primary_position": "P"},
         {"organization_id": "org-evil"},
-        {"bio": "ok", "primary_position": "C"},
+        {"status": "active"},
+        {"user_id": "someone-else"},
+        {"guardian_user_id": "someone-else"},
+        {"photo_url": "https://example.com/x.jpg"},
+        {"verified_metrics": {"exit_velo": 99}},
+        {"bio": "ok", "organization_id": "org-evil"},
     ):
         resp = requests.patch(f"{BASE}/me/athlete", json=payload, headers=a_ath["headers"], timeout=10)
         assert resp.status_code == 422, f"expected 422 for {payload}, got {resp.status_code} {resp.text[:200]}"
+
+
+def test_athlete_patch_accepts_own_profile_fields(athlete_users):
+    """The other half of the same policy. Families were asked to complete these
+    (height, weight, positions) — the model once declared only bio/public_enabled
+    while extra="forbid" silently 422'd everything else, so every parent edit was
+    rejected. Keep both halves asserted so neither can regress unnoticed."""
+    a_ath = athlete_users["A"]
     ok = requests.patch(f"{BASE}/me/athlete", json={"bio": "Updated bio"}, headers=a_ath["headers"], timeout=10)
     assert ok.status_code == 200
     assert ok.json().get("bio") == "Updated bio"
+
+    profile = {"primary_position": "C", "height": "5-10", "weight": "160", "bats": "R", "throws": "R"}
+    resp = requests.patch(f"{BASE}/me/athlete", json=profile, headers=a_ath["headers"], timeout=10)
+    assert resp.status_code == 200, f"family profile edit rejected: {resp.status_code} {resp.text[:200]}"
+    body = resp.json()
+    for k, v in profile.items():
+        assert body.get(k) == v, f"{k} did not persist: got {body.get(k)!r}, expected {v!r}"
 
 
 def test_owner_can_switch_organizations(tenants):
