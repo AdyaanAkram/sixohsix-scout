@@ -77,23 +77,28 @@ jobs:
           DB_NAME: pbg_scout_ci
         run: pytest tests/test_org_isolation.py -n 0 -q --tb=short
 
+      # /auth/login is rate limited to 15 attempts per minute per IP. The
+      # isolation suite spends that budget, so without a pause every login in
+      # the revision suite 429s, its fixture skips all 33 tests, and the step
+      # still exits 0 — a false green. Wait for the window instead of weakening
+      # the production limit for a test run.
+      - name: Let the login rate-limit window clear
+        run: sleep 65
+
+      # One run, then assert it actually ran. A suite that skips everything
+      # must never read as green.
       - name: Revision feature tests
         env:
           PBG_API_BASE: http://127.0.0.1:8000/api
           MONGO_URL: mongodb://localhost:27017
           DB_NAME: pbg_scout_ci
-        run: pytest tests/test_revision_features.py -n 0 -q --tb=short
-
-      # A suite that skips everything must not read as green.
-      - name: Fail if the revision suite skipped wholesale
-        env:
-          PBG_API_BASE: http://127.0.0.1:8000/api
-          MONGO_URL: mongodb://localhost:27017
-          DB_NAME: pbg_scout_ci
         run: |
-          out=$(pytest tests/test_revision_features.py -n 0 -q --tb=no 2>&1 | tail -3)
-          echo "$out"
-          echo "$out" | grep -qE "[0-9]+ passed" || { echo "::error::revision suite ran no tests — seed likely failed"; exit 1; }
+          set -o pipefail
+          pytest tests/test_revision_features.py -n 0 -q --tb=short | tee /tmp/rev.log
+          grep -qE "[0-9]+ passed" /tmp/rev.log || {
+            echo "::error::revision suite ran no tests — seed missing or logins rate-limited"
+            exit 1
+          }
 
   frontend-build:
     runs-on: ubuntu-latest
