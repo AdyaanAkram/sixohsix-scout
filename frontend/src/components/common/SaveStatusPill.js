@@ -1,13 +1,42 @@
 import { CheckCircle2, CloudOff, Loader2, RefreshCw, AlertTriangle, HardDrive } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// The one question this pill answers for an evaluator mid-session is "is my
+// work safe?" — so every state that IS safe says "Saved" first, and only a
+// genuine failure says otherwise. "Synced" / "Sync pending" / "On device" were
+// accurate but left a coach guessing which of them meant they had lost a rep.
+// `title` carries the longer reassurance for anyone who wants it.
 const CONFIG = {
-  idle: { label: "Ready", icon: CheckCircle2, cls: "bg-secondary text-muted-foreground border-border" },
-  saving: { label: "Saving", icon: Loader2, cls: "bg-[hsl(var(--info) / 0.2)] text-[hsl(var(--info))] border-[hsl(var(--info) / 0.3)]", spin: true },
-  saved: { label: "Synced", icon: CheckCircle2, cls: "bg-success/15 text-success border-success/40" },
-  offline: { label: "On device", icon: CloudOff, cls: "bg-warning/15 text-warning border-warning/40" },
-  sync_pending: { label: "Sync pending", icon: RefreshCw, cls: "bg-[hsl(var(--warning) / 0.2)] text-[hsl(var(--warning))] border-[hsl(var(--warning) / 0.35)]" },
-  error: { label: "Tap to retry", icon: AlertTriangle, cls: "bg-destructive/15 text-destructive border-destructive/40" },
+  idle: {
+    label: "Ready", icon: CheckCircle2,
+    title: "Ready to score. Everything you tap saves by itself.",
+    cls: "bg-secondary text-muted-foreground border-border",
+  },
+  saving: {
+    label: "Saving…", icon: Loader2,
+    title: "Saving your scores now.",
+    cls: "bg-[hsl(var(--info) / 0.2)] text-[hsl(var(--info))] border-[hsl(var(--info) / 0.3)]", spin: true,
+  },
+  saved: {
+    label: "Saved", icon: CheckCircle2,
+    title: "Saved. Your scores are safely stored.",
+    cls: "bg-success/15 text-success border-success/40",
+  },
+  offline: {
+    label: "Saved on device", icon: CloudOff,
+    title: "No signal. Your scores are saved on this device and will send by themselves once you are back online — nothing is lost.",
+    cls: "bg-warning/15 text-warning border-warning/40",
+  },
+  sync_pending: {
+    label: "Saved · sending", icon: RefreshCw,
+    title: "Saved on this device and still sending. Tap to try again now.",
+    cls: "bg-[hsl(var(--warning) / 0.2)] text-[hsl(var(--warning))] border-[hsl(var(--warning) / 0.35)]",
+  },
+  error: {
+    label: "Tap to retry", icon: AlertTriangle,
+    title: "Could not send your scores. They are still on this device — tap to try again.",
+    cls: "bg-destructive/15 text-destructive border-destructive/40",
+  },
 };
 
 export const SaveStatusPill = ({ status = "idle", lastSaved, onRetry, warning }) => {
@@ -21,6 +50,7 @@ export const SaveStatusPill = ({ status = "idle", lastSaved, onRetry, warning })
         type={Comp === "button" ? "button" : undefined}
         onClick={canRetry && onRetry ? onRetry : undefined}
         data-testid="evaluation-save-status"
+        title={c.title}
         className={cn(
           "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-xs font-semibold whitespace-nowrap min-h-[32px]",
           c.cls,

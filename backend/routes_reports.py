@@ -36,8 +36,18 @@ async def dashboard(user=Depends(require_roles(*STAFF_ROLES))):
             q = {"event_id": a["event_id"], "status": "checked_in"}
             if group_ids:
                 q["group_id"] = {"$in": group_ids}
-            expected = await db.event_athletes.count_documents(q)
-            done = await db.evaluations.count_documents({"event_id": a["event_id"], "station_id": a["station_id"], "evaluator_id": user["id"], "status": {"$in": ["submitted", "approved"]}})
+            roster = await db.event_athletes.find(q, {"_id": 0, "athlete_id": 1}).to_list(1000)
+            expected = len(roster)
+            done_q = {"event_id": a["event_id"], "station_id": a["station_id"],
+                      "evaluator_id": user["id"], "status": {"$in": ["submitted", "approved"]}}
+            # Must match _assignment_with_context in routes_evaluations: without
+            # scoping to this assignment's own athletes, an evaluator working
+            # several groups at one station sees every group's work counted
+            # against each assignment — the dashboard read "26/13 done" while
+            # the Evaluate page correctly read "13/13".
+            if group_ids:
+                done_q["athlete_id"] = {"$in": [r["athlete_id"] for r in roster]}
+            done = await db.evaluations.count_documents(done_q)
             last_eval = await db.evaluations.find_one({"evaluator_id": user["id"], "event_id": a["event_id"]}, {"_id": 0, "updated_at": 1}, sort=[("updated_at", -1)])
             items.append({
                 "assignment_id": a["id"], "event": event,

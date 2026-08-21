@@ -1473,7 +1473,7 @@ export default function EvaluationForm() {
               onClick={submit}
               data-testid="confirm-submit-button"
             >
-              {submitting ? "Submitting…" : ["saving", "sync_pending"].includes(saveStatus) ? "Syncing…" : saveStatus === "offline" ? "Offline — can't submit" : "Submit & Lock"}
+              {submitting ? "Submitting…" : ["saving", "sync_pending"].includes(saveStatus) ? "Saving — one moment" : saveStatus === "offline" ? "No signal — submit when back online" : "Submit & Lock"}
             </Button>
           </DialogFooter>
         </DialogContent>
