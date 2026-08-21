@@ -1,5 +1,5 @@
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Toaster } from "@/components/ui/sonner";
@@ -44,13 +44,22 @@ import NotFound from "@/pages/NotFound";
 
 const Protected = ({ children }) => {
   const { user, loading } = useAuth();
+  const location = useLocation();
   if (loading)
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
       </div>
     );
-  if (!user) return <Navigate to="/signin" replace />;
+  if (!user) {
+    // Carry the destination through sign-in. A parent who taps "read Riley's
+    // assessment" in an email was landing on a bare sign-in page and then the
+    // default home, having lost the page they actually asked for. SignIn only
+    // honours internal paths, so this cannot become an open redirect.
+    const dest = `${location.pathname}${location.search}`;
+    const next = dest && dest !== "/" ? `?next=${encodeURIComponent(dest)}` : "";
+    return <Navigate to={`/signin${next}`} replace />;
+  }
   return <AppLayout>{children}</AppLayout>;
 };
 

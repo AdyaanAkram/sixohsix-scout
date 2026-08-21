@@ -130,6 +130,13 @@ export default function SignIn() {
                 <Link to="/signup" className="block text-sm text-info hover:underline" data-testid="signin-signup-link">
                   New here? Create your athlete&apos;s ID
                 </Link>
+                {/* Families whose child was already registered at a camp were
+                    signing up again and creating a second, empty profile — the
+                    evaluations stayed on the original. Say so before they do. */}
+                <p className="text-xs text-muted-foreground px-2">
+                  Already been to a 60&apos;6&quot; camp? Your athlete is set up — sign in above or reset
+                  your password. Creating a new ID starts an empty profile.
+                </p>
                 <Link to="/forgot-password" className="block text-sm text-info hover:underline" data-testid="forgot-password-link">
                   Forgot password?
                 </Link>
