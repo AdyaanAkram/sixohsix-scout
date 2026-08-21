@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -524,7 +525,11 @@ async def my_assignments(user=Depends(require_roles(*STAFF_ROLES))):
     q = {"organization_id": user["organization_id"], "evaluator_id": user["id"],
          **active_assignment_filter()}
     assignments = await db.evaluator_assignments.find(q, {"_id": 0}).to_list(50)
-    return [await _assignment_with_context(a, user["organization_id"]) for a in assignments]
+    # Each context build is ~6 round-trips; awaiting them one assignment at a
+    # time put the evaluator's first screen at 2.3s. They do not depend on each
+    # other, so let them overlap.
+    return list(await asyncio.gather(
+        *(_assignment_with_context(a, user["organization_id"]) for a in assignments)))
 
 
 async def _check_assignment_access(user, assignment_id):
