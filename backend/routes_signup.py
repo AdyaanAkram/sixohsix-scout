@@ -29,6 +29,8 @@ from notifications import notify
 
 router = APIRouter(tags=["signup"])
 
+from athlete_identity import find_duplicate
+
 ORG_REGISTRY = "org-606-registry"
 JOIN_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0/O/1/I/L lookalikes
 
@@ -122,6 +124,27 @@ async def signup(body: SignupBody):
             detail="Athletes under 13 (or without a birth date) need a parent/guardian account.")
 
     await _ensure_registry_org()
+
+    # Two parents signing their own child up separately is the single biggest
+    # source of duplicate athletes — the evaluations then land on whichever
+    # profile the club happened to score, and the other parent sees an empty
+    # one. Check before creating anything, so a rejection leaves no orphan user.
+    dup, verdict = await find_duplicate(
+        db, ORG_REGISTRY, body.athlete.first_name.strip(),
+        body.athlete.last_name.strip(), body.athlete.date_of_birth)
+    if dup:
+        who = f"{body.athlete.first_name.strip()} {body.athlete.last_name.strip()}".strip()
+        # Deliberately says nothing about WHOSE account holds them.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{who} already has a 60'6\" ID. If this is your child, sign in with the "
+                "account used to register them — or use 'Forgot password' on that email. "
+                "If another parent registered them, ask your club to add you to their "
+                "profile. Creating a second ID splits their evaluations across two records."
+            ),
+        )
+
     ts = now_iso()
     uid = new_id()
     await db.users.insert_one({

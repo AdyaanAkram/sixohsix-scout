@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from auth import (ADMIN_ROLES, _load_user, create_token, decode_token,
                   get_current_user, hash_password, rate_limit, require_roles,
                   verify_password)
+from athlete_identity import find_duplicate
 from db import clean, db, log_audit, new_id, now_iso
 
 router = APIRouter(tags=["registration"])
@@ -321,17 +322,18 @@ async def _age_group_for_event(org: str, event_id: str, age: int | None) -> str 
 
 
 async def _match_org_athlete(org: str, first: str, last: str, dob: str | None) -> dict | None:
-    """The permanent-ID rule routes_signup._link_or_copy_athlete uses: exact
-    name (case-insensitive) + exact DOB inside the target org."""
-    if not (first and last and dob):
+    """Find this child if the org already has them.
+
+    Was exact name + exact DOB, which missed the ways the same child gets typed
+    twice — "Lopez Jr." against "Lopez Jr" created a second profile. Identity is
+    now compared on a normalized name, and only an exact birth-date match links
+    silently: a near-miss is a probable typo, and quietly attaching a
+    registration to the wrong record is worse than creating a new one.
+    """
+    if not (first and last):
         return None
-    q = {"organization_id": org, "status": {"$ne": "merged"},
-         "first_name": {"$regex": f"^{re.escape(first)}$", "$options": "i"},
-         "last_name": {"$regex": f"^{re.escape(last)}$", "$options": "i"}}
-    for c in await db.athletes.find(q, {"_id": 0}).to_list(20):
-        if c.get("date_of_birth") == dob:
-            return c
-    return None
+    match, verdict = await find_duplicate(db, org, first, last, dob)
+    return match if verdict == "exact" else None
 
 
 # ---------------- Public: event registration ----------------
