@@ -137,11 +137,15 @@ async def signup(body: SignupBody):
         # Deliberately says nothing about WHOSE account holds them.
         raise HTTPException(
             status_code=409,
+            # Deliberately does NOT say "ask your club to add you": an athlete
+            # carries a single guardian_user_id, so there is no second-parent
+            # slot for staff to fill. Promising that would strand the family.
             detail=(
                 f"{who} already has a 60'6\" ID. If this is your child, sign in with the "
-                "account used to register them — or use 'Forgot password' on that email. "
-                "If another parent registered them, ask your club to add you to their "
-                "profile. Creating a second ID splits their evaluations across two records."
+                "email your family used to register them — try 'Forgot password' if you are "
+                "not sure of the password. A second ID would start an empty profile and "
+                "split their evaluations, so please use the original account or contact "
+                "your club for help."
             ),
         )
 
