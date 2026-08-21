@@ -128,7 +128,7 @@ const NAV_BY_WORKSPACE = {
   hq: ["dashboard", "teams", "players", "development", "events"],
   coach: ["dashboard", "my-teams", "my-athletes", "coach-evals", "development"],
   scout: ["dashboard", "hs-review", "discover", "watchlist", "compare", "events"],
-  evaluator: ["todays-event", "evaluate", "submitted"],
+  evaluator: ["evaluate", "submitted"],
   athlete: ["my-id", "settings"],
 };
 
@@ -222,7 +222,7 @@ const MOBILE_PRIMARY_BY_WORKSPACE = {
   hq: ["dashboard", "review", "players", "events"],
   coach: ["dashboard", "coach-evals", "my-athletes", "development"],
   scout: ["dashboard", "hs-review", "discover", "events"],
-  evaluator: ["todays-event", "evaluate", "submitted"],
+  evaluator: ["evaluate", "submitted"],
   athlete: ["my-id", "settings"],
 };
 

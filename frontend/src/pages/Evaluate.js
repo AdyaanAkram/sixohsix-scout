@@ -33,9 +33,39 @@ const eventDate = (iso) => {
     : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 };
 
+// Local calendar date as YYYY-MM-DD, to compare against an event's date-only
+// string without either side crossing a timezone boundary.
+const todayISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+const isToday = (iso) => !!iso && /^\d{4}-\d{2}-\d{2}$/.test(iso) && iso === todayISO();
+
+// "10:00" -> "10:00 AM". Stored 24h; coaches read 12h.
+const clockTime = (t) => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(t || "");
+  if (!m) return null;
+  const h = Number(m[1]);
+  if (h > 23) return null;
+  const suffix = h < 12 ? "AM" : "PM";
+  return `${h % 12 === 0 ? 12 : h % 12}:${m[2]} ${suffix}`;
+};
+
+// Where and when to stand — the two things an evaluator needs on arrival and
+// previously had to leave this page to find.
+const whenWhere = (ev) => {
+  const from = clockTime(ev?.start_time);
+  const to = clockTime(ev?.end_time);
+  const time = from ? (to ? `${from} – ${to}` : from) : null;
+  return [time, ev?.location].filter(Boolean).join("  ·  ");
+};
+
 // Newest first; an undated event sinks below every dated one rather than
 // sorting as the epoch, and the name breaks the remaining ties.
 const compareEventGroups = (a, b) => {
+  // Today outranks everything. Without this a camp scheduled next week sorts
+  // above the one the evaluator is standing at, because the list is newest-first.
+  if (a.today !== b.today) return a.today ? -1 : 1;
   const ta = a.date ? new Date(a.date).getTime() : NaN;
   const tb = b.date ? new Date(b.date).getTime() : NaN;
   const va = Number.isNaN(ta) ? null : ta;
@@ -57,6 +87,8 @@ const groupAssignmentsByEvent = (assignments) => {
         name: a.event?.name || "Untitled event",
         date: a.event?.date || null,
         status: a.event?.status || null,
+        event: a.event || null,
+        today: isToday(a.event?.date),
         finished: isFinishedEvent(a.event?.status),
         stations: [],
       });
@@ -125,6 +157,13 @@ const EventCard = ({ g, onOpen }) => (
   >
     <CardContent className="pt-5 pb-5">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        {/* An evaluator working a camp should never have to work out which of
+            these is the one they drove to. */}
+        {g.today && (
+          <span className="rounded-full bg-brand px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">
+            Today
+          </span>
+        )}
         {eventDate(g.date) && <p className="text-xs text-muted-foreground uppercase tracking-widest">{eventDate(g.date)}</p>}
         {g.status && (
           <span className="rounded-full bg-secondary px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
@@ -133,6 +172,9 @@ const EventCard = ({ g, onOpen }) => (
         )}
       </div>
       <p className="font-display text-2xl text-foreground mt-0.5 break-words">{g.name}</p>
+      {whenWhere(g.event) && (
+        <p className="text-sm text-foreground/90 mt-0.5">{whenWhere(g.event)}</p>
+      )}
       <p className="text-sm text-muted-foreground">
         {g.stations.length} {g.stations.length === 1 ? "station" : "stations"}
       </p>
@@ -343,10 +385,18 @@ export default function Evaluate() {
               <ArrowLeft className="h-3.5 w-3.5" /> All events
             </button>
             <h1 className="font-display text-3xl sm:text-4xl text-foreground break-words">{g.name}</h1>
+            {whenWhere(g.event) && (
+              <p className="text-sm font-semibold text-foreground">{whenWhere(g.event)}</p>
+            )}
             <p className="text-sm text-muted-foreground">
               {[eventDate(g.date), g.status, `${g.completed}/${g.expected} submitted`].filter(Boolean).join(" · ")}
             </p>
           </div>
+          <p className="text-sm text-muted-foreground">
+            {g.stations.length === 1
+              ? "This is your station. Open it to start scoring."
+              : "These are your stations. Open the one you are working."}
+          </p>
           <div className="grid gap-3 md:grid-cols-2" data-testid="evaluate-station-grid">
             {g.stations.map((a) => (
               <StationCard key={a.id} a={a} muted={g.finished} onOpen={(id) => navigate(`/evaluate/${id}`)} />
